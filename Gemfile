@@ -1,13 +1,15 @@
 source 'https://rubygems.org'
 
 # You may use http://rbenv.org/ or https://rvm.io/ to install and use this version
-ruby ">= 2.6.10"
+# Bundler 4 (BUNDLED WITH in Gemfile.lock) needs Ruby 3.2 or newer.
+ruby ">= 3.2"
 
-# Exclude problematic versions of cocoapods and activesupport that causes build failures.
-gem 'cocoapods', '>= 1.13', '!= 1.15.0', '!= 1.15.1'
-gem 'activesupport', '>= 6.1.7.5', '!= 7.1.0'
-gem 'xcodeproj', '< 1.26.0'
-gem 'concurrent-ruby', '< 1.3.4'
+# Pin the CocoaPods toolchain that installs cleanly, and keep activesupport and
+# concurrent-ruby at or above the releases that fix their published advisories.
+gem 'cocoapods', '1.16.2'
+gem 'activesupport', '>= 7.2.3.1', '< 8'
+gem 'xcodeproj', '1.27.0'
+gem 'concurrent-ruby', '>= 1.3.7'
 
 # Ruby 3.4.0 has removed some libraries from the standard library.
 gem 'bigdecimal'

@@ -26,6 +26,8 @@ cd ios && bundle install && bundle exec pod install && cd ..
 npm run ios                                         # or: npm run android
 ```
 
+`bundle install` needs Ruby 3.2 or newer, so install one with Homebrew or rbenv first; macOS's system Ruby 2.6 is too old.
+
 The repository refuses keystore files, so Android debug builds need a local one:
 
 ```sh
