@@ -1,7 +1,7 @@
 # Third-party notices
 
 This inventory covers the Mobile application's production npm dependencies,
-its locked CocoaPods components, its declared Android runtime dependencies,
+its locked CocoaPods components, its resolved Android runtime dependencies,
 and the reference Argon2 code vendored in the native crypto module.
 Development tools and other Concord applications are outside this inventory.
 
@@ -488,44 +488,128 @@ are components of the same MIT-licensed React Native distribution.
 
 ## Android runtime dependencies
 
-The app declares `com.facebook.react:react-android` and
-`com.facebook.react:hermes-android`; React Native's Gradle plugin selects their
-versions. Hermes is enabled in `android/gradle.properties`. The optional JSC
-branch is not enabled. Kotlin runtime is Apache-2.0 licensed.
+The React Native Gradle plugin maps the app declarations to
+`com.facebook.react:react-android:0.87.1` and
+`com.facebook.hermes:hermes-android:250829098.0.17`.
+Hermes is enabled; the optional JSC branch is not part of this inventory.
 
-The following table records React Native 0.87.1's declared Maven runtime
-components. A resolved release dependency inventory must accompany the first
-native release; no signed APK or AAB has been built by this extraction.
+The table records 85 resolved runtime library components, including transitive
+dependencies. Resolution used Gradle 9.4.1, the release/runtime Android JVM
+attributes and the app's Kotlin 2.2.0 declaration; dependency constraints resolve
+the Kotlin standard library to 2.2.10. The coroutines BOM is dependency metadata,
+so it is omitted from the code attribution table. License names and links come
+from the resolved upstream POMs; `javax.inject:1` has no POM license declaration,
+so its Apache-2.0 attribution was verified in the published source JAR.
+This metadata inventory does not claim a built or signed release artifact.
 
 <!-- mobile-android:start -->
 
-| Maven component | Declared version |
-| --- | --- |
-| com.facebook.react:react-android | 0.87.1 |
-| com.facebook.react:hermes-android | React Native Gradle plugin selected |
-| org.jetbrains.kotlin:kotlin-stdlib | 2.2.0 |
-| androidx.appcompat:appcompat | 1.7.0 |
-| androidx.appcompat:appcompat-resources | 1.7.0 |
-| androidx.autofill:autofill | 1.3.0 |
-| androidx.swiperefreshlayout:swiperefreshlayout | 1.1.0 |
-| androidx.tracing:tracing | 1.1.0 |
-| androidx.window:window | 1.5.1 |
-| com.facebook.fbjni:fbjni | 0.7.0 |
-| com.facebook.fresco:fresco | 3.7.0 |
-| com.facebook.fresco:imagepipeline-okhttp3 | 3.7.0 |
-| com.facebook.fresco:middleware | 3.7.0 |
-| com.facebook.fresco:ui-common | 3.7.0 |
-| com.facebook.infer.annotation:infer-annotation | 0.18.0 |
-| com.facebook.soloader:soloader | 0.12.1 |
-| com.facebook.yoga:proguard-annotations | 1.19.0 |
-| com.google.code.findbugs:jsr305 | 3.0.2 |
-| com.squareup.okhttp3:okhttp-urlconnection | 4.9.2 |
-| com.squareup.okhttp3:okhttp | 4.9.2 |
-| com.squareup.okio:okio | 2.9.0 |
-| javax.inject:javax.inject | 1 |
-| androidx.collection:collection | 1.4.0 |
+| Maven library | Resolved version | Upstream license |
+| --- | --- | --- |
+| androidx.activity:activity | 1.7.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.annotation:annotation-experimental | 1.4.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.annotation:annotation-jvm | 1.9.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.annotation:annotation | 1.9.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.appcompat:appcompat-resources | 1.7.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.appcompat:appcompat | 1.7.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.arch.core:core-common | 2.2.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.arch.core:core-runtime | 2.2.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.autofill:autofill | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.collection:collection-jvm | 1.4.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.collection:collection | 1.4.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.concurrent:concurrent-futures | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.core:core-ktx | 1.13.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.core:core | 1.13.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.cursoradapter:cursoradapter | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.customview:customview | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.drawerlayout:drawerlayout | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.emoji2:emoji2-views-helper | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.emoji2:emoji2 | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.fragment:fragment | 1.5.4 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.interpolator:interpolator | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-common | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-livedata-core | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-livedata | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-process | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-runtime | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-viewmodel-savedstate | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-viewmodel | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.loader:loader | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.profileinstaller:profileinstaller | 1.3.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.resourceinspection:resourceinspection-annotation | 1.0.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.savedstate:savedstate | 1.2.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.startup:startup-runtime | 1.1.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.swiperefreshlayout:swiperefreshlayout | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.tracing:tracing | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.vectordrawable:vectordrawable-animated | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.vectordrawable:vectordrawable | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.versionedparcelable:versionedparcelable | 1.1.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.viewpager:viewpager | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.window:window-core-jvm | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.window:window-core | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.window:window | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.facebook.fbjni:fbjni | 0.7.0 | [APACHE-2](https://github.com/facebookincubator/fbjni/blob/main/LICENSE) |
+| com.facebook.fresco:drawee | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:fbcore | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:fresco | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:imagepipeline-base | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:imagepipeline-native | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:imagepipeline-okhttp3 | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:imagepipeline | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:memory-type-ashmem | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:memory-type-java | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:memory-type-native | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:middleware | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:nativeimagefilters | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:nativeimagetranscoder | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:soloader | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:ui-common | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:ui-core | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:urimod | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-source | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.hermes:hermes-android | 250829098.0.17 | [MIT License](https://github.com/facebook/hermes/blob/HEAD/LICENSE) |
+| com.facebook.infer.annotation:infer-annotation | 0.18.0 | [MIT license](https://github.com/facebook/infer/blob/master/LICENSE) |
+| com.facebook.react:react-android | 0.87.1 | [MIT License](https://github.com/facebook/react-native/blob/HEAD/LICENSE) |
+| com.facebook.soloader:annotation | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
+| com.facebook.soloader:nativeloader | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
+| com.facebook.soloader:soloader | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
+| com.facebook.yoga:proguard-annotations | 1.19.0 | [MIT License](https://github.com/facebook/yoga/blob/master/LICENSE) |
+| com.google.code.findbugs:jsr305 | 3.0.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.google.guava:listenablefuture | 1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.parse.bolts:bolts-tasks | 1.4.0 | [BSD License](https://github.com/BoltsFramework/Bolts-Android/blob/master/LICENSE) |
+| com.squareup.okhttp3:okhttp-urlconnection | 4.9.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.squareup.okhttp3:okhttp | 4.9.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.squareup.okio:okio | 2.9.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| javax.inject:javax.inject | 1 | [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| org.jetbrains.kotlin:kotlin-annotations-jvm | 1.3.72 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib-common | 2.2.10 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib-jdk7 | 1.8.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib-jdk8 | 1.8.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib | 2.2.10 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlinx:kotlinx-coroutines-android | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlinx:kotlinx-coroutines-core | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains:annotations | 23.0.0 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jspecify:jspecify | 1.0.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 
 <!-- mobile-android:end -->
+
+React Native's Android native sources also incorporate the following components,
+whose versions are pinned by its native dependency catalog. Their licenses apply
+in addition to the Maven wrapper's license.
+
+| Native component | Android catalog version | License | Source |
+| --- | --- | --- | --- |
+| Boost | 1.83.0 | BSL-1.0 | https://www.boost.org/LICENSE_1_0.txt |
+| DoubleConversion | 1.1.6 | MIT | https://github.com/google/double-conversion |
+| fast_float | 8.0.0 | MIT | https://github.com/fastfloat/fast_float |
+| fmt | 12.1.0 | MIT | https://github.com/fmtlib/fmt |
+| Folly | 2024.11.18.00 | Apache-2.0 | https://github.com/facebook/folly |
+| glog | 0.3.5 | BSD-3-Clause | https://github.com/google/glog |
+| gflags | 2.2.0 | BSD-3-Clause | https://github.com/gflags/gflags |
+| nlohmann/json | 3.11.2 | MIT | https://github.com/nlohmann/json |
+| Yoga | React Native 0.87.1 source | MIT | https://github.com/facebook/yoga |
+
 
 ## Vendored native cryptography
 
