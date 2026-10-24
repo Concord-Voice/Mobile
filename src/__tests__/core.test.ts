@@ -158,7 +158,7 @@ describe('ConcordApi', () => {
     expect(checkBaseUrl('https://api.example.test')).toBe(
       'https://api.example.test',
     );
-    expect(() => checkBaseUrl('http://192.0.2.5:8080')).toThrow(
+    expect(() => checkBaseUrl('http://10.0.0.5:8080')).toThrow(
       'local dev stack',
     );
     expect(() => checkBaseUrl('ftp://x')).toThrow('Invalid');

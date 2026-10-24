@@ -1,0 +1,89 @@
+name: License Check
+
+# Enforces the dependency-license discipline from
+# docs/legal/dependency-license-audit.md and NOTICE.md:
+#
+# - All dependencies must be under permissive licenses (MIT, BSD, Apache-2.0,
+#   ISC, MPL-2.0, or similar) — see allowlist below.
+# - Copyleft (GPL, AGPL, SSPL, BUSL, Elastic License, Commons Clause) is
+#   disallowed and fails the build.
+# - NOTICE.md must agree with the installed dependency set:
+#   scripts/update-notice-md.py --check regenerates the tables and FAILS THIS
+#   WORKFLOW on any of four conditions: a shipped component with no row, a row
+#   for something no longer shipped, a licence that changed (npm only — Go
+#   licences are carried forward, see the script docstring), or a stated count
+#   that disagrees with its own table. Version-only drift warns and does not
+#   fail. NOTICE.md's "Regenerating This File" section carries the same list. It does not block merge — the
+#   Default Branch Ruleset requires only `Gitar` and `SonarCloud Code Analysis`,
+#   so a red guard here is visible, not gating. Making it gating means adding
+#   both jobs below to that ruleset's required checks, which is a repo-admin
+#   change and deliberately not asserted here.
+#
+# Triggers on changes to dependency manifests in any of the FOUR ecosystems
+# (Go control-plane, desktop npm, media-plane npm, admin npm) plus NOTICE.md,
+# the regenerator, and this workflow itself.
+#
+# client/admin was previously absent from this workflow entirely — neither in
+# the path filters nor in any job — even though its bundle is compiled by the
+# admin-ui-builder stage and shipped inside the control-plane runtime image
+# (services/control-plane/Dockerfile:8,66). Its licences were therefore never
+# gated. Added with the drift guard (#2886).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ioc:
+    name: ioc
+    uses: ./.github/workflows/ioc-scanning.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  check-npm-licenses:
+    name: npm — selected workspaces license allowlist and NOTICE attribution
+    needs: [ioc]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      LICENSE_ALLOWLIST: 'MIT;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;0BSD;BlueOak-1.0.0;Python-2.0;Unlicense;CC0-1.0;CC-BY-3.0;CC-BY-4.0;MIT-0;MPL-2.0;(MIT OR CC0-1.0);(MIT OR Apache-2.0);(MIT OR GPL-2.0)'
+      NPM_WORKSPACES: '["."]'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install license-checker
+        working-directory: .github/tools/license-checker
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check selected npm workspaces and NOTICE tables
+        run: |
+          set -euo pipefail
+          mapfile -t workspaces < <(node -e '
+            const allowed = ["."];
+            let selected;
+            try { selected = JSON.parse(process.env.NPM_WORKSPACES); } catch { selected = null; }
+            if (!Array.isArray(selected) || selected.some(value => !allowed.includes(value))) selected = allowed;
+            process.stdout.write(selected.join("\n") + (selected.length ? "\n" : ""));
+          ')
+          for workspace in "${workspaces[@]}"; do
+            case "$workspace" in
+              .) ;;
+              *) echo '::error::invalid npm workspace selection'; exit 1 ;;
+            esac
+            (cd "$workspace" && npm ci --no-audit --no-fund && \
+              "$GITHUB_WORKSPACE/.github/tools/license-checker/node_modules/.bin/license-checker" --production --excludePrivatePackages \
+                --onlyAllow "$LICENSE_ALLOWLIST" --summary)
+            python3 scripts/update-mobile-notice.py --check
+          done
+

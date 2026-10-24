@@ -1,0 +1,43 @@
+name: Scanner baseline
+
+# Restore Alpha's default-branch/periodic CodeQL and Scorecard coverage.
+# PR analysis stays in codeql-pr.yml; all scanner installs follow IOC.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '27 5 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scanner-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ioc:
+    uses: ./.github/workflows/ioc-scanning.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  codeql:
+    needs: [ioc]
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+      actions: read
+
+  scorecard:
+    needs: [ioc]
+    uses: ./.github/workflows/scorecard.yml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      issues: read
+      pull-requests: read
+      checks: read

@@ -1,0 +1,26 @@
+# Build and generated artifacts
+dist/
+build/
+coverage/
+out/
+
+# Dependencies and lockfiles
+node_modules/
+vendor/
+package-lock.json
+
+# Local/runtime artifacts
+.git/
+tmp/
+temp/
+
+# Test fixtures (intentionally vulnerable — used for Semgrep rule validation)
+.semgrep/tests/
+# Workflow-injection regression fixtures (intentionally contain injection patterns — issue #836)
+.github/scripts/tests/fixtures/workflow-injection/
+# D: deployment harness and prototype exclusions remain in Concord-Voice/Concord-Voice-Alpha.
+# Mobile client third-party code: the vendored Argon2 reference C (its
+# "Vendor/" capital V escapes the vendor/ rule above) and the Gradle wrapper
+# script. Semgrep cannot fully parse either, and neither is ours to change.
+native/ConcordCrypto/Vendor/
+android/gradlew

@@ -1,7 +1,6 @@
 # Concord Voice mobile
 
-The React Native client for iOS (#206) and Android (#205). It lives here until it
-is extracted into its own repository.
+The React Native client for iOS (#206) and Android (#205). The app lives at the root of this repository.
 
 ## Layout
 
@@ -47,4 +46,10 @@ accounts can unlock; a legacy key-derivation account is refused with a distinct 
 - Any real UI.
 - MFA login, token refresh and persisted sessions.
 - An Android native crypto module.
-- CI jobs for this directory.
+- Native build and store-release CI.
+
+Scanner workflows are ported from Alpha. The IOC-gated app checks run `npm ci`,
+`npm test`, `npm run lint` and `npm run typecheck` on pull requests. This new CI
+job was accepted on 2026-10-24; Alpha had no Mobile app-level CI.
+
+IOC-gated CodeQL and Scorecard scans also run on pushes to `main` and daily.
