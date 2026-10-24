@@ -40,7 +40,7 @@ jobs:
       actions: read
     defaults:
       run:
-        working-directory: client/desktop
+        working-directory: .
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,10 +50,12 @@ jobs:
         with:
           node-version: 24
           cache: 'npm'
-          cache-dependency-path: client/desktop/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm ci --prefix .github/tools/eslint-formatter --ignore-scripts
 
       - name: Run ESLint (flat config → SARIF)
         id: eslint
@@ -61,8 +63,8 @@ jobs:
           EXTERNAL_VERDICT: ${{ inputs.external-verdict }}
         run: |
           set +e
-          npx eslint . --config eslint.config.mjs --ignore-pattern 'tests/**' \
-            --format @microsoft/eslint-formatter-sarif --output-file eslint-results.sarif
+          npx eslint . \
+            --format ./.github/tools/eslint-formatter/node_modules/@microsoft/eslint-formatter-sarif --output-file eslint-results.sarif
           scan_exit=$?
           set -e
           if [ "$scan_exit" -eq 1 ] && [ "$EXTERNAL_VERDICT" = 'true' ]; then
@@ -126,7 +128,7 @@ jobs:
         id: upload-sarif
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          sarif_file: client/desktop/eslint-results.sarif
+          sarif_file: eslint-results.sarif
           category: eslint
 
       - name: Write protected ESLint upload evidence

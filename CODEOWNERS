@@ -1,0 +1,5 @@
+scripts/security/check-ioc-refresh-pr.sh @Concord-Voice/security
+.github/workflows/ @Concord-Voice/security
+.github/scripts/ @Concord-Voice/security
+scripts/security/ @Concord-Voice/security
+.semgrep/ @Concord-Voice/security

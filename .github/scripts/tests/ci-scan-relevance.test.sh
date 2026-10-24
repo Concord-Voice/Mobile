@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+TOPOLOGY_ROOT="$SCRIPT_DIR/fixtures/alpha-policy"
 HELPER="$REPO_ROOT/.github/scripts/ci-scan-relevance.mjs"
 POLICY="$REPO_ROOT/.github/ci/scan-relevance.yml"
 BUNDLE_SHA=ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
@@ -373,7 +374,7 @@ run_policy_case workflow-lint-source-migration guard-input legacy/github/apply-a
 run_policy_case desktop-input-authority-vectors desktop-input services/control-plane/internal/authoritycontract/testdata/vectors.json
 run_policy_case desktop-input-vector-generator desktop-input scripts/authority-vectors/gen.mjs
 run_policy_case spa-input-deploy-script guard-input legacy/deploy/deploy-spa.sh
-python3 - "$REPO_ROOT" <<'PY'
+python3 - "$TOPOLOGY_ROOT" <<'PY'
 import sys
 from pathlib import Path
 import yaml
@@ -677,7 +678,7 @@ for (const key of ['control_plane', 'media_plane']) await test(`native NATS reso
 NODE
 
 broker_registration_status=0
-python3 - "$REPO_ROOT" "$TASK_TMP" <<'PY' || broker_registration_status=$?
+python3 - "$TOPOLOGY_ROOT" "$TASK_TMP" <<'PY' || broker_registration_status=$?
 # Reuse the repository's supported command/enforcement recognisers. A filename
 # in prose, echo, an uncalled function, or a heredoc is not a registration edge.
 import ast

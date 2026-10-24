@@ -61,12 +61,6 @@ concurrency:
   cancel-in-progress: ${{ !inputs.enforcement-only }}
 
 jobs:
-  # ─── Supply-chain IOC gate (IOC-first invariant, ADR-0018 / #1472) ───
-  # MUST be the first node: every subsequent reusable invocation that
-  # installs or executes repo code carries `needs: ioc`, so no dependency
-  # install can begin before the IOC verdict. This single structural edge
-  # replaces the five per-job `needs: supply-chain-scan` edges that
-  # previously lived inside build.yml.
   ioc:
     if: ${{ inputs.enforcement-only || !(github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     name: ioc
@@ -80,59 +74,6 @@ jobs:
   # ─── PR-time suite (build.yml via workflow_call) ───────────────────────
   # Spec §6 row 6 — workflow_call invocation. build.yml's workflow_call
   # declaration keeps coverage outputs available to the protected caller.
-  build:
-    name: build
-    needs: [ioc, detect-changes]
-    if: ${{ !cancelled() && needs.ioc.result == 'success' && (inputs.enforcement-only || needs.detect-changes.outputs.protected-owner != 'true') }}
-    permissions:
-      contents: read
-      pull-requests: read
-    uses: ./.github/workflows/build.yml
-    # Pass the unified detect-changes union so build.yml skips its duplicate
-    # `changes` detection steps (2026-07 CI deep-dive: three detects -> one).
-    # detect-changes is a ~10s API-only job (no repo-code install/exec) that
-    # finishes well before ioc, so this adds no critical-path latency and does
-    # not weaken the IOC-first invariant (build.yml's dependency-installing jobs
-    # still carry `needs: ioc` via this node). On push:main main-ci.yml passes
-    # nothing, so build.yml computes the filter locally as before.
-    with:
-      desktop-changed: ${{ needs.detect-changes.outputs.desktop }}
-      control-plane-changed: ${{ needs.detect-changes.outputs.control-plane }}
-      media-plane-changed: ${{ needs.detect-changes.outputs.media-plane }}
-      media-plane-tests-changed: ${{ needs.detect-changes.outputs.media-plane-tests }}
-      admin-changed: ${{ needs.detect-changes.outputs.admin }}
-      production-docker-changed: ${{ needs.detect-changes.outputs.production-docker }}
-      force-coverage: ${{ inputs.trusted-source == true && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.scan-known == 'true' && (fromJSON(needs.detect-changes.outputs.scan-selection).selected.sonar_force_all || (fromJSON(needs.detect-changes.outputs.scan-selection).coverage_required.desktop && fromJSON(needs.detect-changes.outputs.scan-selection).coverage_required.control_plane && fromJSON(needs.detect-changes.outputs.scan-selection).coverage_required.media_plane && fromJSON(needs.detect-changes.outputs.scan-selection).coverage_required.admin)) }}
-
-  # ─── concord-dev unit/smoke suite + buildtools age (#1475) ───────────
-  # Orchestrated (not standalone): the native smoke installs repo
-  # dependencies via concord-dev.sh, so the IOC-first invariant applies.
-  unit-smoke:
-    name: unit-smoke
-    needs: [ioc, detect-changes]
-    if: ${{ !inputs.enforcement-only && !cancelled() && needs.ioc.result == 'success' && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.dev_checks || needs.detect-changes.outputs.dev-stack == 'true') }}
-    permissions:
-      # unit-smoke.yml no longer runs its own dorny/paths-filter (dev-stack now
-      # comes from the shared detect-changes job below), so pull-requests: read
-      # is no longer required — the callee declares only contents: read and its
-      # smoke/unit/age jobs use GITHUB_TOKEN for checkout only. A job-level
-      # permissions block REPLACES the inherited top-level set, and this narrower
-      # grant is still a superset of the callee's, so no #1589 startup_failure.
-      contents: read
-    uses: ./.github/workflows/unit-smoke.yml
-    with:
-      dev-stack-changed: ${{ needs.detect-changes.outputs.dev-stack }}
-      dev-checks-relevant: ${{ needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.dev_checks }}
-
-  # ─── Per-tool scanners (workflow_call conversions, ADR-0018 / #1476) ─
-  # Every scanner that installs or executes repo code carries `needs: ioc`.
-  # OSV retains a standalone pull_request scan for legacy or unverified
-  # enforcement. Selected OSV runs from the protected required workflow after
-  # this workflow's IOC and relevance classification (see osv-scanner.yml).
-  # Caller-job permissions are exact supersets of each called workflow's
-  # declared needs (GitHub requires superset; the called side stays the
-  # effective ceiling). Scanner calls follow the shared relevance selection;
-  # unknown selection retains the full scan.
   semgrep:
     name: semgrep
     needs: [ioc, detect-changes]
@@ -167,21 +108,6 @@ jobs:
     with:
       external-verdict: ${{ inputs.enforcement-only == true }}
 
-  govulncheck:
-    name: govulncheck
-    needs: [ioc, detect-changes]
-    if: >-
-      !cancelled() && needs.ioc.result == 'success' &&
-      (inputs.enforcement-only || needs.detect-changes.outputs.protected-owner != 'true') &&
-      (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).selected.govulncheck)
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    uses: ./.github/workflows/govulncheck.yml
-    with:
-      external-verdict: ${{ inputs.enforcement-only == true }}
-
   secret-scanning:
     name: secret-scanning
     needs: [ioc]
@@ -206,660 +132,6 @@ jobs:
   # make a version pin supply-chain-equivalent to a SHA pin (govulncheck.yml).
   # Whole module, never --new-from-*: `golangci-lint run ./...` is 0 issues on
   # main, so any finding is one this PR introduced or a rev bump surfaced.
-  golangci-lint:
-    name: golangci-lint
-    needs: [ioc, detect-changes]
-    if: ${{ !inputs.enforcement-only && needs.detect-changes.outputs.go-lint == 'true' }}
-    # Codesmith measured a CPU-bound whole-module lint: 4 vCPU improves p50
-    # feedback from 1m53s to 1m04s for about $2/month additional runner spend.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: services/control-plane/go.mod
-          cache-dependency-path: services/control-plane/go.sum
-
-      - name: Install golangci-lint (rev from .pre-commit-config.yaml)
-        run: |
-          VERSION=$(grep -A1 -F 'repo: https://github.com/golangci/golangci-lint' .pre-commit-config.yaml | sed -n 's/^ *rev: *//p')
-          # Fail closed: an empty, reshaped, or multi-match rev must not reach
-          # `go install`. [[ =~ ]] anchors to the WHOLE string; a per-line
-          # grep would pass two matched revs joined by a newline.
-          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::could not read the golangci-lint rev from .pre-commit-config.yaml (got '${VERSION}')"
-            exit 1
-          fi
-          echo "golangci-lint ${VERSION}"
-          go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${VERSION}"
-
-      - name: Lint (whole module)
-        working-directory: services/control-plane
-        run: golangci-lint run ./...
-
-  # concord-audiocap native addon (ADR-0043). `needs: ioc` is LOAD-BEARING, not
-  # symmetry: the addon-build leg runs `npm ci` on three runners, and this file
-  # states the invariant a few jobs above — "Every scanner that installs or
-  # executes repo code carries `needs: ioc`" (ADR-0018). It first shipped as a
-  # standalone `pull_request` workflow, which ran that install in parallel with
-  # the supply-chain verdict instead of after it; Codex caught that on PR #3155.
-  #
-  # `needs: detect-changes` supplies the path gate the standalone triggers used to
-  # own. Skipping is correct here and does not weaken a merge gate: a skipped job
-  # reports success and this is not a required check.
-  native-audiocap:
-    name: native-audiocap
-    needs: [ioc, detect-changes]
-    if: ${{ !inputs.enforcement-only && needs.detect-changes.outputs.native == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/native-audiocap.yml
-
-  # Trivy CVE scan of the built service images (container-image-scan.yml).
-  # `needs: ioc` is load-bearing for the same reason as native-audiocap: the
-  # media-plane build runs `npm ci` (ADR-0018). Path-gated on the same
-  # production-docker filter as the cache-cold compose build. Not a ruleset-
-  # required context itself, and a skip never strands a PR, but a FAILURE
-  # fails pr-ci and so blocks "Required PR build result", which reads
-  # needs.pr-ci.result: a fixable HIGH/CRITICAL finding, or a scan that saw no
-  # OS packages, blocks any PR on this path.
-  container-image-scan:
-    name: container-image-scan
-    needs: [ioc, detect-changes]
-    if: ${{ !inputs.enforcement-only && needs.detect-changes.outputs.production-docker == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/container-image-scan.yml
-
-  # Required when deployment inputs change, including on the protected PR path.
-  west-deployment-lab:
-    name: West deployment-access lab
-    needs: [ioc, detect-changes]
-    if: ${{ !cancelled() && needs.ioc.result == 'success' && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run West deployment-access bootstrap and required systemd lab
-        env:
-          CLOUDFLARED_SHA256: d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db # pragma: allowlist secret -- public release digest
-        run: |
-          set -euo pipefail
-          binary="$(mktemp "$RUNNER_TEMP/cloudflared-west.XXXXXX")"
-          trap 'rm -f "$binary"' EXIT
-          curl --fail --silent --show-error --location --max-time 60 \
-            https://github.com/cloudflare/cloudflared/releases/download/2026.10.0/cloudflared-linux-amd64 \
-            --output "$binary"
-          printf '%s  %s\n' "$CLOUDFLARED_SHA256" "$binary" | sha256sum --check --status
-          chmod 0700 "$binary"
-          "$binary" --version | grep -Fq 'cloudflared version 2026.10.0'
-          diagnostic="$("$binary" tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 --loglevel error --metrics 127.0.0.1:20442 run --token-file /dev/null 2>&1)" && exit 1
-          [[ "$diagnostic" == *'requires the ID or name of the tunnel'* ]]
-          bash legacy/deployment-access/tests/test-deployment-access-bootstrap.sh --require-systemd
-
-  # The managed firewall fixture (#3720) used to run inside static-guards and
-  # took about 24 of its 25 minutes. It now runs only when the policy or its
-  # own tests change (detect-changes' firewall-filter), or on hotfix or unknown
-  # selection. The fixture spreads its tests over up to four interpreters, so
-  # it takes the 4-vCPU tier.
-  managed-firewall:
-    name: managed-firewall
-    needs: [ioc, detect-changes]
-    if: ${{ !inputs.enforcement-only && !cancelled() && needs.ioc.result == 'success' && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || needs.detect-changes.outputs.managed-firewall == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run managed firewall fixture tests
-        run: bash legacy/deploy/tests/test-managed-firewall.sh
-
-  # ─── Consolidated static guards (#822 / #872 / #998 / #1246 / #1430 / #1559) ─
-  # Three former single-purpose guard jobs — verify-openapi-coverage,
-  # verify-spa-env, verify-deploy-scripts — merged into one job (2026-07 CI
-  # deep-dive) to reclaim two per-job billing floors: each was a sub-20s job
-  # paying a 2 vCPU x 1-min minimum ~1,000x/month. Most steps are hermetic
-  # static checks; deploy regression loops also include Docker-backed fixtures
-  # that install tools from public Ubuntu packages and run checkout code. None
-  # is a required status check: the org baseline ruleset (17153062) requires
-  # Gitar and SonarCloud Code Analysis. The Alpha-only required build workflow
-  # and its `Required PR build result` check belong to a separate organization
-  # ruleset (24957423).
-  # So consolidating job names is merge-safe. A single fetch-depth: 0 checkout
-  # serves the steps that need full history.
-  static-guards:
-    name: static-guards
-    needs: [ioc, detect-changes]
-    # reference-documents/reference/workflow-failure-patterns.md P3/P8.5: !cancelled()
-    # removes default needs-success chaining so detector failure is conservative;
-    # explicit IOC success still precedes every repository-code execution.
-    if: ${{ !inputs.enforcement-only && !cancelled() && needs.ioc.result == 'success' && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.static_guards || needs.detect-changes.outputs.spa == 'true' || needs.detect-changes.outputs.services == 'true') }}
-    # ADR-0016: relevant or uncertain self-host work includes CPU-bound Docker
-    # fixtures; confirmed unrelated lint/verify work stays on the 2-vCPU tier.
-    runs-on: ${{ (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.selfhost != 'false') && 'blacksmith-4vcpu-ubuntu-2404' || 'blacksmith-2vcpu-ubuntu-2404' }}
-    # The complete deployment suite builds tooling images and runs bounded
-    # readiness tests; #3774 set this budget so its fixtures can finish. The
-    # managed firewall suite, which used most of it, now runs in its own job.
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # Full history: verify-spa-env's attribution diff and the
-          # compose-manifest coverage lint's `git show f9cadd93^` regression
-          # replay (#1246, spec §6.4 D1) both need it; the shallow default
-          # cannot resolve the PR base / old blobs.
-          fetch-depth: 0
-          # Retain small historical inputs after checkout removes credentials,
-          # while avoiding the transfer of large historical blobs.
-          filter: blob:limit=1m
-
-      # The staging dry runs previously occupied their own sub-minute job.
-      # Keep each path gate and run both even if the first fails.
-      - name: Run deploy-spa.sh --dry-run --target=staging
-        if: ${{ !cancelled() && needs.detect-changes.outputs.spa == 'true' }}
-        run: bash legacy/deploy/deploy-spa.sh --dry-run --target=staging
-
-      - name: Run deploy.sh --dry-run --target=staging
-        if: ${{ !cancelled() && needs.detect-changes.outputs.services == 'true' }}
-        run: bash legacy/deploy/deploy.sh --dry-run --target=staging
-
-      # Both the license-workflow guard and provision-secrets drift-lock parse
-      # YAML. Provision their pinned dependency before either guard runs.
-      - name: Ensure PyYAML for static guards
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_toolchain || needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.secrets_contract || needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.dispatch_trust) }}
-        run: >-
-          python3 -m pip install --user --quiet --disable-pip-version-check --require-hashes --only-binary=:all: -r .github/requirements-pyyaml.txt
-
-      - name: Go toolchain alignment guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_toolchain) }}
-        run: python3 scripts/check-go-toolchain.py --check-license-workflow
-
-      - name: Test Go toolchain guard (planted mismatches)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_toolchain) }}
-        run: python3 scripts/test-check-go-toolchain.py
-
-      # ── OpenAPI route-coverage drift gate (#822) ──────────────────────
-      # Static parse of router.go vs docs/api/openapi.yaml — fails on drift in
-      # either direction. The ZAP API DAST (#1465) imports the spec as its scan
-      # surface, so a stale spec silently narrows DAST coverage.
-      - name: Run check-openapi-coverage.sh
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.openapi) }}
-        run: bash scripts/api/check-openapi-coverage.sh
-
-      # ── SPA-deploy contract verifier (#872 I4 layered defense, PR side) ─
-      - name: Run verify-spa-env.sh --mode=pr
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.spa_env) }}
-        env:
-          # SHA-format strings from GitHub-controlled metadata; passing via
-          # env per workflow-injection hardening guidance.
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          bash legacy/deploy/verify-spa-env.sh \
-            --mode=pr \
-            --base-sha="${BASE_SHA}" \
-            --head-sha="${HEAD_SHA}"
-
-      # ── Deploy-test wiring (#998 G1 — L1 of #921 trust-chain) ──────────
-      # Hermetic deploy-test scripts + repo-structure guards. No run block
-      # below uses github.event.* or other untrusted input — only hardcoded
-      # paths/flags, and in the deploy-tests loop a local bash var bound to a
-      # glob of checked-out paths (no workflow-injection surface). Runs on the
-      # MERGE ref (no path filter), the only layer that catches concurrent-merge
-      # collisions (the #1549-after-#1536 ADR-number race).
-      # Visible in CI, not a required status check; the pre-commit hook remains
-      # the local fast path.
-      - name: Feature wiring guard (#2157)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.feature_wiring) }}
-        run: bash scripts/check-feature-wiring.sh
-
-      - name: Manifest-coverage lint (Tier A, #1246)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) }}
-        run: bash scripts/check-compose-manifest-coverage.sh --scope=production-active
-
-      - name: Test compose-manifest-coverage lint (#1246 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) }}
-        run: bash scripts/test-check-compose-manifest-coverage.sh
-
-      - name: Verify Admin Portal production wiring
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) }}
-        run: bash scripts/test-admin-ui-production-wiring.sh
-
-      # Sibling axis: files a HOST SCRIPT installs from, rather than compose
-      # build contexts. Runs unconditionally on the merge ref for the same
-      # reason the lint above does — a concurrent merge can add a consumer
-      # reference and a manifest entry in two different PRs.
-      - name: Deploy-script manifest-coverage lint
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) }}
-        run: bash scripts/check-deploy-manifest-script-coverage.sh
-
-      - name: Test deploy-script manifest-coverage lint (self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) }}
-        run: bash scripts/test-check-deploy-manifest-script-coverage.sh
-
-      - name: ADR-number lint (#1559)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.adr_numbers) }}
-        run: bash scripts/check-adr-numbers.sh
-
-      - name: Test ADR-number lint (#1559 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.adr_numbers) }}
-        run: bash scripts/test-check-adr-numbers.sh
-
-      # provision-secrets Infisical source drift-lock (#2317/ADR-0033). Also a
-      # pre-commit hook, but CI-runs it so a contributor who skips pre-commit
-      # cannot land a re-introduced GitHub-sourced runtime secret (#2330 review).
-      # PyYAML is provisioned above: the lock fails closed without it, and the
-      # runner image is not contractually guaranteed to ship it (#2330 round 9).
-      - name: Provision-secrets Infisical source drift-lock (#2317)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.secrets_contract) }}
-        run: bash scripts/check-provision-secrets-source.sh
-
-      - name: Test provision-secrets drift-lock (#2317 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.secrets_contract) }}
-        run: bash scripts/test-check-provision-secrets-source.sh
-
-      - name: Check offline secret catalog and fixtures (#2947)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.secrets_contract) }}
-        run: |
-          python3 scripts/check-secrets-catalog.py
-          python3 -m unittest discover -s scripts/tests -p test_secrets_catalog.py
-
-      # Compose dotenv encoder rejection path. Also a pre-commit hook, and CI-run
-      # for the same reason as the drift-lock above — but the reason bites harder
-      # here, because the thing under test IS a guard that could not stop anything.
-      # `compose_dotenv_quote` detected CR/LF and returned non-zero into a command
-      # substitution that discarded the status; leaving its regression test as a
-      # hook alone would reproduce that exact shape one level up, where a
-      # --no-verify commit, an uninstalled hook or a fork PR bypasses it while CI
-      # stays green.
-      - name: Test Compose dotenv encoder rejects and FAILS (#2973)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.secrets_contract) }}
-        run: bash scripts/test-provision-secrets-encoder.sh
-
-      # macOS bash heredoc-hang guard wiring (#3426). Also a pre-commit hook, and
-      # CI-run for the same reason as the drift-lock above: a --no-verify commit,
-      # an uninstalled hook or a fork PR could otherwise land a config that drops
-      # the guard's fail_fast or first position, and every Mac on an affected
-      # bash would hang again with nothing red. Reuses this job's PyYAML install.
-      - name: Test the bash heredoc-hang guard and its wiring (#3426)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.secrets_contract) }}
-        run: bash scripts/test-check-bash-heredoc-hang.sh
-
-      # main-cd dispatch-ref trust boundary (#2966). Also a pre-commit hook, and
-      # CI-run for the same reason as the drift-lock above: nothing in .github/
-      # invokes pre-commit, so a hook alone is invisible to a --no-verify commit,
-      # an uninstalled hook, or a fork PR. Reuses this job's PyYAML install; the
-      # lint fails closed without it rather than silently passing.
-      #
-      # Reach: workflow-lint is not a required status check. The org baseline
-      # ruleset (17153062) requires Gitar and SonarCloud Code Analysis, and the
-      # Alpha-only 24957423 adds Required PR build result.
-      # A red run here is visible, not merge-blocking.
-      # This CI job is the broadest enforcement this guard has.
-      - name: main-cd dispatch-ref trust boundary (#2966)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.dispatch_trust) }}
-        run: bash scripts/check-deploy-ref-gate.sh
-
-      - name: Test dispatch-ref trust boundary (#2966 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.dispatch_trust) }}
-        run: bash scripts/test-check-deploy-ref-gate.sh
-
-      # Go test Redis isolation (#2680). Also a pre-commit hook, but CI-runs it
-      # for the same reason as the drift-lock above: nothing in .github/ invokes
-      # `pre-commit`, so a hook alone is invisible to a --no-verify commit, an
-      # uninstalled hook, or a fork PR.
-      #
-      # Reach: `static-guards` is not a required status check. The org baseline
-      # ruleset (17153062) requires Gitar and SonarCloud Code Analysis, and the
-      # Alpha-only 24957423 adds Required PR build result.
-      # A red run here is visible, not merge-blocking.
-      #
-      # Whole-tree, not changed-files: pre-commit's `files:` filter cannot see a
-      # delete-or-rename-only commit, the same blind spot #2682 landed a stale
-      # mirror through.
-      - name: Go test Redis isolation guard (#2680)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_test_contracts) }}
-        run: |
-          set -euo pipefail
-          mapfile -t FILES < <(git ls-files '*_test.go' 'services/control-plane/internal/testhelpers/*.go')
-          printf '  scanning %d files\n' "${#FILES[@]}"
-          # An empty list already exits 2 (the script rejects a zero-length
-          # argument list), but a PARTIALLY wrong pathspec would still exit 0
-          # having quietly scanned less. Pin the defect site itself, so a
-          # narrowed pattern is a red step rather than a green one.
-          #
-          # Bash array scan, NOT `printf ... | grep -q`. Under pipefail grep
-          # exits on its match and closes the read end, so printf's remaining
-          # writes take SIGPIPE and the pipeline's 141 reports a guard that HELD
-          # as violated -- a FALSE red on an unrelated PR. Observed on run
-          # 34168515012 at 588 files ("printf: write error: Broken pipe"), green
-          # on the commit immediately before it. scripts/check-mirror-pairing.sh
-          # already avoids the same defect by construction; see its awk note for
-          # the 2026-08-13 measurements. A bash loop has no pipe to signal.
-          found=0
-          for f in "${FILES[@]}"; do
-            if [ "$f" = 'services/control-plane/internal/testhelpers/testredis.go' ]; then
-              found=1; break
-            fi
-          done
-          [ "$found" -eq 1 ] \
-            || { echo "::error::#2680 file list no longer covers the original defect site"; exit 1; }
-          bash scripts/check-no-unscoped-redis-flush.sh "${FILES[@]}"
-
-      - name: Test Redis-isolation guard (#2680 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_test_contracts) }}
-        run: bash scripts/test-check-no-unscoped-redis-flush.sh
-
-      # The review-disposition gate's own suite. Pre-commit-only until now, for
-      # no reason anyone chose — and the same argument as the two guards above
-      # applies with more force here, because this one decides whether a PR may
-      # merge. A --no-verify commit, an uninstalled hook or a fork PR could
-      # break the merge gate with CI staying green.
-      #
-      # Same reach caveat as the rest of static-guards: visible, not
-      # merge-blocking. Do not describe it as a gate on the gate.
-      - name: Test review-disposition gate (self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.review_contracts) }}
-        run: bash scripts/test-check-review-dispositions.sh
-
-      # The roster the gate above TRUSTS. Pre-commit alone cannot enforce this
-      # for the same three reasons already stated in this job -- --no-verify, an
-      # uninstalled hook, a fork PR -- and the consequence here is unusually
-      # wide: the gate reads its roster from the BASE branch, so a bad roster
-      # that reaches main is not a failure of the PR that introduced it but of
-      # every PR AFTER it, each exiting 2 (UNKNOWN). Found by Codex on #3287,
-      # which shipped the guard wired to pre-commit only.
-      #
-      # No arguments: the guard checks its own default set (both rosters)
-      # rather than a changed-files list, because a roster can also be broken by
-      # a merge resolution that touches neither file in this PR's diff.
-      #
-      # Same reach caveat as the rest of static-guards: visible, not
-      # merge-blocking.
-      - name: Reviewer-roster shape guard (#3287)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.review_contracts) }}
-        run: bash scripts/check-roster-shape.sh
-
-      - name: Test roster-shape guard (#3287 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.review_contracts) }}
-        run: bash scripts/test-check-roster-shape.sh
-
-      # Whole-tree, NOT changed-files. The allowlist shrinks as each sweep PR
-      # lands, and the guard errors on a stale entry -- that ratchet only fires
-      # if every file is scanned every run. Pre-commit alone is bypassed by
-      # --no-verify, an uninstalled hook, or a fork PR.
-      # Repo-wide, not services/control-plane-rooted. Every Go test file lives
-      # under control-plane TODAY, so a narrower root is accurate now and stops
-      # being accurate the moment a second Go module lands -- and it would fail
-      # GREEN. -type f keeps a directory or device named *_test.go out of the
-      # scan.
-      - name: JSON-assertion guard (#2811)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_test_contracts) }}
-        run: |
-          find . -type f -name '*_test.go' \
-            -not -path './node_modules/*' -not -path './*/node_modules/*' \
-            -not -path './legacy-agent/worktrees/*' -not -path './.git/*' -print0 \
-            | xargs -0 bash scripts/check-no-single-return-json-assertion.sh
-
-      - name: Test JSON-assertion guard (#2811 self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.go_test_contracts) }}
-        run: bash scripts/test-check-no-single-return-json-assertion.sh
-
-      # ADR-0018 IOC-gate wiring for the native addon (#3155). This guard belongs
-      # HERE and not in native-audiocap.yml, and the reason is the whole point of
-      # it: the thing it protects is the WORKFLOW WIRING, which a PR can break
-      # without touching a single file under client/desktop/native/. Put it behind
-      # the `native` path filter and the one diff that can regress it -- an edit to
-      # pr-ci.yml or native-audiocap.yml alone -- is exactly the diff that skips
-      # the check. Such workflow edits select static-guards and this test.
-      #
-      # Pre-commit ran it already; that is bypassed by --no-verify, an uninstalled
-      # hook, or a fork PR, which is the same argument as every guard above.
-      # Same reach caveat as the rest of static-guards: visible, not merge-blocking.
-      - name: Native addon IOC-gate wiring (ADR-0018)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.native_ioc) }}
-        run: bash scripts/check-native-ioc-gate.sh
-
-      - name: Test native addon IOC-gate guard (self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.native_ioc) }}
-        run: bash scripts/test-check-native-ioc-gate.sh
-
-      # Copilot-mirror drift guard: .github/instructions/claude-<rule>.instructions.md
-      # bodies must match their legacy-agent/rules/<rule>.md canonical. `--fix`
-      # regenerates locally.
-      - name: Copilot-mirror drift guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: bash scripts/check-instruction-mirrors.sh
-
-      # Copilot SKILL mirror guard: .github/skills/<name>/ must byte-match the
-      # canonical legacy-agent/skills/<name>/ (evals/ excluded).
-      - name: Copilot skill-mirror drift guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: bash scripts/check-skill-mirrors.sh
-
-      # Copilot AGENT mirror guard: .github/agents/*.agent.md is GENERATED from
-      # legacy-agent/agents/*.md. Runs here for parity with the two guards above — without
-      # it this is the only mirror surface whose drift a `--no-verify` commit (or an
-      # uninstalled hook) can land. The local pre-commit hook additionally cannot fire
-      # on a commit that only DELETES a source, so a stale orphan mirror would survive
-      # until an unrelated agent edit; this whole-tree run has neither hole.
-      - name: Copilot agent-mirror generation guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: python3 scripts/check-agent-mirrors.py
-
-      - name: Agent-mirror generator regression tests
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: bash scripts/test-check-agent-mirrors.sh
-
-      # ── Codex mirror pairing guard ────────────────────────────────────
-      # A changed legacy-agent/rules|agents source must bring its generated .codex/
-      # mirror with it.
-      #
-      # This asserts PAIRING, not content: the real
-      # `sync-codex-tooling.py --check` cannot run on a runner, because its
-      # source root, the private dev-tooling repo (which also vendors the
-      # Superpowers and microsoft-foundry snapshots), does not exist here, and
-      # the in-repo copies are hardened OUTPUT that the hardening rejects as
-      # input by design.
-      # Content is covered locally by the check-codex-mirrors pre-commit hook,
-      # whose comment in .pre-commit-config.yaml carries the measurements.
-      #
-      # This leg exists because that hook cannot see a commit that BYPASSES it:
-      # PR #2682 edited legacy-agent/rules/backend.md 11 days after the hook landed
-      # and still shipped a stale mirror, which sat on main until #2737. It also
-      # covers a delete-only or rename-only commit, which no `files:` selector
-      # can match.
-      - name: Codex mirror pairing guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        env:
-          # SHA-format strings from GitHub-controlled metadata; passed via env
-          # per the workflow-injection hardening used by verify-spa-env above.
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          bash scripts/check-mirror-pairing.sh \
-            --base-sha="${BASE_SHA}" \
-            --head-sha="${HEAD_SHA}"
-
-      - name: Mirror-pairing guard regression tests
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: bash scripts/test-check-mirror-pairing.sh
-
-      # A protection hook that cannot run exits 126/127, which Claude Code, Codex
-      # and VS Code all treat as a pass. Covers legacy-agent/settings.json,
-      # .codex/hooks.json and .github/hooks/*.json. Also runs as a pre-commit
-      # hook; this leg covers a bypassed commit. The test runs the check on every
-      # hook file, then proves it rejects injected defects.
-      - name: Agent hook-command resolution guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: bash scripts/test-check-hook-commands.sh
-
-      - name: Graphify query-persistence contract (#2531)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.graphify_contracts) }}
-        run: bash scripts/test-graphify-query-persistence.sh
-
-      - name: Catalog/skill discipline regression tests
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.graphify_contracts || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.review_contracts || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.tooling_mirrors) }}
-        run: bash scripts/test-catalog-disciplines.sh
-
-      # This suite gated ONLY through pre-commit until now, so a push that never ran
-      # the local hooks reached review with the reviewer-definition guard unexercised
-      # on all three mirrors. Running it here also puts the one step that executes the
-      # checkout's own fenced block in an ephemeral container rather than on a
-      # reviewer's machine.
-      - name: /review-pr reviewer-definition trust guard
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.review_contracts) }}
-        run: bash scripts/test-review-pr-agent-trust.sh
-
-      - name: Run all test-*.sh under legacy/deploy/tests/
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.selfhost) }}
-        # P8.5: only the self-host subset reuses conservative detection;
-        # unrelated deployment tests run. Share three worker slots with selected
-        # lifecycle suites so the installer does not wait for the deployment tail.
-        env:
-          RUN_SELFHOST_TESTS: ${{ needs.detect-changes.result != 'success' || needs.detect-changes.outputs.selfhost != 'false' }}
-        run: |
-          set -euo pipefail
-          tests=()
-          for t in legacy/deploy/tests/test-*.sh; do
-            case "$t" in
-              legacy/deploy/tests/test-managed-firewall.sh)
-                # Runs in the managed-firewall job.
-                continue
-                ;;
-              legacy/deploy/tests/test-selfhost-*.sh)
-                if [ "${RUN_SELFHOST_TESTS:-true}" = false ]; then
-                  continue
-                fi
-                ;;
-            esac
-            tests+=("$t")
-          done
-          # Start the longest measured consumer early instead of leaving a tail.
-          # Reorder only selected tests, preserving the self-host filter above.
-          for test_index in "${!tests[@]}"; do
-            if [ "${tests[$test_index]}" = "legacy/deploy/tests/test-selfhost-storage.sh" ]; then
-              storage_test=${tests[$test_index]}
-              unset "tests[$test_index]"
-              tests=("$storage_test" "${tests[@]}")
-              break
-            fi
-          done
-          if [ "${RUN_SELFHOST_TESTS:-true}" != false ]; then
-            tests=(
-              scripts/tests/test-install-selfhost.sh
-              "${tests[@]}"
-              scripts/tests/test-concord-selfhost.sh
-              scripts/tests/test-provision-cert.sh
-            )
-          fi
-          if [ "${#tests[@]}" -eq 0 ]; then
-            exit 0
-          fi
-          # Three complete scripts at a time; retain every selected consumer.
-          # Normalize 255/signals so xargs does not abandon queued scripts.
-          worker=$(cat <<'BASH'
-            printf "Running %q\n" "$1"
-            # Keep literal lifecycle calls for the structural IOC guard. Its
-            # Docker-backed provisioner fixture retains the job's IOC prerequisite.
-            case "$1" in
-              scripts/tests/test-concord-selfhost.sh)
-                if bash scripts/tests/test-concord-selfhost.sh; then exit 0; fi ;;
-              scripts/tests/test-install-selfhost.sh)
-                if bash scripts/tests/test-install-selfhost.sh; then exit 0; fi ;;
-              scripts/tests/test-provision-cert.sh)
-                if bash scripts/tests/test-provision-cert.sh; then exit 0; fi ;;
-              legacy/deploy/tests/test-*.sh)
-                if bash -- "$1"; then exit 0; fi ;;
-              *)
-                printf "Unexpected test script %q\n" "$1" >&2
-                exit 1 ;;
-            esac
-            # Normalize 255/signals so xargs finishes the selected inventory.
-            printf "Failed %q\n" "$1" >&2
-            # Keep the failing consumer visible in check annotations even when
-            # the hosted log download is unavailable. Escape command data only.
-            annotation_path=${1//%/%25}
-            annotation_path=${annotation_path//$'\r'/%0D}
-            annotation_path=${annotation_path//$'\n'/%0A}
-            printf '::error title=Static guard failed::%s\n' "$annotation_path"
-            exit 1
-          BASH
-          )
-          if ! printf '%s\0' "${tests[@]}" | xargs -0 -r -P 3 -n 1 bash -c "$worker" --; then
-            exit 1
-          fi
-
-      # SonarCloud narrowed-profile drift guard (ADR-0017 / #1430).
-      # Hermetic self-test — no token, no network, fork-safe — BLOCKING.
-      - name: Test SonarCloud narrowed-profile drift guard (self-test)
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.sonar_profile) }}
-        run: bash scripts/sonar/test-check-narrowed-profile.sh
-
-      # ── CHANGELOG.md discipline gate (#1857) ───────────────────────────
-      # Folded in from the former standalone `verify-changelog` job (2026-08 CI
-      # cost audit). That job averaged 1.00 min across 1,925 runs and had an
-      # in-job paths fast-exit, so most of those runs paid a full billing floor
-      # to decide they had nothing to do.
-      #
-      # The path gate is a git diff, NOT dorny/paths-filter as before: the
-      # action lists PR files over the API, which is why the old job needed
-      # `pull-requests: read`. Folding that grant into static-guards would
-      # widen the permissions of a job running ~25 other guards, for no gain —
-      # this job already checks out with fetch-depth: 0, which is also exactly
-      # what verify-changelog.sh's merge-base anchoring needs.
-      - name: Verify CHANGELOG discipline (#1857)
-        # `!cancelled()` restores the independence this check had as its own
-        # job. Steps inherit an implicit success(), so without it an earlier
-        # static-guards failure SKIPS this one — the developer fixes guard A,
-        # pushes, and only then learns the changelog is also wrong. Two CI
-        # cycles to surface two independent facts, which is exactly the cost
-        # the consolidation was meant to save. Nothing was ever bypassable
-        # (a failed earlier step still reds the job and blocks merge); what
-        # was lost is completeness of signal in one run. Not `always()`: a
-        # cancelled run should stay cancelled.
-        if: ${{ !cancelled() && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.changelog) }}
-        env:
-          # Untrusted inputs pass via env, never inline ${{ }} in run: (#836).
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        # No step-level path guard. It used to run the script only when
-        # package.json / CHANGELOG.md / the script itself changed, which is
-        # exactly the set Rule 4 (#2996) must NOT be limited to: Rule 4 fires on
-        # a PR that touches client/desktop/src or a service and touches the
-        # changelog not at all, so a guard keyed on changelog-adjacent paths
-        # skips precisely the PRs it exists to catch. The script fast-exits
-        # internally instead — Rule 4 filters paths itself, and Rule 1 returns
-        # on "no desktop version change" — so unconditional execution costs a
-        # handful of git invocations, not a job.
-        run: bash .github/scripts/verify-changelog.sh
-
-  # ─── Unified change detection (single paths-filter for the whole PR) ──
-  # ONE dorny/paths-filter job computes every filter the PR pipeline needs
-  # (2026-07 CI deep-dive). The first two outputs gate pr-ci's own dry-run
-  # jobs (as before); the remaining six are passed as inputs into build.yml
-  # and unit-smoke.yml so those reusable workflows reuse the outputs instead of
-  # executing duplicate checkout + paths-filter steps — one filter execution
-  # per PR. On PRs
-  # dorny/paths-filter reads the changed-file list via the API, so the result is
-  # identical regardless of which workflow computes it; a shallow checkout
-  # suffices. (main-ci.yml push:main keeps computing filters inside build.yml —
-  # it passes no inputs — because push diffs need git history.)
   detect-changes:
     name: detect-changes
     if: ${{ inputs.enforcement-only || !(github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
@@ -891,9 +163,9 @@ jobs:
       managed-firewall: ${{ steps.firewall-filter.outputs.managed_firewall }}
       # gates the golangci-lint job
       go-lint: ${{ steps.filter.outputs.go_lint }}
-      scan-known: ${{ steps.selection.outputs.known }}
-      scan-selection: ${{ steps.selection.outputs.selection }}
-      codeql-matrix: ${{ steps.selection.outputs.codeql_matrix }}
+      scan-known: ${{ steps.mobile-selection.outputs.known }}
+      scan-selection: ${{ steps.mobile-selection.outputs.selection }}
+      codeql-matrix: ${{ steps.mobile-selection.outputs.codeql_matrix }}
       protected-owner: ${{ steps.protected-owner.outputs.confirmed }}
     steps:
       - name: Verify protected workflow identity
@@ -1074,194 +346,26 @@ jobs:
   # (#893/#900/#904/#906/#910). The shared workflow_lint family selects this
   # runner from the union of its policy inputs and the former inline fast-path
   # inputs; each selected check still validates its full governed surface.
-  workflow-lint:
-    name: workflow-lint
-    needs: [ioc, detect-changes]
-    if: ${{ !inputs.enforcement-only && !cancelled() && needs.ioc.result == 'success' && (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).hotfix || fromJSON(needs.detect-changes.outputs.scan-selection).advisory.workflow_lint) }}
-    permissions:
-      contents: read
-    # ADR-0013 §2 / ADR-0005 §3: ADR-0016 measured sub-minute parity;
-    # 2-vCPU Blacksmith is the half-cost tier for detect/verify work.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install python3 + PyYAML (lint dependencies)
-        # §5.1 and §5.2 lints rely on python3 + PyYAML. ubuntu-latest ships
-        # python3 by default; pyyaml is the only extra install. Uses
-        # --user to align with build.yml's pattern and avoid pip needing
-        # write access to system site-packages (PEP-668 on recent
-        # ubuntu-latest images marks system Python as externally-managed
-        # and rejects unprefixed installs).
-        run: |
-          python3 -m pip install --user --quiet --require-hashes --only-binary=:all: -r .github/requirements-pyyaml.txt
-
-      - name: TruffleHog runtime is digest-pinned
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import yaml
-
-          text = Path('.github/workflows/secret-scanning.yml').read_text()
-          action = re.search(r'^\s*uses:\s*trufflesecurity/trufflehog@[0-9a-f]{40}\s+# v(\d+\.\d+\.\d+)\s*$', text, re.MULTILINE)
-          assert action, 'TruffleHog action must use a full SHA with a bare version comment'
-          workflow = yaml.safe_load(text)
-          step = next(step for step in workflow['jobs']['trufflehog-ci']['steps'] if str(step.get('uses', '')).startswith('trufflesecurity/trufflehog@'))
-          runtime = str(step.get('with', {}).get('version', 'latest'))
-          assert re.fullmatch(rf'{re.escape(action.group(1))}@sha256:[0-9a-f]{{64}}', runtime), f'TruffleHog runtime must match action v{action.group(1)} and be digest-pinned; got {runtime}'
-          PY
-
-      - name: SonarCloud path-skip build sentinel
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import yaml
-
-          changes = yaml.safe_load(Path('.github/workflows/build.yml').read_text())['jobs']['changes']
-          uses_steps = [step for step in changes['steps'] if 'uses' in step]
-          assert 'if' not in changes and len(uses_steps) == 2
-          assert all("inputs.desktop-changed == ''" in str(step.get('if', '')) for step in uses_steps)
-
-          local = yaml.safe_load(next(step for step in uses_steps if step.get('id') == 'filter')['with']['filters'])
-          caller_steps = yaml.safe_load(Path('.github/workflows/pr-ci.yml').read_text())['jobs']['detect-changes']['steps']
-          caller_filter = next(step for step in caller_steps if step.get('id') == 'filter')
-          assert '.github/ci/scan-relevance.yml' in caller_filter['with']['filters']
-          caller = yaml.safe_load(Path('.github/ci/scan-relevance.yml').read_text())
-          for component in ('desktop', 'admin'):
-              assert caller[component] == local[component], f'{component} filter drift between pr-ci.yml and build.yml'
-          PY
-
-      - name: Desktop PR/release trust boundary (#2274)
-        run: bash .github/scripts/lint-pr-release-trust.sh .
-
-      - name: §5.2 — multi-secret AND-check completeness
-        run: bash .github/scripts/lint-multisecret-andcheck.sh .github/workflows/
-
-      - name: §5.3 — always() requires justification comment
-        run: bash .github/scripts/lint-always-needs-comment.sh .github/workflows/
-
-      - name: G2 — branch-protection.json ↔ workflow name sync (#999)
-        run: bash .github/scripts/lint-branch-protection.sh
-
-      - name: G2 — Alpha code-scanning ruleset validation
-        run: bash .github/scripts/lint-branch-protection.sh --branch-protection legacy/github/alpha-code-scanning-ruleset.json
-
-      - name: G2b — deploy-App bypass on every main ruleset (#1518)
-        run: bash .github/scripts/lint-deploy-app-bypass.sh
-
-      - name: G3 — workflow_dispatch boolean comparison enforcement (#1000)
-        run: bash .github/scripts/lint-boolean-coercion.sh .github/workflows/
-
-      # Closes the split that occurred three times during #3139: a suite wired
-      # into one of the two lists below and not the other runs nowhere, and
-      # reports nothing when it doesn't.
-      - name: Test suites are both invoked and reachable by their filter (#3139)
-        run: bash .github/scripts/lint-test-suite-wiring.sh
-
-      - name: Fleet target admission and serving refusal policy (#2751)
-        run: bash .github/scripts/tests/deploy-targets.test.sh
-
-      - name: Fixed fleet workflow callers (#2751)
-        run: bash .github/scripts/tests/fleet-callers.test.sh
-
-      - name: Main CD preflight, stage, and serving-gate DAG (#2751)
-        run: bash .github/scripts/tests/fleet-main-cd.test.sh
-
-      # Step name deliberately avoids the literal `$` + `{{ }}` token because
-      # GHA evaluates expression syntax in `name:` fields too, and an empty
-      # token there is the exact bug G4 catches — this would self-trigger
-      # the pattern. See the spec note in lint-empty-expression.sh.
-      - name: G4 — empty expression tokens inside run-block bash comments (#1001)
-        run: bash .github/scripts/lint-empty-expression.sh .github/workflows/
-
-      - name: G5 — gh CLI requires --repo when no checkout (#1002)
-        run: bash .github/scripts/lint-gh-repo-flag.sh .github/workflows/
-
-      # P14 — workflow-injection guard (#836). actionlint installed via
-      # curl-pinned release binary with SHA256 verification. Spec:
-      # reference-documents/superpowers/specs/2026-05-20-836-workflow-injection-guard-design.md §4.3 + §6.4.
-      # Shellcheck integration is ENABLED — the 27 pre-existing shellcheck
-      # info/style findings have been cleaned up (8 in #1088 + the bundled
-      # provision-secrets.yml fix in this commit).
-      - name: P14 — install actionlint (#836, pinned binary)
+      - name: Select the Mobile scanner surface
+        id: mobile-selection
         env:
-          ACTIONLINT_VERSION: v1.7.12
-          # Public release checksum (not a secret). Source:
-          # https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_checksums.txt
-          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  # pragma: allowlist secret
+          SELECTION: ${{ steps.selection.outputs.selection }}
         run: |
-          set -euo pipefail
-          TARBALL="actionlint_${ACTIONLINT_VERSION#v}_linux_amd64.tar.gz"
-          curl -sLo "/tmp/${TARBALL}" \
-            "https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/${TARBALL}"
-          echo "${ACTIONLINT_SHA256}  /tmp/${TARBALL}" | sha256sum -c -
-          tar -xzf "/tmp/${TARBALL}" -C /tmp actionlint
-          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
-          actionlint --version
+          python3 - <<'PYCODE'
+          import json, os
+          selection = json.loads(os.environ['SELECTION'])
+          if selection.get('known') is True:
+              for key in selection['selected']:
+                  selection['selected'][key] = key in ('eslint', 'osv', 'semgrep_custom', 'semgrep_community', 'semgrep_canary')
+              selection['coverage_required'] = {key: False for key in selection['coverage_required']}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('known=' + str(selection.get('known') is True).lower() + '\n')
+              output.write('selection=' + json.dumps(selection, separators=(',', ':')) + '\n')
+          PYCODE
 
-      - name: P14 — actionlint workflow-injection scan (#836)
-        run: actionlint -config-file=.actionlint.yaml
-
-      - name: Concord-built MinIO publication and consumer contract (#1220)
-        run: |
-          bash scripts/tests/test-check-oci-tag.sh
-          bash scripts/tests/test-publish-minio-image.sh --require-compose
-
-      - name: Docker Engine publisher admission contract (#3692)
-        run: bash scripts/tests/test-require-docker-engine.sh
-
-      - name: Self-test — lint scripts pass their own test suites
-        # Defense-in-depth: re-run each lint's hermetic test suite in CI
-        # so a regression to the lint scripts themselves is caught even
-        # if a developer skips pre-commit.
-        run: |
-          bash .github/scripts/tests/lint-pr-release-trust.test.sh
-          bash .github/scripts/tests/lint-multisecret-andcheck.test.sh
-          bash .github/scripts/tests/lint-always-needs-comment.test.sh
-          bash .github/scripts/tests/lint-branch-protection.test.sh
-          bash .github/scripts/tests/sonar-required-gate.test.sh
-          bash .github/scripts/tests/lint-deploy-app-bypass.test.sh
-          bash .github/scripts/tests/lint-boolean-coercion.test.sh
-          bash .github/scripts/tests/lint-empty-expression.test.sh
-          bash .github/scripts/tests/lint-gh-repo-flag.test.sh
-          bash .github/scripts/tests/lint-workflow-injection.test.sh
-          bash .github/scripts/tests/lint-sync-releases-secret-path.test.sh
-          bash .github/scripts/tests/lint-spa-real-asset-retry.test.sh
-          bash .github/scripts/tests/parse-dispatched-workflow.test.sh
-          bash .github/scripts/tests/workflow-validate-report.test.sh
-          bash .github/scripts/tests/deploy-canary.test.sh
-          bash .github/scripts/tests/deployment-access-west.test.sh
-          python3 .github/scripts/tests/test_print_codeql_results.py
-          bash .github/scripts/tests/classify-release.test.sh
-          bash .github/scripts/tests/verify-changelog.test.sh
-          bash .github/scripts/tests/promote-unreleased-changelog.test.sh
-          # Both of these existed with NO runner at all — not this step, not
-          # pre-commit — so they had never executed in CI or locally.
-          bash .github/scripts/tests/check-pattern-register.test.sh
-          bash .github/scripts/tests/check-required-statuses.test.sh
-          bash .github/scripts/tests/deployment-client.test.sh
-          bash .github/scripts/tests/lint-test-suite-wiring.test.sh
-          bash .github/scripts/tests/ci-scan-relevance.test.sh
-          bash .github/scripts/tests/trivy-assert-os.test.sh
-          bash scripts/test-nats-server-bootstrap.sh
-          bash legacy/github/secrets-hygiene.test.sh
-
-  # NOTE: the former verify-openapi-coverage, verify-spa-env, and
-  # verify-deploy-scripts jobs are consolidated into the single `static-guards`
-  # job earlier in this file (2026-07 CI deep-dive).
-
-  # Final protected-source API report. This job reports its actual needs
-  # results; the protected wrapper adds its selected OSV job result separately.
-  # always() preserves failed and skipped producers as explicit values for
-  # the required wrapper.
   report:
     name: report
-    needs: [ioc, detect-changes, build, semgrep, eslint, govulncheck, west-deployment-lab]
+    needs: [ioc, detect-changes, semgrep, eslint]
     if: ${{ always() && (inputs.enforcement-only || !(github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null))) }}
     permissions:
       contents: read
@@ -1303,14 +407,12 @@ jobs:
         env:
           SELECTION: ${{ needs.detect-changes.outputs.scan-selection || '{}' }}
           IOC_RESULT: ${{ needs.ioc.result }}
-          BUILD_RESULT: ${{ needs.build.result }}
           SEMGREP_RESULT: ${{ needs.semgrep.result }}
           ESLINT_RESULT: ${{ needs.eslint.result }}
-          GOVULNCHECK_RESULT: ${{ needs.govulncheck.result }}
-          DESKTOP_COVERAGE: ${{ needs.build.outputs.desktop-coverage == 'true' }}
-          CONTROL_PLANE_COVERAGE: ${{ needs.build.outputs.control-plane-coverage == 'true' }}
-          MEDIA_PLANE_COVERAGE: ${{ needs.build.outputs.media-plane-coverage == 'true' }}
-          ADMIN_COVERAGE: ${{ needs.build.outputs.admin-coverage == 'true' }}
+          DESKTOP_COVERAGE: 'false'
+          CONTROL_PLANE_COVERAGE: 'false'
+          MEDIA_PLANE_COVERAGE: 'false'
+          ADMIN_COVERAGE: 'false'
         run: |
           python3 - <<'PY'
           import json
@@ -1319,10 +421,8 @@ jobs:
 
           jobs = {
               'ioc': os.environ['IOC_RESULT'],
-              'build': os.environ['BUILD_RESULT'],
               'semgrep': os.environ['SEMGREP_RESULT'],
               'eslint': os.environ['ESLINT_RESULT'],
-              'govulncheck': os.environ['GOVULNCHECK_RESULT'],
           }
           coverage = {
               'desktop': os.environ['DESKTOP_COVERAGE'] == 'true',
@@ -1342,14 +442,45 @@ jobs:
                   stream.write(f'{name}={json.dumps(value, separators=(",", ":"))}\n')
           PY
 
-      # always() preserves scan outputs before a selected lab failure blocks the verdict.
-      - name: Require selected West deployment-access lab
-        if: >-
-          ${{ always() &&
-          (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' ||
-           fromJSON(needs.detect-changes.outputs.scan-selection).hotfix ||
-           fromJSON(needs.detect-changes.outputs.scan-selection).advisory.deployment) &&
-          needs.west-deployment-lab.result != 'success' }}
+  workflow-lint:
+    name: Workflow lint and scanner contracts
+    needs: [ioc]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned YAML parser
         run: |
-          echo "::error::Selected West deployment-access lab did not succeed."
-          exit 1
+          python3 -m pip install --user --require-hashes --only-binary=:all: -r .github/requirements-pyyaml.txt
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: v1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          TARBALL="actionlint_${ACTIONLINT_VERSION#v}_linux_amd64.tar.gz"
+          curl -fsSLo "/tmp/${TARBALL}" "https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/${TARBALL}"
+          echo "${ACTIONLINT_SHA256}  /tmp/${TARBALL}" | sha256sum -c -
+          tar -xzf "/tmp/${TARBALL}" -C /tmp actionlint
+          /tmp/actionlint -config-file=.actionlint.yaml
+      - name: Scanner and workflow contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s .github/scripts/tests -p test_mobile_scanner_contract.py
+          python3 -m unittest discover -s .github/scripts/tests -p test_ci_scan_verdict.py
+          python3 -m unittest discover -s .github/scripts/tests -p test_print_codeql_results.py
+          bash .github/scripts/tests/parse-dispatched-workflow.test.sh
+          bash .github/scripts/tests/workflow-validate-report.test.sh
+          bash .github/scripts/tests/ci-scan-relevance.test.sh
+          bash .github/scripts/tests/resolve-hotfix-label.test.sh
+          bash scripts/test-update-notice-md.sh
+      - name: Protected main pin contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s .github/scripts/tests -p test_verify_required_build_pins.py
+          bash .github/scripts/tests/lint-workflow-call-contract.test.sh

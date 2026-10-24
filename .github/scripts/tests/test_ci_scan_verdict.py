@@ -262,7 +262,7 @@ class DiffLinesTests(unittest.TestCase):
             evidence = with_finding(path="café.go", start=2)
             evidence["diff"]["added_lines"] = added
             reasons = MODULE.verify_verdict(selection(),
-                {"codeql": "success", "build": "success"}, evidence, PR)
+                {"codeql": "success", "ioc": "success"}, evidence, PR)
             self.assertTrue(any("new blocking finding" in reason for reason in reasons), reasons)
             self.assertFalse(any("diff location unresolved" in reason for reason in reasons), reasons)
 
@@ -378,7 +378,7 @@ class DiffLinesTests(unittest.TestCase):
             evidence = with_finding(path="evil.js", start=2)
             evidence["diff"]["added_lines"] = added
             reasons = MODULE.verify_verdict(selection(),
-                {"codeql": "success", "build": "success"}, evidence, PR)
+                {"codeql": "success", "ioc": "success"}, evidence, PR)
             self.assertTrue(any("diff location unresolved" in reason for reason in reasons),
                             f"a blocking finding in a binary-detected file must be unresolved: {reasons}")
 
@@ -446,7 +446,7 @@ class DiffLinesTests(unittest.TestCase):
             evidence = with_finding(path="wf.yml", start=6 + 3)
             evidence["diff"]["added_lines"] = added
             reasons = MODULE.verify_verdict(selection(),
-                {"codeql": "success", "build": "success"}, evidence, PR)
+                {"codeql": "success", "ioc": "success"}, evidence, PR)
             self.assertTrue(any("diff location unresolved" in reason for reason in reasons),
                             "a blocking finding past a scanner-only line break must be unresolved, "
                             f"not judged against git's line numbers: {reasons}")
@@ -519,9 +519,9 @@ class BaseParentTests(unittest.TestCase):
 
 class ScanVerdictTests(unittest.TestCase):
     def verdict(self, ev=None, sel=None, jobs=None, pr=None):
-        job_state = {"codeql": "success", "build": "success"} if jobs is None else dict(jobs)
+        job_state = {"codeql": "success", "ioc": "success"} if jobs is None else dict(jobs)
         if jobs is not None:
-            job_state.setdefault("build", "success")
+            job_state.setdefault("ioc", "success")
         return MODULE.verify_verdict(selection() if sel is None else sel,
             job_state,
             evidence_for() if ev is None else ev, PR if pr is None else pr)
@@ -567,7 +567,7 @@ class ScanVerdictTests(unittest.TestCase):
                                           sarif_id="standalone-id")])
         evidence["osv_source_verified"] = False
         evidence["reports"] = {}
-        reasons = MODULE.verify_verdict(selected, {"build": "success", "osv": "success"}, evidence, PR)
+        reasons = MODULE.verify_verdict(selected, {"ioc": "success", "osv": "success"}, evidence, PR)
         self.assertTrue(any("OSV" in reason or "osv" in reason.lower() for reason in reasons), reasons)
 
     def test_selected_protected_osv_job_must_succeed(self):
@@ -580,7 +580,7 @@ class ScanVerdictTests(unittest.TestCase):
             "artifact": {"id": 505, "name": name, "expired": False,
                 "workflow_run": {"id": int(RUN_ID)}}}}
         evidence["osv_source_verified"] = True
-        reasons = MODULE.verify_verdict(selected, {"build": "success", "osv": "failure"}, evidence, PR)
+        reasons = MODULE.verify_verdict(selected, {"ioc": "success", "osv": "failure"}, evidence, PR)
         self.assertTrue(any("OSV" in reason or "osv" in reason.lower() for reason in reasons), reasons)
 
     def test_protected_osv_evidence_remains_valid_when_pr_edits_standalone_workflow(self):
@@ -595,7 +595,7 @@ class ScanVerdictTests(unittest.TestCase):
                 "workflow_run": {"id": int(RUN_ID)}}}}
         evidence["osv_source_verified"] = True
         evidence["diff"]["added_lines"] = {".github/workflows/osv-scanner.yml": [1]}
-        reasons = MODULE.verify_verdict(selected, {"build": "success", "osv": "success"}, evidence, PR)
+        reasons = MODULE.verify_verdict(selected, {"ioc": "success", "osv": "success"}, evidence, PR)
         self.assertEqual([], reasons)
 
     def test_protected_osv_accepts_server_parent_category_only_with_exact_sarif_identity(self):
@@ -626,7 +626,7 @@ class ScanVerdictTests(unittest.TestCase):
         evidence = evidence_for([analysis("osv-scanner", ".github/workflows/osv-scanner.yml:osv-scan",
                                           sarif_id="protected-id")])
         evidence["osv_source_verified"] = False
-        reasons = MODULE.verify_verdict(selected, {"build": "success", "osv": "success"}, evidence, PR)
+        reasons = MODULE.verify_verdict(selected, {"ioc": "success", "osv": "success"}, evidence, PR)
         self.assertTrue(any("OSV workflow source" in reason for reason in reasons), reasons)
 
     def test_selection_requires_closed_fifteen_keys_and_four_coverage_flags(self):
@@ -682,7 +682,7 @@ class ScanVerdictTests(unittest.TestCase):
         ev = evidence_for()
         self.assertEqual([], self.verdict(ev, sel, {"semgrep": "success"}))
         for state in (None, "skipped", "failure", "cancelled"):
-            jobs = {"build": "success"}
+            jobs = {"ioc": "success"}
             if state is not None:
                 jobs["semgrep"] = state
             with self.subTest(state=state):
@@ -823,11 +823,11 @@ class ScanVerdictTests(unittest.TestCase):
                                                   ancestor, descendant))
 
     def test_selected_build_failure_cannot_turn_required_scan_irrelevant(self):
-        self.assertTrue(any("build" in reason.lower() for reason in
-            self.verdict(jobs={"codeql": "success", "build": "failure"})))
+        self.assertTrue(any("ioc" in reason.lower() for reason in
+            self.verdict(jobs={"codeql": "success", "ioc": "failure"})))
         missing_build = MODULE.verify_verdict(selection(), {"codeql": "success"},
             evidence_for(), PR)
-        self.assertTrue(any("build" in reason.lower() for reason in missing_build))
+        self.assertTrue(any("ioc" in reason.lower() for reason in missing_build))
 
     def test_incomplete_pagination_http_and_sarif_fail_closed(self):
         cases = [("pagination_complete", False, "pagination"),
@@ -961,7 +961,7 @@ class ScanVerdictTests(unittest.TestCase):
         ev["sonar"] = {"app_id": 12526, "conclusion": "success", "status": "completed",
                        "head_sha": HEAD, "analysis_window_verified": True}
         ev["analysis_window_verified"] = True
-        jobs = {"codeql": "success", "sonar": "success", "build": "success",
+        jobs = {"codeql": "success", "sonar": "success", "ioc": "success",
                 "coverage_uploads": {"desktop": True}}
         self.assertEqual([], self.verdict(ev, sel, jobs))
         ev["sonar"]["app_id"] = 1
@@ -979,16 +979,16 @@ class ScanVerdictTests(unittest.TestCase):
         ev = evidence_for()
         ev["sonar"] = {"app_id": 12526, "conclusion": "success", "status": "completed",
                        "head_sha": HEAD, "analysis_window_verified": True}
-        jobs = {"build": "success", "codeql": "success", "sonar": "skipped"}
+        jobs = {"ioc": "success", "codeql": "success", "sonar": "skipped"}
         self.assertEqual([], self.verdict(ev, sel, jobs, pr=PR))
         same_repo = copy.deepcopy(PR)
         same_repo["head"]["repo"]["full_name"] = "Concord-Voice/Mobile"
-        self.assertTrue(any("Sonar selected build or scan" in reason
+        self.assertTrue(any("Sonar selected IOC gate or scan" in reason
                             for reason in self.verdict(ev, sel, jobs, pr=same_repo)))
         # Dependabot reads SONAR_TOKEN from its own secret store, so a skipped
         # job blocks it like any same-repository PR; a scanned one passes.
         same_repo["user"] = {"login": "dependabot[bot]"}
-        self.assertTrue(any("Sonar selected build or scan" in reason
+        self.assertTrue(any("Sonar selected IOC gate or scan" in reason
                             for reason in self.verdict(ev, sel, jobs, pr=same_repo)))
         self.assertEqual([], self.verdict(ev, sel, dict(jobs, sonar="success"), pr=same_repo))
         ev["sonar"] = None
@@ -1270,7 +1270,7 @@ class CliTests(unittest.TestCase):
             selected = selection()
             selected["mode"] = mode
             selection_file.write_text(json.dumps(selected))
-            jobs_file.write_text(json.dumps({"codeql": "success", "build": "success"}))
+            jobs_file.write_text(json.dumps({"codeql": "success", "ioc": "success"}))
 
             class Api:
                 def __init__(self, token):
@@ -1346,7 +1346,7 @@ class ProtectedProvenanceCollectionTests(unittest.TestCase):
     the question the old proof asked (workflow commit against the PR's base), so a test
     cannot pass or fail merely on which paths happen to be served.
     """
-    JOBS = {"build": "success", "semgrep": "success"}
+    JOBS = {"ioc": "success", "semgrep": "success"}
 
     def collect(self, *, tip=MAIN, ref=None, tip_compare=None):
         pr = {"number": 3691, "head": {"sha": HEAD, "repo": {"full_name": "contributor/repo"}},
@@ -1502,7 +1502,7 @@ class ProtectedCollectionTests(unittest.TestCase):
                     patch.object(MODULE, "_base_parent", return_value=BASE), \
                     patch.object(MODULE.subprocess, "run", return_value=SimpleNamespace(stdout=wrapper_sha)):
                 api = Api(comparison)
-                current, evidence = MODULE._collect(api, sel, {"build": "success", "semgrep": "success"},
+                current, evidence = MODULE._collect(api, sel, {"ioc": "success", "semgrep": "success"},
                                                     3691, int(RUN_ID))
                 self.assertTrue(evidence["provenance_verified"])
                 self.assertIn("/git/ref/heads/main", api.paths)
@@ -1510,21 +1510,21 @@ class ProtectedCollectionTests(unittest.TestCase):
                 self.assertNotIn(f"/compare/{wrapper_sha}...{BASE}", api.paths)
                 self.assertIn(f"/compare/{POLICY}...{wrapper_sha}", api.paths)
                 self.assertEqual([], MODULE.verify_verdict(sel,
-                    {"build": "success", "semgrep": "success"}, evidence, current))
+                    {"ioc": "success", "semgrep": "success"}, evidence, current))
                 divergent = dict(comparison, status="diverged", behind_by=1)
                 api = Api(divergent)
-                _, bad_evidence = MODULE._collect(api, sel, {"build": "success", "semgrep": "success"},
+                _, bad_evidence = MODULE._collect(api, sel, {"ioc": "success", "semgrep": "success"},
                                                    3691, int(RUN_ID))
                 self.assertFalse(bad_evidence["provenance_verified"])
                 with patch.dict("os.environ", {"WORKFLOW_SHA": POLICY}):
                     with self.assertRaisesRegex(MODULE.Unknown, "protected source"):
-                        MODULE._collect(Api(comparison), sel, {"build": "success", "semgrep": "success"},
+                        MODULE._collect(Api(comparison), sel, {"ioc": "success", "semgrep": "success"},
                                         3691, int(RUN_ID))
-                reasons = MODULE.verify_verdict(sel, {"build": "success", "semgrep": "success"},
+                reasons = MODULE.verify_verdict(sel, {"ioc": "success", "semgrep": "success"},
                                                 bad_evidence, current)
                 self.assertTrue(any("provenance" in reason.lower() for reason in reasons))
                 api = Api(comparison, dict(pinned_comparison, status="diverged", behind_by=1))
-                _, bad_evidence = MODULE._collect(api, sel, {"build": "success", "semgrep": "success"},
+                _, bad_evidence = MODULE._collect(api, sel, {"ioc": "success", "semgrep": "success"},
                                                    3691, int(RUN_ID))
                 self.assertFalse(bad_evidence["provenance_verified"])
 
@@ -1588,7 +1588,7 @@ class ProtectedCollectionTests(unittest.TestCase):
             with patch.dict("os.environ", env), patch.object(MODULE, "REPO_ROOT", root), \
                     patch.object(MODULE.subprocess, "run", fake_run):
                 try:
-                    _, evidence = MODULE._collect(Api(), sel, {"build": "success", "semgrep": "success"},
+                    _, evidence = MODULE._collect(Api(), sel, {"ioc": "success", "semgrep": "success"},
                                                   3691, int(RUN_ID))
                 except MODULE.Unknown as exc:
                     if raise_unknown:
@@ -1746,7 +1746,7 @@ class StandaloneScanCollectionTests(unittest.TestCase):
                     patch.object(MODULE, "_protected_osv_pin", return_value=osv_pin), \
                     patch.object(MODULE, "_local_reports", return_value=reports):
                 current_pr, evidence = MODULE._collect(api, selection_data,
-                    {"build": "success", selected_key: "success"}, 3691, int(RUN_ID))
+                    {"ioc": "success", selected_key: "success"}, 3691, int(RUN_ID))
             return selection_data, current_pr, evidence, api.paths
 
     def test_independent_osv_pin_must_match_the_protected_wrapper(self):
@@ -1774,7 +1774,7 @@ class StandaloneScanCollectionTests(unittest.TestCase):
         selected, pr, evidence, _ = self.collect(selected_key="osv",
             osv_api_category=".github/workflows", osv_analysis_key=key)
         self.assertEqual([], MODULE.verify_verdict(selected,
-            {"build": "success", "osv": "success"}, evidence, pr))
+            {"ioc": "success", "osv": "success"}, evidence, pr))
         with self.assertRaises(MODULE.Unknown):
             self.collect(selected_key="osv", osv_api_category=".github/workflows",
                 osv_analysis_key=key, osv_sarif_category=".github/workflows/other.yml:osv-scan")
@@ -1785,7 +1785,7 @@ class StandaloneScanCollectionTests(unittest.TestCase):
             osv_analysis_key=".github/workflows/required-pr-build.yml:protected-pr-publish",
             osv_newer_analysis=True)
         self.assertEqual(["unknown: osv-scanner latest upload mismatch"],
-            MODULE.verify_verdict(selected, {"build": "success", "osv": "success"}, evidence, pr))
+            MODULE.verify_verdict(selected, {"ioc": "success", "osv": "success"}, evidence, pr))
 
     def test_retry_rejects_preseeded_receipt_and_prior_attempt_analysis(self):
         with self.assertRaisesRegex(MODULE.Unknown, "current-attempt artifact not after"):
@@ -1815,14 +1815,14 @@ class StandaloneScanCollectionTests(unittest.TestCase):
 
     def sonar_reasons(self, checks):
         selected, pr, evidence, _ = self.collect(selected_key="sonar", sonar_checks=checks)
-        return MODULE.verify_verdict(selected, {"build": "success", "sonar": "success"}, evidence, pr), evidence
+        return MODULE.verify_verdict(selected, {"ioc": "success", "sonar": "success"}, evidence, pr), evidence
 
     def test_stale_then_fresh_sonar_check_on_unchanged_head_passes_collection(self):
         stale = self.sonar_check(started="2026-10-08T11:00:00Z", completed="2026-10-08T11:01:00Z")
         fresh = self.sonar_check()
         selected, pr, evidence, _ = self.collect(selected_key="sonar", sonar_checks=[stale, fresh],
             run_status="in_progress", run_updated="2026-10-08T12:00:30Z")
-        reasons = MODULE.verify_verdict(selected, {"build": "success", "sonar": "success"}, evidence, pr)
+        reasons = MODULE.verify_verdict(selected, {"ioc": "success", "sonar": "success"}, evidence, pr)
         self.assertEqual([], reasons)
 
     def test_sonar_check_before_protected_run_but_on_current_pr_revision_passes(self):
@@ -1862,7 +1862,7 @@ class StandaloneScanCollectionTests(unittest.TestCase):
 
 class CutoverCanaryContractTests(unittest.TestCase):
     def test_canary_evidence_requires_thirty_current_distinct_protected_runs(self):
-        source = (MODULE_PATH.parents[2] / "legacy/github/apply-alpha-scan-relevance.sh").read_text()
+        source = (MODULE_PATH.parents[2] / ".github/scripts/tests/fixtures/scan-relevance-migration.sh").read_text()
 
         def fragment(start, end):
             return source[source.index(start):source.index(end, source.index(start))]
@@ -1958,7 +1958,7 @@ class CutoverCanaryContractTests(unittest.TestCase):
 
 class NativeCodeQLCheckTests(unittest.TestCase):
     def test_migration_requires_a_completed_trusted_current_head_codeql_check(self):
-        source = (MODULE_PATH.parents[2] / "legacy/github/apply-alpha-scan-relevance.sh").read_text()
+        source = (MODULE_PATH.parents[2] / ".github/scripts/tests/fixtures/scan-relevance-migration.sh").read_text()
         declaration = "verify_native_codeql() {"
         self.assertTrue(declaration in source,
                         "the cutover must verify current-head GitHub Advanced Security CodeQL checks")

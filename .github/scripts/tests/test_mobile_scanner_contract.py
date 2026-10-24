@@ -1,0 +1,59 @@
+"""Exercise the extracted workflow's selection step at its process boundary."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[3]
+WORKFLOW = yaml.load((ROOT / '.github/workflows/pr-ci.yml').read_text(), Loader=yaml.BaseLoader)
+
+
+class MobileScannerContract(unittest.TestCase):
+    def select(self, value):
+        job = WORKFLOW['jobs']['detect-changes']
+        step = next(s for s in job['steps'] if s.get('id') == 'mobile-selection')
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / 'output'
+            run = subprocess.run(['bash', '-e', '-c', step['run']], check=False,
+                                 env={**os.environ, 'SELECTION': json.dumps(value), 'GITHUB_OUTPUT': str(output)},
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            return dict(line.split('=', 1) for line in output.read_text().splitlines())
+
+    def test_scanner_selection_preserves_identity_and_omits_absent_products(self):
+        original = {'known': True, 'policy_sha': 'a' * 40, 'head_sha': 'b' * 40,
+                    'selected': dict.fromkeys(['eslint', 'osv', 'semgrep_custom', 'semgrep_community',
+                                              'semgrep_canary', 'sonar', 'govulncheck'], True),
+                    'coverage_required': {'desktop': True, 'admin': True}}
+        result = self.select(original)
+        self.assertEqual(result['known'], 'true')
+        selection = json.loads(result['selection'])
+        self.assertEqual(selection['policy_sha'], original['policy_sha'])
+        self.assertEqual(selection['head_sha'], original['head_sha'])
+        self.assertFalse(selection['selected']['sonar'])
+        self.assertFalse(selection['selected']['govulncheck'])
+        self.assertTrue(selection['selected']['eslint'])
+        self.assertTrue(selection['selected']['osv'])
+        self.assertFalse(any(selection['coverage_required'].values()))
+
+    def test_unknown_policy_never_becomes_valid_selection(self):
+        result = self.select({'known': False})
+        self.assertEqual(result['known'], 'false')
+        self.assertIs(json.loads(result['selection'])['known'], False)
+
+    def test_installing_jobs_depend_on_ioc_and_no_app_build_is_fabricated(self):
+        for name in ('semgrep', 'eslint', 'secret-scanning', 'workflow-lint'):
+            self.assertIn('ioc', WORKFLOW['jobs'][name]['needs'], name)
+        self.assertNotIn('build', WORKFLOW['jobs'])
+        report = next(s for s in WORKFLOW['jobs']['report']['steps'] if s.get('id') == 'report')
+        self.assertIn("'ioc': os.environ['IOC_RESULT']", report['run'])
+        self.assertNotIn("'build':", report['run'])
+        self.assertNotIn('SONAR_TOKEN', json.dumps(WORKFLOW))
+
+
+if __name__ == '__main__':
+    unittest.main()

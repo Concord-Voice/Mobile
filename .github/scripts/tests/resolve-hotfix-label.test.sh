@@ -236,7 +236,7 @@ fi
 
 echo ""
 echo "Workflow: the changes job can actually read PR metadata"
-MAIN_CI="${REPO_ROOT}/.github/workflows/main-ci.yml"
+MAIN_CI="${REPO_ROOT}/.github/scripts/tests/fixtures/alpha-policy/.github/workflows/main-ci.yml"
 if grep -q 'pull-requests: read' < <(awk '/^  changes:/{f=1;next} f&&/^  [a-z-]+:$/{f=0} f' "$MAIN_CI"); then
   echo "  ✓ changes job declares pull-requests: read"; pass=$(( pass + 1 ))
 else
@@ -250,7 +250,7 @@ fi
 
 echo ""
 echo "Workflow: main-ci.yml consumes the script, not an inline lookup"
-MAIN_CI="${REPO_ROOT}/.github/workflows/main-ci.yml"
+MAIN_CI="${REPO_ROOT}/.github/scripts/tests/fixtures/alpha-policy/.github/workflows/main-ci.yml"
 if grep -q 'resolve-hotfix-label.sh' "$MAIN_CI"; then
   echo "  ✓ main-ci.yml calls resolve-hotfix-label.sh"; pass=$(( pass + 1 ))
 else

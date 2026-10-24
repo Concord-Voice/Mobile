@@ -72,3 +72,8 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Scanner output and Python CI helpers
+__pycache__/
+*.sarif
+semgrep-*.json

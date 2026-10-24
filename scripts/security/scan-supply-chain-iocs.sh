@@ -71,6 +71,8 @@ run_subcheck_1() {
 
 # ── Subcheck 2: IOC-list match in lockfiles ─────────────────────────────────
 LOCKFILES=(
+  "package-lock.json"
+  ".github/tools/eslint-formatter/package-lock.json"
   "client/desktop/package-lock.json"
   "services/media-plane/package-lock.json"
   "client/admin/package-lock.json"

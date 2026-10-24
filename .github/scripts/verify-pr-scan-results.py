@@ -264,10 +264,10 @@ def _verify_verdict(selection, jobs, evidence, current_pr):
     latest = evidence.get("latest_analyses", [])
     if not isinstance(reports, dict) or not all(isinstance(v, list) for v in (analyses, latest)):
         return reasons + ["unknown: scan evidence malformed"]
-    if "build" not in jobs:
-        reasons.append("unknown: selected build missing")
-    elif jobs["build"] != "success":
-        reasons.append("policy: selected build failed")
+    if "ioc" not in jobs:
+        reasons.append("unknown: selected IOC gate missing")
+    elif jobs["ioc"] != "success":
+        reasons.append("policy: selected IOC gate failed")
     if selected["semgrep_canary"] and jobs.get("semgrep") != "success":
         reasons.append("policy: Semgrep canary selected job did not succeed")
     if selected["osv"] and evidence.get("osv_source_verified") is not True:
@@ -327,8 +327,8 @@ def _verify_verdict(selection, jobs, evidence, current_pr):
         # secret store and must scan. The trusted App check remains mandatory
         # and independently bound to this PR head.
         sonar_job_ok = jobs.get("sonar") == "success" or (external_pr and jobs.get("sonar") == "skipped")
-        if not sonar_job_ok or jobs.get("build") != "success":
-            reasons.append("policy: Sonar selected build or scan did not succeed")
+        if not sonar_job_ok or jobs.get("ioc") != "success":
+            reasons.append("policy: Sonar selected IOC gate or scan did not succeed")
         for component in COMPONENTS:
             if selection.get("coverage_required", {}).get(component):
                 artifacts = evidence.get("coverage_artifacts", [])
