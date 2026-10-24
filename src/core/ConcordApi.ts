@@ -26,6 +26,14 @@ export type LoginKeys = {
   keyDerivationAlg: string;
 };
 
+/** A DM conversation as the conversation list shows it. */
+export type DmSummary = {
+  id: string;
+  title: string;
+  unreadCount: number;
+  lastActivity: string;
+};
+
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string | undefined) {
     // Status and error code only: response bodies may echo user data.
@@ -360,6 +368,37 @@ export class ConcordApi {
       `/dm/conversations/${encodeURIComponent(conversationId)}/messages`,
     );
     return Array.isArray(result.messages) ? result.messages.map(record) : [];
+  }
+
+  /** The caller's DM conversations, newest activity first as the server orders them. */
+  async conversations(): Promise<DmSummary[]> {
+    const me = this.userId;
+    const result = await this.call('GET', '/dm/conversations');
+    const list = Array.isArray(result.conversations)
+      ? result.conversations.map(record)
+      : [];
+    return list.map(c => {
+      const others = (Array.isArray(c.participants) ? c.participants : [])
+        .map(record)
+        .filter(p => p.user_id !== me)
+        .map(p =>
+          typeof p.display_name === 'string' && p.display_name
+            ? p.display_name
+            : text(p.username),
+        );
+      const last = c.last_message ? record(c.last_message) : null;
+      return {
+        id: text(c.id),
+        title:
+          typeof c.name === 'string' && c.name
+            ? c.name
+            : others.join(', ') || 'Notes to self',
+        unreadCount: Number.isSafeInteger(c.unread_count)
+          ? (c.unread_count as number)
+          : 0,
+        lastActivity: text(last ? last.created_at : c.created_at),
+      };
+    });
   }
 
   async wsTicket(): Promise<string> {

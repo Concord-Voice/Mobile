@@ -1,26 +1,68 @@
 import ReactTestRenderer from 'react-test-renderer';
 import App from '../App';
+import type { ConcordApi } from '../src/core/ConcordApi';
+import { useSession } from '../src/state/session';
 
-test('renders the app shell', async () => {
-  let tree!: ReactTestRenderer.ReactTestRenderer;
-  await ReactTestRenderer.act(() => {
-    tree = ReactTestRenderer.create(<App />);
+const text = (tree: ReactTestRenderer.ReactTestRenderer) =>
+  tree.root
+    .findAllByType('Text' as never)
+    .map(t => t.props.children)
+    .flat()
+    .join('|');
+
+let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
+
+async function render() {
+  await ReactTestRenderer.act(async () => {
+    mounted = ReactTestRenderer.create(<App />);
   });
-  expect(tree.root.findByType('Text' as never).props.children).toBe(
-    'Concord Voice',
-  );
+  return mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+}
+
+afterEach(async () => {
+  await ReactTestRenderer.act(() => mounted?.unmount());
+  mounted = null;
+  useSession.setState({
+    stage: { kind: 'signed_out' },
+    api: null,
+    error: null,
+  });
 });
 
-test('follows the dark color scheme', async () => {
-  const scheme = jest
-    .spyOn(require('react-native'), 'useColorScheme')
-    .mockReturnValue('dark');
-  let tree!: ReactTestRenderer.ReactTestRenderer;
-  await ReactTestRenderer.act(() => {
-    tree = ReactTestRenderer.create(<App />);
+test('starts on the sign-in screen', async () => {
+  const tree = await render();
+  expect(text(tree)).toContain('Log in');
+  expect(
+    tree.root.findAllByProps({ accessibilityLabel: 'Password' })[0].props
+      .secureTextEntry,
+  ).toBe(true);
+});
+
+test('offers only the code methods the account has', async () => {
+  useSession.setState({
+    stage: { kind: 'mfa', challengeToken: 'c', methods: ['webauthn', 'email'] },
   });
-  expect(tree.root.findByType('Text' as never).props.style).toEqual({
-    color: '#fff',
+  const tree = await render();
+  expect(text(tree)).toContain('Emailed code');
+  expect(text(tree)).not.toContain('Authenticator code');
+});
+
+test('explains a passkey-only account', async () => {
+  useSession.setState({
+    stage: { kind: 'mfa', challengeToken: 'c', methods: ['webauthn'] },
   });
-  scheme.mockRestore();
+  expect(text(await render())).toContain('needs a passkey');
+});
+
+test('lists DM conversations once signed in', async () => {
+  const api = {
+    conversations: jest.fn(async () => [
+      { id: 'd1', title: 'Peer', unreadCount: 2, lastActivity: 'now' },
+    ]),
+  } as unknown as ConcordApi;
+  useSession.setState({ stage: { kind: 'signed_in', userId: 'u' }, api });
+  const tree = await render();
+  expect(text(tree)).toContain('Peer');
+  expect(text(tree)).toContain('2');
+  expect(text(tree)).toContain('You');
 });

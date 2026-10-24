@@ -249,6 +249,47 @@ describe('ConcordApi', () => {
     return { api, ...fake };
   };
 
+  it('summarises DM conversations for the list', async () => {
+    const { api } = signedIn({
+      'GET /dm/conversations': () => [
+        200,
+        {
+          conversations: [
+            {
+              id: 'd1',
+              created_at: 't0',
+              unread_count: 3,
+              participants: [
+                { user_id: ME, username: 'me' },
+                { user_id: PEER, username: 'peer', display_name: 'Peer P' },
+              ],
+              last_message: { created_at: 't1' },
+            },
+            {
+              id: 'd2',
+              name: 'Team',
+              created_at: 't2',
+              unread_count: 'x',
+              participants: [],
+            },
+            {
+              id: 'd3',
+              created_at: 't3',
+              participants: [{ user_id: ME, username: 'me' }],
+            },
+          ],
+        },
+      ],
+    });
+    await expect(api.conversations()).rejects.toThrow('Not signed in');
+    await api.login('e', 'p');
+    expect(await api.conversations()).toEqual([
+      { id: 'd1', title: 'Peer P', unreadCount: 3, lastActivity: 't1' },
+      { id: 'd2', title: 'Team', unreadCount: 0, lastActivity: 't2' },
+      { id: 'd3', title: 'Notes to self', unreadCount: 0, lastActivity: 't3' },
+    ]);
+  });
+
   it('refreshes once on 401, shares the rotation and retries', async () => {
     let refreshes = 0;
     const { api, calls } = signedIn({
