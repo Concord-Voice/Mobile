@@ -1,5 +1,6 @@
 import { ApiError, ConcordApi, checkBaseUrl } from '../core/ConcordApi';
 import { DmSocket, type SocketLike } from '../core/DmSocket';
+import { MOBILE_ORIGIN, createSocket } from '../core/socket';
 
 const ME = 'user-mobile';
 const PEER = 'user-peer';
@@ -12,19 +13,30 @@ function fakeFetch(routes: Record<string, Route>) {
   const calls: Array<{
     key: string;
     headers: Record<string, string>;
+    credentials?: string;
     body?: Record<string, unknown>;
   }> = [];
   const impl = jest.fn(
     async (
       url: string,
-      init: { method: string; headers: Record<string, string>; body?: string },
+      init: {
+        method: string;
+        headers: Record<string, string>;
+        credentials?: string;
+        body?: string;
+      },
     ) => {
       const path = url.replace(/^https?:\/\/[^/]+\/api\/v1/, '');
       const key = `${init.method} ${path}`;
       const body = init.body
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined;
-      calls.push({ key, headers: init.headers, body });
+      calls.push({
+        key,
+        headers: init.headers,
+        credentials: init.credentials,
+        body,
+      });
       const route = routes[key];
       const [status, json] = route ? route(body) : [404, { code: 'not_found' }];
       return {
@@ -74,12 +86,19 @@ describe('ConcordApi', () => {
       'POST /auth/register': () => [201, { pending_id: 'pending-1' }],
       'POST /auth/register/confirm': () => [
         200,
-        { access_token: 'a1', user: { id: ME } },
+        {
+          access_token: 'a1',
+          refresh_token: 'r1',
+          session_id: 's1',
+          user: { id: ME },
+        },
       ],
       'POST /auth/login': () => [
         200,
         {
           access_token: 'a2',
+          refresh_token: 'r2',
+          session_id: 's2',
           user: { id: ME },
           e2ee_keys: {
             wrapped_private_key: 'V1JBUA==', // pragma: allowlist secret
@@ -116,9 +135,15 @@ describe('ConcordApi', () => {
     await api.confirm(pending, '123456');
     expect(api.userId).toBe(ME);
     expect(await api.login('m@example.test', 'synthetic-pass')).toEqual({
-      wrappedPrivateKey: 'V1JBUA==', // pragma: allowlist secret
-      keyDerivationSalt: 'U0FMVA==',
-      keyDerivationAlg: 'argon2id',
+      kind: 'signed_in',
+      keys: {
+        wrappedPrivateKey: 'V1JBUA==', // pragma: allowlist secret
+        keyDerivationSalt: 'U0FMVA==',
+        keyDerivationAlg: 'argon2id',
+      },
+    });
+    expect(calls.find(c => c.key === 'POST /auth/login')?.body).toMatchObject({
+      remember_me: true,
     });
     const peer = await api.findUserId('peer');
     const conv = await api.openDm(peer);
@@ -135,22 +160,250 @@ describe('ConcordApi', () => {
       wrapped_key_versions: { [PEER]: 3 },
     });
     expect(calls.every(c => c.headers['X-Machine-Id'] === MACHINE)).toBe(true);
+    expect(calls.every(c => c.credentials === 'omit')).toBe(true);
     expect(
       calls.find(c => c.key === 'POST /auth/ws-ticket')?.headers.Authorization,
     ).toBe('Bearer a2');
   });
 
-  it('refuses MFA logins and an invalid key version', async () => {
+  it('completes an MFA login with an emailed code', async () => {
+    const { impl, calls } = fakeFetch({
+      'POST /auth/login': () => [
+        200,
+        {
+          mfa_required: true,
+          mfa_challenge_token: 'chal',
+          methods: ['totp', 'email', 7],
+        },
+      ],
+      'POST /auth/mfa/email/send': () => [200, {}],
+      'POST /auth/mfa/verify': body =>
+        body?.code === '424242'
+          ? [
+              200,
+              {
+                access_token: 'a1',
+                refresh_token: 'r1',
+                session_id: 's1',
+                user: { id: ME },
+                e2ee_keys: {
+                  wrapped_private_key: 'V1JBUA==', // pragma: allowlist secret
+                  key_derivation_salt: 'U0FMVA==',
+                  key_derivation_alg: 'argon2id',
+                },
+              },
+            ]
+          : [401, { code: 'invalid_code' }],
+    });
+    const api = new ConcordApi('https://api.example.test', MACHINE, impl);
+    expect(await api.login('e', 'p')).toEqual({
+      kind: 'mfa',
+      challengeToken: 'chal',
+      methods: ['totp', 'email'],
+    });
+    expect(() => api.userId).toThrow('Not signed in');
+    await api.sendMfaEmail('chal');
+    await expect(
+      api.verifyMfa('chal', 'email', '000000'),
+    ).rejects.toMatchObject({ status: 401 });
+    const keys = await api.verifyMfa('chal', 'email', '424242');
+    expect(keys.keyDerivationAlg).toBe('argon2id');
+    expect(api.userId).toBe(ME);
+    expect(calls.find(c => c.key === 'POST /auth/mfa/verify')?.body).toEqual({
+      mfa_challenge_token: 'chal',
+      method: 'email',
+      code: '000000',
+    });
+  });
+
+  it('refuses an invalid key version', async () => {
     const { impl } = fakeFetch({
-      'POST /auth/login': () => [200, { mfa_required: true }],
       'GET /users/u/public-key': () => [
         200,
         { public_key: 'UEs=', key_version: 0 },
       ],
     });
     const api = new ConcordApi('https://api.example.test', MACHINE, impl);
-    await expect(api.login('e', 'p')).rejects.toThrow('MFA');
     await expect(api.publicKey('u')).rejects.toThrow('Invalid API response');
+  });
+
+  const signedIn = (routes: Record<string, Route>) => {
+    const fake = fakeFetch({
+      'POST /auth/login': () => [
+        200,
+        {
+          access_token: 'a1',
+          refresh_token: 'r1',
+          session_id: 's1',
+          user: { id: ME },
+          e2ee_keys: {
+            wrapped_private_key: 'V1JBUA==', // pragma: allowlist secret
+            key_derivation_salt: 'U0FMVA==',
+            key_derivation_alg: 'argon2id',
+          },
+        },
+      ],
+      ...routes,
+    });
+    const api = new ConcordApi('https://api.example.test', MACHINE, fake.impl);
+    return { api, ...fake };
+  };
+
+  it('summarises DM conversations for the list', async () => {
+    const { api } = signedIn({
+      'GET /dm/conversations': () => [
+        200,
+        {
+          conversations: [
+            {
+              id: 'd1',
+              created_at: 't0',
+              unread_count: 3,
+              participants: [
+                { user_id: ME, username: 'me' },
+                { user_id: PEER, username: 'peer', display_name: 'Peer P' },
+              ],
+              last_message: { created_at: 't1' },
+            },
+            {
+              id: 'd2',
+              name: 'Team',
+              created_at: 't2',
+              unread_count: 'x',
+              participants: [],
+            },
+            {
+              id: 'd3',
+              created_at: 't3',
+              participants: [{ user_id: ME, username: 'me' }],
+            },
+          ],
+        },
+      ],
+    });
+    await expect(api.conversations()).rejects.toThrow('Not signed in');
+    await api.login('e', 'p');
+    expect(await api.conversations()).toEqual([
+      { id: 'd1', title: 'Peer P', unreadCount: 3, lastActivity: 't1' },
+      { id: 'd2', title: 'Team', unreadCount: 0, lastActivity: 't2' },
+      { id: 'd3', title: 'Notes to self', unreadCount: 0, lastActivity: 't3' },
+    ]);
+  });
+
+  it('refreshes once on 401, shares the rotation and retries', async () => {
+    let refreshes = 0;
+    const { api, calls } = signedIn({
+      'POST /auth/refresh': () => {
+        refreshes += 1;
+        return [
+          200,
+          { access_token: 'a2', refresh_token: 'r2', session_id: 's2' },
+        ];
+      },
+      'POST /auth/ws-ticket': () =>
+        calls.at(-1)?.headers.Authorization === 'Bearer a2'
+          ? [200, { ticket: 'tkt' }]
+          : [401, { code: 'token_expired' }],
+    });
+    await api.login('e', 'p');
+    expect(await Promise.all([api.wsTicket(), api.wsTicket()])).toEqual([
+      'tkt',
+      'tkt',
+    ]);
+    expect(refreshes).toBe(1);
+    const refresh = calls.find(c => c.key === 'POST /auth/refresh');
+    expect(refresh?.headers['X-Refresh-Token']).toBe('r1');
+    expect(api.userId).toBe(ME);
+  });
+
+  it('ends the session when the refresh token is refused', async () => {
+    const { api } = signedIn({
+      'POST /auth/refresh': () => [401, { code: 'invalid_refresh' }],
+      'POST /auth/ws-ticket': () => [401, { code: 'token_expired' }],
+    });
+    await api.login('e', 'p');
+    const expired = jest.fn();
+    api.onExpired = expired;
+    await expect(api.wsTicket()).rejects.toMatchObject({ status: 401 });
+    expect(expired).toHaveBeenCalledTimes(1);
+    expect(() => api.userId).toThrow('Not signed in');
+    await expect(api.refresh()).rejects.toThrow('Not signed in');
+  });
+
+  it('retries only once and never on credential routes', async () => {
+    let tickets = 0;
+    let refreshes = 0;
+    const { api } = signedIn({
+      'POST /auth/refresh': () => {
+        refreshes += 1;
+        return [
+          200,
+          { access_token: 'a2', refresh_token: 'r2', session_id: 's2' },
+        ];
+      },
+      'POST /auth/ws-ticket': () => {
+        tickets += 1;
+        return [401, { code: 'token_expired' }];
+      },
+      'POST /auth/mfa/verify': () => [401, { code: 'invalid_code' }],
+    });
+    await api.login('e', 'p');
+    await expect(api.wsTicket()).rejects.toMatchObject({ status: 401 });
+    expect(tickets).toBe(2);
+    await expect(api.verifyMfa('c', 'totp', '1')).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(refreshes).toBe(1);
+    expect(api.userId).toBe(ME);
+  });
+
+  it('does not revive a session logged out during a rotation', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { impl } = signedIn({
+      'POST /auth/logout': () => [200, {}],
+    });
+    const slow = jest.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith('/auth/refresh')) {
+        await gate;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            access_token: 'a2',
+            refresh_token: 'r2',
+            session_id: 's2',
+          }),
+        } as Response;
+      }
+      return impl(url, init);
+    });
+    const racing = new ConcordApi(
+      'https://api.example.test',
+      MACHINE,
+      slow as unknown as typeof fetch,
+    );
+    await racing.login('e', 'p');
+    const rotation = racing.refresh();
+    await racing.logout();
+    release();
+    await rotation;
+    expect(() => racing.userId).toThrow('Not signed in');
+  });
+
+  it('logs out with its refresh token and clears the session even on failure', async () => {
+    const { api, calls } = signedIn({
+      'POST /auth/logout': () => [500, {}],
+    });
+    await api.logout();
+    await api.login('e', 'p');
+    await expect(api.logout()).rejects.toMatchObject({ status: 500 });
+    expect(() => api.userId).toThrow('Not signed in');
+    const logout = calls.find(c => c.key === 'POST /auth/logout');
+    expect(logout?.headers['X-Refresh-Token']).toBe('r1');
+    expect(logout?.headers.Authorization).toBe('Bearer a1');
   });
 
   it('allows plain http only for localhost', () => {
@@ -411,5 +664,31 @@ describe('DmSocket', () => {
     await expect(
       DmSocket.open('ws://x', () => ({ ...failing }), 5),
     ).rejects.toThrow('open timed out');
+  });
+});
+
+describe('createSocket', () => {
+  it('opens a native WebSocket with the mobile origin header', () => {
+    const created: unknown[][] = [];
+    const original = globalThis.WebSocket;
+    globalThis.WebSocket = jest.fn(function (
+      this: unknown,
+      ...args: unknown[]
+    ) {
+      created.push(args);
+    }) as unknown as typeof WebSocket;
+    try {
+      createSocket('wss://api.example.test/api/v1/ws?ticket=t');
+    } finally {
+      globalThis.WebSocket = original;
+    }
+    expect(MOBILE_ORIGIN).toBe('app://concord-mobile');
+    expect(created).toEqual([
+      [
+        'wss://api.example.test/api/v1/ws?ticket=t',
+        undefined,
+        { headers: { Origin: 'app://concord-mobile' } },
+      ],
+    ]);
   });
 });

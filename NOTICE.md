@@ -462,6 +462,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | yargs | 15.4.1 | MIT | https://github.com/yargs/yargs |
 | yargs | 17.7.3 | MIT | https://github.com/yargs/yargs |
 | yocto-queue | 0.1.0 | MIT | https://github.com/sindresorhus/yocto-queue |
+| zustand | 5.0.16 | MIT | https://github.com/pmndrs/zustand |
 
 <!-- mobile-npm:end -->
 
