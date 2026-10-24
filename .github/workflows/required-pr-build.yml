@@ -1,4 +1,4 @@
-# Alpha-only organization ruleset workflow. GitHub loads this definition from
+# Mobile organization ruleset workflow. GitHub loads this definition from
 # protected main, so a PR cannot skip or rewrite its required result job.
 # Event filters are ignored for ruleset-triggered runs. The sentinel branch
 # avoids a second ordinary run for each PR after this file reaches main.
