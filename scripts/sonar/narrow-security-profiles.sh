@@ -36,7 +36,7 @@ if [[ -z "${SONAR_TOKEN:-}" ]]; then
   exit 1
 fi
 
-scurl() { curl --fail --silent --show-error -u "$(printf '%s:' "$SONAR_TOKEN")" "$@"; }
+scurl() { curl --fail --silent --show-error -u "${SONAR_TOKEN}:" "$@"; }
 
 total_deactivated=0
 

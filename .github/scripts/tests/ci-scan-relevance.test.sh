@@ -4,7 +4,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-TOPOLOGY_ROOT="$SCRIPT_DIR/fixtures/alpha-policy"
 HELPER="$REPO_ROOT/.github/scripts/ci-scan-relevance.mjs"
 POLICY="$REPO_ROOT/.github/ci/scan-relevance.yml"
 BUNDLE_SHA=ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
@@ -48,12 +47,10 @@ mkdir -p "$FIXTURE"
 git -C "$FIXTURE" init --quiet
 git -C "$FIXTURE" config user.name fixture
 git -C "$FIXTURE" config user.email fixture@example.invalid
-mkdir -p "$FIXTURE/docs" "$FIXTURE/services/control-plane/internal/example"
+mkdir -p "$FIXTURE/docs" "$FIXTURE/src/example"
 printf 'old doc\n' > "$FIXTURE/docs/relevance.md"
-printf 'old source\n' > "$FIXTURE/services/control-plane/internal/example/deleted.go"
-printf 'old source\n' > "$FIXTURE/services/control-plane/internal/example/renamed-out.go"
-mkdir -p "$FIXTURE/legacy/github"
-printf 'secret consumer fixture\n' > "$FIXTURE/legacy/github/secrets-hygiene.json"
+printf 'old source\n' > "$FIXTURE/src/example/deleted.ts"
+printf 'old source\n' > "$FIXTURE/src/example/renamed-out.ts"
 mkdir -p "$FIXTURE/.github/workflows" "$FIXTURE/.github/actions/obsolete"
 printf 'name: retired\n' > "$FIXTURE/.github/workflows/removed-consumer.yaml"
 printf 'name: retired\n' > "$FIXTURE/.github/actions/obsolete/action.yaml"
@@ -142,101 +139,16 @@ if (expectedText === 'all-scanners') {
   assert.equal(result.coverage_required.control_plane, true, `${label}: full Sonar coverage runs`);
   assert.equal(result.coverage_required.media_plane, true, `${label}: full Sonar coverage runs`);
   assert.equal(result.coverage_required.admin, true, `${label}: full Sonar coverage runs`);
-} else if (expectedText === 'broker-input') {
-  // Shared broker checks below assert component routing and reachable suite registration.
-} else if (expectedText === 'guard-input') {
-  // These cases pin a particular guard input without overconstraining unrelated scanners.
-} else if (expectedText === 'desktop-input') {
-  assert.equal(filters.desktop, 'true', `${label}: desktop test input selects the build`);
-  assert.equal(result.coverage_required.desktop, true, `${label}: desktop coverage is required`);
-} else if (expectedText === 'advisory-only') {
-  assert.equal(result.advisory.workflow_lint, true, `${label} reaches workflow-lint runner`);
-} else if (expectedText === 'eslint-false') {
-  assert.equal(result.selected.eslint, false, `${label} is ignored by the ESLint input matcher`);
-} else if (expectedText === 'dev-counts-only') {
-  // Assert the advisory family below; other scanners are intentionally orthogonal.
 } else {
   assert.deepEqual(Object.fromEntries(scanners.map(key => [key, result.selected[key]])), Object.fromEntries(scanners.map(key => [key, expected.has(key)])), `${label}: exact scanner selection`);
 }
-if (label === 'historical-docs') {
-  assert.equal(result.advisory.static_guards, false, 'docs-only PR does not select static guards');
-}
-if (label === 'apple-worker')
-  assert.deepEqual(result.workers, ['apple-sso-bridge'], 'one worker change selects only its worker');
-if (label === 'admin-lock')
-  assert.deepEqual(result.npm_workspaces, ['client/admin'], 'admin lockfile selects only its license workspace');
-if (label === 'admin-lock') assert.equal(result.license_go, false, 'npm manifest does not run Go attribution');
-if (label === 'license-tool-manifest' || label === 'license-tool-lock') {
-  assert.deepEqual(result.npm_workspaces, ['client/desktop', 'services/media-plane', 'client/admin'],
-    `${label}: license tool inputs select every npm license workspace`);
-  assert.equal(result.license_go, false, `${label}: tool dependency changes do not select Go attribution`);
-}
-if (label === 'notice')
-  assert.deepEqual(result.npm_workspaces, ['client/desktop', 'services/media-plane', 'client/admin'],
-    'NOTICE/policy changes select all npm workspaces in fixed order');
-if (label === 'notice') assert.equal(result.license_go, true, 'NOTICE selects Go and npm attribution');
-if (label === 'go-import-reachability')
-  assert.equal(result.license_go, true, 'Go call-site changes select runtime reachability attribution');
-if (label === 'go-only' || label === 'ts-only' || label === 'selfhost-docs') {
-  assert.equal(filters.selfhost, 'false', `${label} uses shared SaaS checks without the extra packaging fixtures`);
-  assert.equal(filters.selfhost_guard, 'false', `${label} does not select the advisory self-host guard`);
-  assert.equal(result.advisory.selfhost, false, `${label} does not schedule extra self-host fixtures`);
-}
-if (label === 'selfhost-packaging') {
-  assert.equal(filters.selfhost, 'true', 'public assembly changes select the unique self-host fixtures');
-  assert.equal(filters.selfhost_guard, 'true', 'public assembly changes select the advisory self-host guard');
-}
+// D: Alpha product/guard routing assertions remain in Concord-Voice/Concord-Voice-Alpha.
+
 if (label === 'docs-ordinary-push')
   assert.equal(result.selected.osv, false, 'ordinary docs push skips OSV');
 if (label === 'docs-hotfix-push' || label === 'docs-schedule')
   assert.equal(result.selected.osv, true, `${label} retains full OSV selection`);
-if (label.startsWith('guard-')) {
-  const family = label.startsWith('guard-dev-checks-desktop-')
-    ? 'dev_checks'
-    : label.startsWith('guard-secrets-contract-')
-      ? 'secrets_contract'
-      : label.slice('guard-'.length).replaceAll('-', '_');
-  assert.equal(result.advisory[family], true, `${family} implementation input selects its own guard`);
-  assert.equal(result.advisory.static_guards, true, `${family} selects the static-guards runner`);
-  if (family === 'secrets_contract')
-    assert.equal(filters.secrets_contract, 'true', `${label} matches the actual secrets contract policy`);
-}
-for (const [prefix, family] of [['feature-input-', 'feature_wiring'],
-                                ['roster-input-', 'review_contracts'],
-                                ['ioc-input-', 'native_ioc']]) {
-  if (label.startsWith(prefix)) {
-    assert.equal(result.advisory[family], true, `${label} selects ${family}`);
-    assert.equal(result.advisory.static_guards, true, `${label} starts static guards`);
-  }
-}
-if (label.startsWith('workflow-lint-source-'))
-  assert.equal(result.advisory.workflow_lint, true, `${label} reaches workflow-lint runner`);
-if (label === 'workflow-lint-only') {
-  assert.equal(result.advisory.workflow_lint, true, 'workflow-lint-only input selects the lint runner');
-  assert.equal(result.advisory.static_guards, false, 'workflow-lint selector alone does not start static guards');
-}
-if (label === 'go-toolchain-test-only')
-  assert.equal(result.advisory.go_toolchain, true, 'guard self-test changes select its family');
-if (label.startsWith('toolchain-input-'))
-  assert.equal(result.advisory.go_toolchain, true, `${label} runs the Go toolchain guard`);
-if (label === 'deployment-input-main-cd')
-  assert.equal(result.advisory.deployment, true, 'main-cd change runs deployment wiring guard');
-if (label === 'deployment-input-west-workflow') {
-  assert.equal(result.advisory.deployment, true, 'West workflow change selects deployment guard');
-  assert.equal(result.advisory.static_guards, true, 'West workflow change starts static guards');
-}
-if (label === 'deployment-input-fleet-helper') {
-  assert.equal(result.advisory.deployment, true, 'fleet helper change selects deployment guard');
-  assert.equal(result.advisory.static_guards, true, 'fleet helper change starts static guards');
-}
-if (label === 'deployment-input-provision-secrets') {
-  assert.equal(result.advisory.deployment, true, 'provision-secrets change selects deployment guard');
-  assert.equal(result.advisory.static_guards, true, 'provision-secrets change starts static guards');
-}
-if (label === 'catalog-input-dev-lifecycle')
-  assert.equal(result.advisory.review_contracts, true, 'skill change runs catalog discipline guard');
-if (label === 'spa-input-deploy-script')
-  assert.equal(filters.spa, 'true', 'SPA deploy script runs SPA dry run');
+
 NODE
 }
 run_transition_case() {
@@ -257,7 +169,7 @@ run_inventory_case() {
   local count="$1" path i
   reset_fixture
   for ((i = 1; i <= count; i++)); do
-    path="$FIXTURE/reference-documents/superpowers/inventory/file-$i.md"
+    path="$FIXTURE/docs/inventory/file-$i.md"
     mkdir -p "$(dirname "$path")"
     printf 'inventory %s\n' "$i" > "$path"
   done
@@ -273,129 +185,23 @@ if [[ ! -f "$POLICY" || ! -f "$HELPER" ]]; then
   exit 1
 fi
 
-# Matcher cases use the real dorny action against exact Git diffs. Expected scanner
-# keys are intentionally explicit so accidental broadening also fails.
-run_policy_case historical-docs semgrep_community \
-  reference-documents/superpowers/plans/2026-10-07-3587-pr-a1-contract-codec.md \
-  reference-documents/superpowers/plans/2026-10-07-3587-pr-a2-contract-verification.md \
-  reference-documents/superpowers/plans/2026-10-07-3587-pr0-migrationrunner.md \
-  reference-documents/superpowers/reports/2026-10-07-2553-account-root-authority-vendors.md \
-  reference-documents/superpowers/reports/2026-10-07-2553-key-custody-decision-brief.md \
-  reference-documents/superpowers/reports/2026-10-07-2553-recovery-sheet-decisions.md \
-  reference-documents/superpowers/reports/2026-10-07-2553-vendor-review.md \
-  reference-documents/superpowers/specs/2026-10-07-2553-account-key-authority-design-of-record.md
+# D: Alpha product, deployment, catalog and broker cases remain in Concord-Voice/Concord-Voice-Alpha.
+# Match Mobile's live policy using the pinned action and real Git diffs.
+run_policy_case historical-docs semgrep_community README.md
 run_policy_case docs-ordinary-push semgrep_community docs/ordinary.md
 run_policy_case docs-hotfix-push codeql_actions,codeql_go,codeql_js,eslint,govulncheck,osv,semgrep_custom,semgrep_community,semgrep_canary,sonar docs/hotfix.md
 run_policy_case docs-schedule codeql_actions,codeql_go,codeql_js,eslint,govulncheck,osv,semgrep_custom,semgrep_community,semgrep_canary,sonar docs/scheduled.md
-run_policy_case go-only codeql_go,govulncheck,osv,semgrep_custom,semgrep_community,sonar services/control-plane/internal/example/example.go
-run_policy_case ts-only codeql_js,eslint,semgrep_custom,semgrep_community,sonar client/desktop/src/renderer/example.ts
-run_policy_case selfhost-docs semgrep_community docs/self-hosting/example.md
-run_policy_case selfhost-packaging guard-input scripts/public-mirror/assemble.sh
-run_policy_case eslint-csp-prod-strip codeql_js,eslint,semgrep_custom,semgrep_community,sonar client/desktop/scripts/csp-prod-strip.ts
-run_policy_case ignored-desktop-functions eslint-false 'client/desktop/functions/assets/[[path]].js'
-run_policy_case admin-tsconfig codeql_js,semgrep_community,sonar client/admin/tsconfig.json
+run_policy_case mobile-ts codeql_js,eslint,semgrep_custom,semgrep_community src/example/example.ts
+run_policy_case mobile-manifest codeql_js,eslint,osv,semgrep_community package.json
 run_policy_case actions-only codeql_actions,codeql_js,semgrep_community,semgrep_canary .github/workflows/example.yml
-run_policy_case embedded-html codeql_go,codeql_js,govulncheck,semgrep_community,sonar services/control-plane/internal/email/templates/reset.html
-run_policy_case admin-html codeql_js,semgrep_community,sonar client/admin/index.html
-run_policy_case embedded-json codeql_js,semgrep_community,osv,sonar client/admin/package.json
-run_policy_case embedded-yaml codeql_js,codeql_actions,semgrep_community,semgrep_canary .github/workflows/reusable.yml
-run_policy_case desktop-manifest codeql_js,eslint,semgrep_community,sonar,osv client/desktop/package.json
-run_policy_case admin-manifest codeql_js,semgrep_community,sonar,osv client/admin/package-lock.json
-run_policy_case media-manifest codeql_js,semgrep_community,sonar,osv services/media-plane/package.json
-run_policy_case control-plane-manifest codeql_go,govulncheck,osv,semgrep_community,sonar services/control-plane/go.sum
-run_policy_case added-workspace codeql_js,semgrep_community,osv future-workspace/package.json
-run_policy_case sonar-config semgrep_community,sonar sonar-project.properties
-run_policy_case ignored-prototype '' prototypes/mobile-client/example.ts
 run_policy_case sbom codeql_js,osv,semgrep_community docs/inventory.cdx.json
 run_policy_case scanner-config codeql_js,semgrep_custom,semgrep_community,semgrep_canary .semgrep/rules/example.yml
-run_policy_case apple-worker codeql_js,semgrep_custom,semgrep_community legacy/cloudflare/workers/apple-sso-bridge/src/index.ts
-run_policy_case invite-worker codeql_js,semgrep_custom,semgrep_community legacy/cloudflare/workers/invite-landing/src/index.ts
-run_policy_case admin-lock codeql_js,semgrep_community,sonar,osv client/admin/package-lock.json
-tool_input_failures=0
-run_policy_case license-tool-manifest codeql_js,osv,semgrep_community .github/tools/license-checker/package.json || tool_input_failures=1
-run_policy_case license-tool-lock codeql_js,osv,semgrep_community .github/tools/license-checker/package-lock.json || tool_input_failures=1
-[[ "$tool_input_failures" -eq 0 ]] || exit 1
+run_policy_case license-tool-manifest codeql_js,osv,semgrep_community .github/tools/license-checker/package.json
+run_policy_case license-tool-lock codeql_js,osv,semgrep_community .github/tools/license-checker/package-lock.json
 run_policy_case notice semgrep_community NOTICE.md
-run_policy_case go-import-reachability codeql_go,govulncheck,osv,semgrep_custom,semgrep_community,sonar services/control-plane/internal/example/example.go
-run_policy_case go-toolchain-test-only semgrep_community scripts/test-check-go-toolchain.py
-run_policy_case guard-workflow-lint codeql_actions,codeql_go,codeql_js,eslint,govulncheck,osv,semgrep_custom,semgrep_community,semgrep_canary,sonar \
-  .github/workflows/ci-example.yml \
-  .github/scripts/tests/ci-scan-relevance.test.sh \
-  .github/scripts/ci-scan-relevance.mjs \
-  .github/ci/scan-relevance.yml
-run_policy_case workflow-lint-source-suite advisory-only .github/scripts/tests/ci-scan-relevance.test.sh
-run_policy_case workflow-lint-source-helper advisory-only .github/scripts/ci-scan-relevance.mjs
-run_policy_case workflow-lint-source-map advisory-only .github/ci/scan-relevance.yml
-run_policy_case workflow-lint-only advisory-only .github/scripts/workflow-lint-only.txt
-run_policy_case workflow-lint-legacy-changelog advisory-only CHANGELOG.md
-run_policy_case workflow-lint-legacy-script advisory-only scripts/lint-example.sh
-run_policy_case guard-go-toolchain semgrep_community scripts/check-go-toolchain.py scripts/test-check-go-toolchain.py
-run_policy_case toolchain-input-builder guard-input services/control-plane/Dockerfile
-run_policy_case toolchain-input-ops-builder guard-input services/control-plane/Dockerfile.ops-agent
-run_policy_case guard-openapi codeql_go,govulncheck,osv,semgrep_custom,semgrep_community,sonar scripts/api/check-openapi-coverage.sh services/control-plane/internal/stepup/openapi_contract_test.go
-run_policy_case guard-spa-env semgrep_community scripts/verify-spa-env.sh scripts/test-verify-spa-env.sh legacy/deploy/verify-spa-env.sh legacy/deploy/tests/test-verify-spa-env.sh
-run_policy_case guard-deployment semgrep_community scripts/check-compose-manifest-coverage.sh scripts/test-check-compose-manifest-coverage.sh
-run_policy_case deployment-input-main-cd guard-input .github/workflows/main-cd.yml
-run_policy_case deployment-input-west-workflow guard-input .github/workflows/deployment-access-west.yml
-run_policy_case deployment-input-fleet-helper guard-input .github/scripts/fleet_preflight.py
-run_policy_case deployment-input-provision-secrets guard-input .github/workflows/provision-secrets.yml
-run_policy_case guard-secrets-contract-catalog guard-input reference-documents/reference/secrets-catalog.json
-run_policy_case guard-secrets-contract-workflow-consumer guard-input .github/workflows/provision-secrets.yml
-run_policy_case guard-secrets-contract-composite-consumer guard-input .github/actions/release/action.yml
-run_policy_case guard-secrets-contract-generic-workflow-yml guard-input .github/workflows/unlisted-consumer.yml
-run_policy_case guard-secrets-contract-generic-workflow-yaml guard-input .github/workflows/unlisted-consumer.yaml
-run_policy_case guard-secrets-contract-generic-composite guard-input .github/actions/unlisted/action.yml
-run_delete_case guard-secrets-contract-deleted-workflow guard-input .github/workflows/removed-consumer.yaml
-run_delete_case guard-secrets-contract-deleted-composite guard-input .github/actions/obsolete/action.yaml
-run_delete_case guard-secrets-contract-deleted-consumer guard-input legacy/github/secrets-hygiene.json
-run_policy_case guard-selfhost semgrep_community scripts/tests/test-install-selfhost.sh scripts/install-selfhost.sh
-run_policy_case guard-feature-wiring semgrep_community scripts/check-feature-wiring.sh
-run_policy_case feature-input-provision guard-input .github/workflows/provision-secrets.yml
-run_policy_case feature-input-openapi guard-input docs/api/openapi.yaml
-run_policy_case feature-input-compose guard-input docker-compose.production.yml
-run_policy_case feature-input-primary-nginx guard-input legacy/deploy/nginx/concordvoice.conf
-run_policy_case feature-input-failover-nginx guard-input infrastructure/docker/nginx/nginx.conf
-run_policy_case feature-input-admin-nginx guard-input legacy/deploy/nginx/admin-console.conf.template
-run_policy_case guard-adr-numbers semgrep_community scripts/check-adr-numbers.sh scripts/test-check-adr-numbers.sh
-run_policy_case guard-secrets-contract semgrep_community scripts/check-provision-secrets-source.sh scripts/test-check-provision-secrets-source.sh
-run_policy_case guard-dispatch-trust semgrep_community .github/scripts/lint-pr-release-trust.sh
-run_policy_case guard-go-test-contracts semgrep_community scripts/check-no-unscoped-redis-flush.sh scripts/test-check-no-unscoped-redis-flush.sh
-run_policy_case guard-review-contracts semgrep_community scripts/check-review-dispositions.sh scripts/test-check-review-dispositions.sh
-run_policy_case roster-input-claude guard-input legacy-agent/repo-config.json
-run_policy_case roster-input-codex guard-input .codex/repo-config.json
-run_policy_case guard-tooling-mirrors semgrep_community scripts/sync-codex-tooling.py
-run_policy_case guard-graphify-contracts semgrep_community scripts/fetch-graphify-graph.sh scripts/test-fetch-graphify-graph.sh scripts/test-graphify-query-bootstrap.sh scripts/test-graphify-query-persistence.sh
-run_policy_case catalog-input-dev-lifecycle guard-input legacy-agent/skills/dev-lifecycle/SKILL.md
-run_policy_case guard-native-ioc semgrep_community scripts/check-native-ioc-gate.sh scripts/test-check-native-ioc-gate.sh
-run_policy_case ioc-input-main-ci guard-input .github/workflows/main-ci.yml
-run_policy_case verifier-gate all-scanners .github/scripts/verify-pr-scan-results.py
-run_policy_case wrapper-gate all-scanners .github/workflows/required-pr-build.yml
-run_policy_case workflow-lint-source-migration guard-input legacy/github/apply-alpha-scan-relevance.sh
-run_policy_case desktop-input-authority-vectors desktop-input services/control-plane/internal/authoritycontract/testdata/vectors.json
-run_policy_case desktop-input-vector-generator desktop-input scripts/authority-vectors/gen.mjs
-run_policy_case spa-input-deploy-script guard-input legacy/deploy/deploy-spa.sh
-python3 - "$TOPOLOGY_ROOT" <<'PY'
-import sys
-from pathlib import Path
-import yaml
-
-workflow = yaml.load((Path(sys.argv[1]) / '.github/workflows/pr-ci.yml').read_text(), Loader=yaml.BaseLoader)
-steps = workflow['jobs']['static-guards']['steps']
-catalog = next(step for step in steps if step.get('name') == 'Catalog/skill discipline regression tests')
-for family in ('graphify_contracts', 'review_contracts', 'tooling_mirrors'):
-    assert f'.advisory.{family}' in catalog['if'], f'catalog guard must run for {family} inputs'
-PY
-run_policy_case guard-sonar-profile semgrep_community,sonar scripts/sonar/check-narrowed-profile.sh scripts/sonar/test-check-narrowed-profile.sh
-run_policy_case guard-changelog semgrep_community .github/scripts/verify-changelog.sh .github/scripts/tests/verify-changelog.test.sh
-run_policy_case guard-dev-checks semgrep_community scripts/concord-dev.sh scripts/tests/test-concord-dev-args.sh
-run_policy_case guard-dev-checks-desktop-store dev-counts-only client/desktop/src/renderer/stores/countsFixture.ts
-run_policy_case guard-dev-checks-desktop-test dev-counts-only client/desktop/tests/unit/countsFixture.test.ts
-run_policy_case guard-dev-checks-desktop-src-test dev-counts-only client/desktop/src/renderer/components/countsFixture.test.tsx
-run_policy_case guard-dev-checks-desktop-theme dev-counts-only client/desktop/src/renderer/styles/index.css
-run_policy_case guard-dev-checks-desktop-package dev-counts-only client/desktop/package.json
-run_delete_case delete-in-scope codeql_go,govulncheck,osv,semgrep_custom,semgrep_community,sonar services/control-plane/internal/example/deleted.go
-run_transition_case rename-into-scope codeql_go,govulncheck,osv,semgrep_custom,semgrep_community,sonar docs/relevance.md services/control-plane/internal/example/renamed.go
-run_transition_case rename-out-scope codeql_go,govulncheck,osv,semgrep_custom,semgrep_community,sonar services/control-plane/internal/example/renamed-out.go docs/renamed.md
+run_delete_case delete-in-scope codeql_js,eslint,semgrep_custom,semgrep_community src/example/deleted.ts
+run_transition_case rename-into-scope codeql_js,eslint,semgrep_custom,semgrep_community docs/relevance.md src/example/renamed.ts
+run_transition_case rename-out-scope codeql_js,eslint,semgrep_custom,semgrep_community src/example/renamed-out.ts docs/renamed.md
 run_inventory_case 301
 run_inventory_case 3000
 run_inventory_case 3001
@@ -621,14 +427,10 @@ const docsMatrix = JSON.parse(selected({ ...outputs, semgrep_community: 'true' }
 assert.deepEqual(docsMatrix, { include: [] }, 'docs-only scans allocate no CodeQL leg');
 
 const fs = await import('node:fs');
-for (const [filename, key] of [['go-only', 'codeql_go'], ['historical-docs', 'semgrep_community'],
-  ['sonar-config', 'sonar_force_all']]) {
-  const emitted = JSON.parse(fs.readFileSync(`${selectionDir}/${filename}.selection.json`, 'utf8'));
-  assert.equal(emitted.known, true, `${filename} selection is known`);
-  assert.equal(emitted.selected[key], true, `${filename} emitted selection contains ${key}`);
-}
-const emittedSonar = JSON.parse(fs.readFileSync(`${selectionDir}/sonar-config.selection.json`, 'utf8'));
-assert.deepEqual(emittedSonar.coverage_required, allCoverage, 'emitted Sonar config requires all four suites');
+const emitted = JSON.parse(fs.readFileSync(`${selectionDir}/mobile-ts.selection.json`, 'utf8'));
+assert.equal(emitted.known, true, 'Mobile source selection is known');
+assert.equal(emitted.selected.eslint, true, 'Mobile source selects ESLint');
+assert.equal(emitted.selected.sonar, false, 'Mobile has no Sonar lane');
 console.log(`PASS: ${ANALYSIS_KEYS.length} analysis keys; historical, boundary, error, and legacy contracts`);
 NODE
 
@@ -636,147 +438,4 @@ NODE
 grep -qF "$BUNDLE_SHA" "$REPO_ROOT/.github/workflows/pr-ci.yml"
 
 
-# Regression for #2624: the shared native broker is executed by both workspaces.
-run_policy_case broker-shared-vector broker-input services/control-plane/internal/voicecommand/testdata/envelopes.json
-run_policy_case broker-unrelated-doc broker-input reference-documents/ci/nats-resolver-unrelated.md
-run_policy_case broker-resolver broker-input scripts/test-tools/nats-server.sh
-run_policy_case broker-contract-suite broker-input scripts/test-nats-server-bootstrap.sh
-broker_routing_status=0
-node --input-type=module - "$TASK_TMP" <<'NODE' || broker_routing_status=$?
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { test } from 'node:test';
-const dir = process.argv[2];
-const keys = ['control_plane', 'media_plane_tests'];
-const actual = async label => {
-  const lines = (await readFile(`${dir}/${label}.dorny-output`, 'utf8')).split(/\r?\n/);
-  const filters = {};
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^([a-z0-9_]+)<<(.+)$/);
-    if (match && ['true', 'false'].includes(lines[i + 1])) filters[match[1]] = lines[i + 1];
-  }
-  assert.equal(filters.all_changed, 'true', `${label}: actual changed path reaches the matcher`);
-  for (const key of keys) assert.ok(['true', 'false'].includes(filters[key]), `${label}: matcher emits ${key}`);
-  return filters;
-};
-const shared = await actual('broker-shared-vector');
-const unrelated = await actual('broker-unrelated-doc');
-const resolver = await actual('broker-resolver');
-await test('shared voice-command fixture selects both workspaces (positive control)', () => {
-  assert.deepEqual(keys.map(key => shared[key]), ['true', 'true']);
-});
-await test('unrelated documentation selects neither broker consumer (negative control)', () => {
-  assert.deepEqual(keys.map(key => unrelated[key]), ['false', 'false']);
-});
-for (const key of keys) await test(`native NATS resolver change selects ${key} (#2624)`, () => {
-  assert.equal(resolver[key], 'true', `shared NATS resolver must select ${key}`);
-});
-const selected = JSON.parse(await readFile(`${dir}/broker-resolver.selection.json`, 'utf8'));
-for (const key of ['control_plane', 'media_plane']) await test(`native NATS resolver change requires ${key} coverage (#2624)`, () => {
-  assert.equal(selected.coverage_required[key], true, `shared NATS resolver must require ${key} coverage`);
-});
-NODE
-
-broker_registration_status=0
-python3 - "$TOPOLOGY_ROOT" "$TASK_TMP" <<'PY' || broker_registration_status=$?
-# Reuse the repository's supported command/enforcement recognisers. A filename
-# in prose, echo, an uncalled function, or a heredoc is not a registration edge.
-import ast
-import json
-import re
-import shlex
-import sys
-from pathlib import Path
-import yaml
-
-root, evidence = Path(sys.argv[1]), Path(sys.argv[2])
-library_path = root / '.github/scripts/lint_test_suite_wiring.py'
-module = ast.parse(library_path.read_text(), filename=str(library_path))
-cut = next(i for i, node in enumerate(module.body) if isinstance(node, ast.Assign)
-           and any(isinstance(target, ast.Name) and target.id == 'suites' for target in node.targets))
-library = {}
-exec(compile(ast.Module(body=module.body[:cut], type_ignores=[]), str(library_path), 'exec'), library)
-
-scripts = {str(path.relative_to(root)): path.read_text()
-           for pattern in ('.github/scripts/*.sh', '.github/scripts/tests/*.test.sh', 'scripts/*.sh')
-           for path in root.glob(pattern)}
-workflow = yaml.safe_load((root / '.github/workflows/pr-ci.yml').read_text())
-pc = yaml.safe_load((root / '.pre-commit-config.yaml').read_text())
-
-
-def invokes(body, path, shell=None):
-    library['SUITE_DIR'] = str(Path(path).parent)
-    return library['invokes'](body, Path(path).name) and not library['swallows_failure'](body, Path(path).name, shell)
-
-
-def reaches(body, target, shell=None, seen=None):
-    if invokes(body, target, shell):
-        return True
-    seen = set() if seen is None else seen
-    for path, source in scripts.items():
-        if path not in seen and path in body and invokes(body, path, shell):
-            seen.add(path)
-            if reaches(source, target, 'bash', seen):
-                return True
-    return False
-
-
-def selected(condition, selection):
-    condition = str(condition or '')
-    if library['statically_false'](condition) or library['event_conjunct_excludes_pr'](condition):
-        return False
-    families = re.findall(r'\.advisory\.([a-z_]+)', condition)
-    return not families or any(selection['advisory'].get(family, False) for family in families)
-
-
-def registered(target, changed, selection):
-    # These ordinary PR quality jobs execute checked-out head scripts. This does
-    # not claim that an edited reusable workflow ran under the protected pin.
-    for name in ('workflow-lint', 'static-guards'):
-        job = workflow['jobs'][name]
-        if job.get('continue-on-error') or not selected(job.get('if'), selection):
-            continue
-        for step in job['steps']:
-            if not step.get('continue-on-error') and selected(step.get('if'), selection):
-                if reaches(step.get('run', ''), target, library['resolve_shell'](workflow, job, step)):
-                    return True
-    for repo in pc['repos']:
-        for hook in repo['hooks']:
-            entry = str(hook.get('entry', ''))
-            # pre-commit execs argv directly; shell operators in entry are data.
-            if any(word in {';', '&&', '||', '|', '&'} for word in shlex.split(entry)):
-                continue
-            stages = hook.get('stages', pc.get('default_stages', ['pre-commit']))
-            if not any(stage in stages for stage in ('commit', 'pre-commit')):
-                continue
-            if any(hook.get(key) for key in ('types', 'types_or', 'exclude_types')):
-                continue  # This focused check certifies only unrestricted shell hooks.
-            includes = [str(node['files']) for node in (pc, hook) if node.get('files')]
-            excludes = [str(node['exclude']) for node in (pc, hook) if node.get('exclude')]
-            if all(re.search(pattern, changed) for pattern in includes) and not any(re.search(pattern, changed) for pattern in excludes):
-                if reaches(entry, target, 'bash'):
-                    return True
-    return False
-
-
-suite = 'scripts/test-nats-server-bootstrap.sh'
-assert (root / suite).is_file(), 'contract-suite fixture is a real repository file'
-assert (root / 'scripts/test-tools/nats-server.sh').is_file(), 'resolver fixture is a real repository file'
-assert (root / 'services/control-plane/internal/voicecommand/testdata/envelopes.json').is_file(), 'shared-vector control is a real repository file'
-assert invokes(f'bash {suite}', suite), 'supported shell invocation is recognised (positive control)'
-for mention in (f'echo {suite}', f'bash -n {suite}', f'# bash {suite}', f"cat <<'TEXT'\nbash {suite}\nTEXT"):
-    assert not invokes(mention, suite), f'mere mention cannot register the contract suite: {mention}'
-control = json.loads((evidence / 'workflow-lint-source-suite.selection.json').read_text())
-assert registered('.github/scripts/tests/ci-scan-relevance.test.sh', '.github/scripts/tests/ci-scan-relevance.test.sh', control), 'actual CI selector suite is registered (positive control)'
-print('PASS: actual quality-check registration and invocation-vs-mention controls')
-failures = []
-for label, changed in (('broker-resolver', 'scripts/test-tools/nats-server.sh'), ('broker-contract-suite', suite)):
-    selection = json.loads((evidence / f'{label}.selection.json').read_text())
-    assert selection['known'] is True, 'matching relevance is based on validated actual matcher output'
-    if not registered(suite, changed, selection):
-        failures.append(f'hermetic NATS acquisition/cache/cleanup contract suite must be registered for {changed}')
-for failure in failures:
-    print(f'RED: {failure}')
-assert not failures, '; '.join(failures)
-PY
-[[ "$broker_routing_status" -eq 0 && "$broker_registration_status" -eq 0 ]]
+# D: native broker routing/registration remains in Concord-Voice/Concord-Voice-Alpha.

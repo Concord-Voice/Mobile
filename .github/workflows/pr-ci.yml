@@ -159,8 +159,6 @@ jobs:
       dev-stack: ${{ steps.filter.outputs.dev_stack }}
       # gates native-audiocap.yml (ADR-0043)
       native: ${{ steps.filter.outputs.native }}
-      # gates the managed-firewall job
-      managed-firewall: ${{ steps.firewall-filter.outputs.managed_firewall }}
       # gates the golangci-lint job
       go-lint: ${{ steps.filter.outputs.go_lint }}
       scan-known: ${{ steps.mobile-selection.outputs.known }}
@@ -244,23 +242,7 @@ jobs:
         with:
           filters: ${{ inputs.trusted-source && 'policy/.github/ci/scan-relevance.yml' || '.github/ci/scan-relevance.yml' }}
           predicate-quantifier: some-with-excludes
-      # Exactly what the managed firewall fixture suite reads. It stays out of
-      # scan-relevance.yml: every key there is part of the protected scanner
-      # selection contract, and a key the protected base does not know yet
-      # turns the whole selection unknown. pr-ci.yml is left out on purpose,
-      # so CI-only edits do not run the suite. The pre-commit hook triggers on
-      # more files because it also runs the caller and RTC parity suites,
-      # which stay in static-guards.
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: firewall-filter
-        if: ${{ !inputs.enforcement-only }}
-        with:
-          filters: |
-            managed_firewall:
-              - 'infrastructure/docker/iptables/**'
-              - 'legacy/deploy/tests/managed_firewall_fixture.py'
-              - 'legacy/deploy/tests/managed_firewall_fake.py'
-              - 'legacy/deploy/tests/test-managed-firewall.sh'
+      # D: managed firewall routing remains in Concord-Voice/Concord-Voice-Alpha.
       - name: Compose protected scan selection
         id: selection
         env:
@@ -441,6 +423,33 @@ jobs:
               for name, value in (('selection', selection), ('jobs', jobs), ('coverage-uploads', coverage)):
                   stream.write(f'{name}={json.dumps(value, separators=(",", ":"))}\n')
           PY
+
+  # N: app checks accepted by Mark on 2026-10-24; Alpha had no Mobile app CI.
+  app-checks:
+    name: Mobile tests, lint and typecheck
+    needs: [ioc]
+    if: ${{ !inputs.enforcement-only }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
 
   workflow-lint:
     name: Workflow lint and scanner contracts

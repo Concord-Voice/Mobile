@@ -52,14 +52,11 @@ const DEPENDABOT = '.github/dependabot.yml';
 // break all nine ignore-rule cases on first run: minimal fixtures declared one npm
 // directory while this list named five, so `stale` fired on every case. Deriving
 // means a sixth workspace never breaks the suite — and never silently un-tests it.
+// D: desktop, server and worker workspaces remain in Concord-Voice/Concord-Voice-Alpha.
 export const WORKSPACES = [
+  '.',
   '.github/tools/license-checker',
-  'client/desktop',
-  'client/admin',
-  'services/media-plane',
-  'legacy/cloudflare/workers/apple-sso-bridge',
-  'legacy/cloudflare/workers/invite-landing',
-  'dev-tooling/concord-bridge',
+  '.github/tools/eslint-formatter',
 ];
 const REQUIRED = ['kind', 'ecosystem', 'workspace', 'package', 'pinned', 'reason', 'review_by'];
 const KINDS = new Set(['exact-pin', 'held-back']);
@@ -220,7 +217,7 @@ function updateBlocks(doc) {
 // No String() coercion: `updateBlocks` guarantees a non-empty string, and the
 // coercion is precisely what turned `directories: [null]` into the directory
 // "null". A type guarantee that is enforced upstream should not be re-faked here.
-const normDir = (d) => d.replace(/^\/+/, '').replace(/\/+$/, '');
+const normDir = (d) => d.replace(/^\/+/, '').replace(/\/+$/, '') || '.';
 
 /**
  * Every directory a block names, whichever key spells it.

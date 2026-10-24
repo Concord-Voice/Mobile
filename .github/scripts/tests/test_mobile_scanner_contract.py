@@ -46,8 +46,12 @@ class MobileScannerContract(unittest.TestCase):
         self.assertIs(json.loads(result['selection'])['known'], False)
 
     def test_installing_jobs_depend_on_ioc_and_no_app_build_is_fabricated(self):
-        for name in ('semgrep', 'eslint', 'secret-scanning', 'workflow-lint'):
+        for name in ('semgrep', 'eslint', 'secret-scanning', 'workflow-lint', 'app-checks'):
             self.assertIn('ioc', WORKFLOW['jobs'][name]['needs'], name)
+        app = WORKFLOW['jobs']['app-checks']
+        self.assertEqual([step['run'] for step in app['steps'] if 'run' in step],
+                         ['npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
+        self.assertEqual(app['permissions'], {'contents': 'read'})
         self.assertNotIn('build', WORKFLOW['jobs'])
         report = next(s for s in WORKFLOW['jobs']['report']['steps'] if s.get('id') == 'report')
         self.assertIn("'ioc': os.environ['IOC_RESULT']", report['run'])

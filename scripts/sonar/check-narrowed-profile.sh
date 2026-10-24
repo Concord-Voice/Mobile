@@ -54,7 +54,7 @@ fi
 # Mirror narrow-security-profiles.sh's scurl helper: curl --fail with token auth.
 # --fail makes curl exit non-zero on HTTP >= 400; under `set -e` that aborts the
 # script. We trap that to emit an operational error (exit 3), distinct from drift.
-scurl() { curl --fail --silent --show-error -u "$(printf '%s:' "$SONAR_TOKEN")" "$@"; }
+scurl() { curl --fail --silent --show-error -u "${SONAR_TOKEN}:" "$@"; }
 
 # op_fail <message>: operational error — HTTP/API/parse failure, NOT drift.
 op_fail() {
