@@ -322,7 +322,10 @@ describe('ConcordApi', () => {
       'POST /auth/ws-ticket': () => [401, { code: 'token_expired' }],
     });
     await api.login('e', 'p');
+    const expired = jest.fn();
+    api.onExpired = expired;
     await expect(api.wsTicket()).rejects.toMatchObject({ status: 401 });
+    expect(expired).toHaveBeenCalledTimes(1);
     expect(() => api.userId).toThrow('Not signed in');
     await expect(api.refresh()).rejects.toThrow('Not signed in');
   });

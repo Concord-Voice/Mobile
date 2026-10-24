@@ -4,12 +4,14 @@ import { createSessionStore, describeError } from '../state/session';
 jest.mock('../ConcordCrypto', () => ({
   unlockIdentity: jest.fn(async () => 'HANDLE'),
   releaseAll: jest.fn(async () => {}),
+  releaseKey: jest.fn(async () => {}),
   nativeErrorCode: (e: unknown) =>
     (e as { code?: string } | null)?.code ?? null,
 }));
 const crypto = jest.requireMock('../ConcordCrypto') as {
   unlockIdentity: jest.Mock;
   releaseAll: jest.Mock;
+  releaseKey: jest.Mock;
 };
 
 const KEYS = {
@@ -21,6 +23,7 @@ const KEYS = {
 function fakeApi(overrides: Partial<Record<string, jest.Mock>> = {}) {
   const api = {
     userId: 'user-1',
+    onExpired: null as (() => void) | null,
     login: jest.fn(async () => ({ kind: 'signed_in', keys: KEYS })),
     verifyMfa: jest.fn(async () => KEYS),
     sendMfaEmail: jest.fn(async () => {}),
@@ -142,6 +145,40 @@ describe('session store', () => {
       stage: { kind: 'signed_out' },
       api: null,
       identity: null,
+    });
+  });
+
+  it('drops a key that finishes unlocking after sign-out', async () => {
+    let unlock!: (handle: string) => void;
+    crypto.unlockIdentity.mockReturnValueOnce(
+      new Promise(resolve => {
+        unlock = resolve;
+      }),
+    );
+    const { useStore } = store(fakeApi());
+    const signingIn = useStore.getState().signIn('https://c.test', 'm', 'pw');
+    await new Promise(setImmediate);
+    await useStore.getState().signOut();
+    unlock('LATE');
+    await signingIn;
+    expect(crypto.releaseKey).toHaveBeenCalledWith('LATE');
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      identity: null,
+    });
+  });
+
+  it('returns to sign-in when the server ends the session', async () => {
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    api.onExpired?.();
+    expect(crypto.releaseAll).toHaveBeenCalled();
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      api: null,
+      identity: null,
+      error: 'Your session ended. Log in again.',
     });
   });
 });

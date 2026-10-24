@@ -3,6 +3,7 @@ import {
   type KeyHandle,
   nativeErrorCode,
   releaseAll,
+  releaseKey,
   unlockIdentity,
 } from '../ConcordCrypto';
 import {
@@ -99,9 +100,15 @@ export function createSessionStore(
         );
       } catch (error) {
         // Without the key the app is useless, so the fresh server session goes too.
+        if (get().api !== api) return;
         await api.logout().catch(() => {});
         set({ stage: { kind: 'signed_out' }, api: null });
         throw error;
+      }
+      // Signed out (or signed in elsewhere) while unlocking: drop this key.
+      if (get().api !== api) {
+        await Promise.allSettled([releaseKey(identity), api.logout()]);
+        return;
       }
       set({ identity, stage: { kind: 'signed_in', userId: api.userId } });
     };
@@ -119,8 +126,20 @@ export function createSessionStore(
             server.trim().replace(/\/+$/, ''),
             newMachineId(),
           );
+          api.onExpired = () => {
+            if (get().api !== api) return;
+            pendingPassword = null;
+            set({
+              stage: { kind: 'signed_out' },
+              api: null,
+              identity: null,
+              error: 'Your session ended. Log in again.',
+            });
+            releaseAll().catch(() => {});
+          };
           set({ api });
           const result = await api.login(email.trim(), password);
+          if (get().api !== api) return api.logout().catch(() => {});
           if (result.kind === 'mfa') {
             pendingPassword = password;
             set({
@@ -145,14 +164,16 @@ export function createSessionStore(
       verifyMfa: (method, code) =>
         run(async () => {
           const { api, stage } = get();
-          if (!api || stage.kind !== 'mfa' || pendingPassword === null)
+          const password = pendingPassword;
+          if (!api || stage.kind !== 'mfa' || password === null)
             throw new Error('No MFA challenge');
           const keys = await api.verifyMfa(
             stage.challengeToken,
             method,
             code.trim(),
           );
-          await finish(api, keys, pendingPassword);
+          if (get().api !== api) return api.logout().catch(() => {});
+          await finish(api, keys, password);
         }),
 
       signOut: async () => {

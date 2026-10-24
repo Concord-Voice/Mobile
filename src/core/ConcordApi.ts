@@ -72,6 +72,8 @@ function text(value: unknown): string {
 export class ConcordApi {
   private session: Session | null = null;
   private readonly base: string;
+  /** Called when the server refuses a rotation and the session ends on its own. */
+  onExpired: (() => void) | null = null;
 
   constructor(
     base: string,
@@ -201,8 +203,10 @@ export class ConcordApi {
               error instanceof ApiError &&
               error.status === 401 &&
               this.session === current
-            )
+            ) {
               this.session = null;
+              this.onExpired?.();
+            }
             throw error;
           },
         )
