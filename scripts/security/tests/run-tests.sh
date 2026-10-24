@@ -838,6 +838,67 @@ test_ioc_refresh_guard_unsorted_body_fails() {
     || { echo "expected sortedness reason, got: $output" >&2; return 1; }
 }
 
+# Real npm v2/v3 metadata, including updates and nested/aliased packages.
+test_subcheck3_npm_install_metadata() {
+  local tmpdir; tmpdir=$(setup_test_repo)
+  trap "rm -rf $tmpdir" RETURN
+  cd "$tmpdir"
+  python3 - "$SCANNER" <<'PYTEST'
+import copy, json, os, pathlib, subprocess, sys
+scanner = sys.argv[1]
+lock = pathlib.Path('package-lock.json')
+entry = {'version': '1.0.0', 'hasInstallScript': True}
+for version in (2, 3):
+    for scenario in ('added', 'unchanged', 'upgrade', 'nested', 'alias', 'enabled', 'removed', 'absent'):
+        base = {'node_modules/example-package': copy.deepcopy(entry)}
+        head = copy.deepcopy(base)
+        expected = True
+        if scenario == 'added':
+            base = {}
+        elif scenario == 'unchanged':
+            expected = False
+        elif scenario == 'upgrade':
+            head['node_modules/example-package']['version'] = '2.0.0'
+        elif scenario == 'nested':
+            head['node_modules/parent/node_modules/example-package'] = copy.deepcopy(entry)
+        elif scenario == 'alias':
+            base = {}
+            head = {'node_modules/alias': {**entry, 'name': '@scope/real-package'}}
+        elif scenario == 'enabled':
+            base['node_modules/example-package']['hasInstallScript'] = False
+        elif scenario == 'removed':
+            head['node_modules/example-package'].pop('hasInstallScript')
+            expected = False
+        elif scenario == 'absent':
+            base = {}
+            head['node_modules/example-package'].pop('hasInstallScript')
+            expected = False
+        def write(packages):
+            lock.write_text(json.dumps({'name': 'fixture', 'lockfileVersion': version,
+                                        'packages': {'': {'name': 'fixture'}, **packages}}))
+        write(base)
+        subprocess.run(['git', 'add', 'package-lock.json'], check=True)
+        subprocess.run(['git', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty',
+                        '-m', 'npm metadata base'], check=True)
+        write(head)
+        run = subprocess.run([scanner, '--lockfile-only'], capture_output=True, text=True,
+                             env={**os.environ, 'IOC_DIFF_BASE': 'HEAD'})
+        assert run.returncode == 0, (scenario, run.stderr)
+        warnings = [line for line in run.stdout.splitlines() if '[WARN] New install script:' in line]
+        assert len(warnings) == int(expected), (version, scenario, run.stdout)
+        if expected:
+            assert 'hasInstallScript = true' in warnings[0], warnings
+            assert 'command)' in warnings[0], warnings
+        if scenario == 'upgrade':
+            assert 'example-package@2.0.0' in warnings[0], warnings
+        if scenario == 'nested':
+            assert 'node_modules/parent/node_modules/example-package' in warnings[0], warnings
+        if scenario == 'alias':
+            assert '@scope/real-package@1.0.0' in warnings[0], warnings
+print('npm v2/v3: 16 install-metadata cases passed')
+PYTEST
+}
+
 # ── Entry point ────────────────────────────────────────────────────────────
 echo "Running supply-chain scanner tests..."
 echo ""

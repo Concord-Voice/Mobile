@@ -477,7 +477,7 @@ are components of the same MIT-licensed React Native distribution.
 | React Native and its React/RCT bridge pods | 0.87.1 | MIT | https://github.com/facebook/react-native |
 | ReactNativeDependencies | 0.87.1 | MIT wrapper; component licenses below | https://github.com/facebook/react-native |
 | Boost | 1.84.0 | BSL-1.0 | https://www.boost.org/LICENSE_1_0.txt |
-| DoubleConversion | 1.1.6 | MIT | https://github.com/google/double-conversion |
+| DoubleConversion | 1.1.6 | BSD-3-Clause | https://github.com/google/double-conversion/blob/v1.1.6/LICENSE |
 | fast_float | 8.0.0 | MIT | https://github.com/fastfloat/fast_float |
 | fmt | 12.1.0 | MIT | https://github.com/fmtlib/fmt |
 | glog | 0.3.5 | BSD-3-Clause | https://github.com/google/glog |
@@ -601,7 +601,7 @@ in addition to the Maven wrapper's license.
 | Native component | Android catalog version | License | Source |
 | --- | --- | --- | --- |
 | Boost | 1.83.0 | BSL-1.0 | https://www.boost.org/LICENSE_1_0.txt |
-| DoubleConversion | 1.1.6 | MIT | https://github.com/google/double-conversion |
+| DoubleConversion | 1.1.6 | BSD-3-Clause | https://github.com/google/double-conversion/blob/v1.1.6/LICENSE |
 | fast_float | 8.0.0 | MIT | https://github.com/fastfloat/fast_float |
 | fmt | 12.1.0 | MIT | https://github.com/fmtlib/fmt |
 | Folly | 2024.11.18.00 | Apache-2.0 | https://github.com/facebook/folly |

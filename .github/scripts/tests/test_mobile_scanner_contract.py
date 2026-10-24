@@ -58,6 +58,51 @@ class MobileScannerContract(unittest.TestCase):
         self.assertNotIn("'build':", report['run'])
         self.assertNotIn('SONAR_TOKEN', json.dumps(WORKFLOW))
 
+    def test_default_branch_scanners_run_after_ioc(self):
+        baseline = yaml.load((ROOT / '.github/workflows/scanner-baseline.yml').read_text(),
+                             Loader=yaml.BaseLoader)
+        self.assertEqual(baseline['on']['push']['branches'], ['main'])
+        self.assertTrue(baseline['on']['schedule'][0]['cron'])
+        self.assertEqual(baseline['concurrency']['cancel-in-progress'], 'false')
+        for name in ('codeql', 'scorecard'):
+            job = baseline['jobs'][name]
+            self.assertEqual(job['needs'], ['ioc'])
+            self.assertNotIn('if', job, 'IOC failure must use the default skip behavior')
+            self.assertEqual(job['uses'], f'./.github/workflows/{name}.yml')
+        self.assertNotIn('secrets', json.dumps(baseline))
+
+    def test_protected_owner_requires_mobile_repository_and_main(self):
+        step = next(s for s in WORKFLOW['jobs']['detect-changes']['steps']
+                    if s.get('id') == 'protected-owner')
+        cases = [
+            ({'repository_id': 1359565586, 'ref': 'main'}, True),
+            ({'repository_id': 1359565586, 'ref': 'refs/heads/main'}, True),
+            ({'repository_id': 1158152129, 'ref': 'main'}, False),
+            ({'repository_id': 1359565586, 'ref': 'refs/tags/main'}, False),
+            ({'repository_id': 1359565586, 'ref': 'main', 'sha': 'a' * 40}, False),
+        ]
+        for rule, expected in cases:
+            with self.subTest(rule=rule), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                output = directory / 'output'
+                rule['path'] = '.github/workflows/required-pr-build.yml'
+                (directory / 'rules.json').write_text(json.dumps([
+                    {'type': 'workflows', 'parameters': {'workflows': [rule]}}]))
+                gh = directory / 'gh'
+                gh.write_text('#!/bin/sh\ncat "$RUNNER_TEMP/rules.json"\n')
+                gh.chmod(0o755)
+                run = subprocess.run(['bash', '-e', '-c', step['run']], check=False,
+                                     env={**os.environ, 'PATH': temp + os.pathsep + os.environ['PATH'],
+                                          'RUNNER_TEMP': temp, 'GITHUB_OUTPUT': str(output),
+                                          'GITHUB_REPOSITORY': 'Concord-Voice/Mobile',
+                                          'MODE': 'required-full',
+                                          'SELECTION': json.dumps({'known': True, 'hotfix': False,
+                                                                   'mode': 'required-full'})},
+                                     capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                self.assertEqual(values['confirmed'], str(expected).lower())
+
 
 if __name__ == '__main__':
     unittest.main()

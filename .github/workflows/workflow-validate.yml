@@ -6,9 +6,11 @@ name: Workflow Validate
 # Trust contract: ../../reference-documents/superpowers/specs/2026-10-02-3569-trusted-workflow-validation-design.md.
 # Failure patterns consulted: ../../reference-documents/reference/workflow-failure-patterns.md (P2/P3/P5/P14).
 
+# Validate same-repo revisions directly: GITHUB_TOKEN-applied labels cannot
+# trigger another workflow. The trusted helper emits no comment for non-workflow changes.
 on:
   pull_request_target:
-    types: [labeled, synchronize]
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
 
 permissions:
@@ -51,7 +53,7 @@ jobs:
     name: Analyze changed workflows
     if: |
       github.event.pull_request.base.ref == 'main'
-      && contains(github.event.pull_request.labels.*.name, 'workflow-validation: dispatch')
+      && (github.event.action != 'labeled' || github.event.label.name == 'workflow-validation: dispatch')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10

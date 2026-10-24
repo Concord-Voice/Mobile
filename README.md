@@ -51,3 +51,5 @@ accounts can unlock; a legacy key-derivation account is refused with a distinct 
 Scanner workflows are ported from Alpha. The IOC-gated app checks run `npm ci`,
 `npm test`, `npm run lint` and `npm run typecheck` on pull requests. This new CI
 job was accepted on 2026-10-24; Alpha had no Mobile app-level CI.
+
+IOC-gated CodeQL and Scorecard scans also run on pushes to `main` and daily.

@@ -312,13 +312,16 @@ def need(ok, message):
     if not ok: errors.append(message)
 events = doc.get('on', {}); event = events.get('pull_request_target', {})
 need(bool(event), 'requires pull_request_target')
-need(event.get('types') == ['labeled', 'synchronize'], 'preserves labeled/synchronize events')
+need(event.get('types') == ['opened', 'synchronize', 'reopened', 'labeled'],
+     'validates initial and subsequent revisions without relying on automatic labels')
 need(event.get('branches') == ['main'], 'restricts event to main base')
 jobs = doc.get('jobs', {}); analysis = jobs.get('analyze-changed-workflows', {}); fork = jobs.get('notify-fork-pr', {})
 need("github.event.pull_request.base.ref == 'main'" in analysis.get('if', ''), 'analysis explicitly gates base ref')
 need("github.event.pull_request.head.repo.full_name == github.repository" in analysis.get('if', ''), 'analysis is same-repository only')
-need("contains(github.event.pull_request.labels.*.name, 'workflow-validation: dispatch')" in analysis.get('if', ''),
-     'analysis retains the workflow-validation label gate')
+need("github.event.action != 'labeled' || github.event.label.name == 'workflow-validation: dispatch'" in analysis.get('if', ''),
+     'unlabeled revision events run; explicit label events are scoped')
+need("pull_request.labels" not in analysis.get('if', ''),
+     'automatic-label timing cannot suppress revision analysis')
 need("github.event.pull_request.base.ref == 'main'" in fork.get('if', ''), 'fork notice explicitly gates base ref')
 need("contains(github.event.pull_request.labels.*.name, 'workflow-validation: dispatch')" in fork.get('if', ''),
      'fork notice retains the workflow-validation label gate')

@@ -1,19 +1,8 @@
-# ESLint → SARIF → Code Scanning (ADR-0017 End-state A, #1425).
-# Runs the workspace's pinned ESLint 10 flat config (client/desktop/
-# eslint.config.mjs) with the EXACT same scope as `npm run lint`
-# (`eslint . --ignore-pattern 'tests/**'`) so CI findings always match
-# local runs, then uploads SARIF under category `eslint`.
-# push:main upload included so Code Scanning computes new-vs-existing
-# alert deltas for PRs (full-tree scan, unlike Semgrep's baseline diff).
-# No path filter: the code_scanning gate (A8/#1431) expects per-tool
-# analyses on every PR; a filtered tool starves the rule on non-frontend PRs.
+# Mobile ESLint 8 / React Native configuration -> SARIF -> Code Scanning.
+# Uses the root app's npm lint scope and a separate pinned SARIF formatter.
+# Called by pr-ci.yml after IOC; this file has no default-branch caller.
 name: ESLint SARIF
 
-# PR leg invoked by pr-ci.yml with `needs: ioc` (ADR-0018 IOC-first, #1476)
-# — the npm ci below must not race the supply-chain verdict. The push leg
-# stays in-file until main-ci.yml (#1477) takes it over.
-# push:main leg moved to main-ci.yml (#1477); concurrency lives at the
-# orchestrators (main-ci queues, never cancels a baseline upload).
 on:
   workflow_call:
     inputs:
@@ -57,7 +46,7 @@ jobs:
           npm ci
           npm ci --prefix .github/tools/eslint-formatter --ignore-scripts
 
-      - name: Run ESLint (flat config → SARIF)
+      - name: Run ESLint (React Native config → SARIF)
         id: eslint
         env:
           EXTERNAL_VERDICT: ${{ inputs.external-verdict }}

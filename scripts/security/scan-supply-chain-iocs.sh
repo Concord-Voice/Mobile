@@ -308,6 +308,10 @@ for key, entry in data.get("packages", {}).items():
     # yield "semver" rather than "@babel/core/node_modules/semver".
     idx = key.rfind("node_modules/")
     name = key[idx + len("node_modules/"):] if idx >= 0 else (entry.get("name") or key)
+    if entry.get("hasInstallScript") is True:
+        metadata = json.dumps({"path": key, "name": entry.get("name") or name,
+                               "version": entry.get("version", "unknown")}, sort_keys=True)
+        print(f"{name}\thasInstallScript\t{metadata}")
     scripts = entry.get("scripts") or {}
     for sk in ("preinstall", "postinstall", "install"):
         if sk in scripts:
@@ -343,6 +347,18 @@ run_subcheck_3() {
 
     while IFS=$'\t' read -r pkg script_key cmd; do
       [[ -n "$pkg" ]] || continue
+      if [[ "$script_key" == hasInstallScript ]]; then
+        python3 -c '
+import json, sys
+metadata = json.loads(sys.argv[1])
+def text(value):
+    return json.dumps(str(value), ensure_ascii=True)[1:-1]
+print("[WARN] New install script: " + text(metadata["name"]) + "@" + text(metadata["version"])
+      + " has hasInstallScript = true at " + text(metadata["path"]) + " in " + sys.argv[2]
+      + " (npm lockfile does not include the command)")
+' "$cmd" "$lockfile"
+        continue
+      fi
       local version
       version=$(python3 -c '
 import json, sys

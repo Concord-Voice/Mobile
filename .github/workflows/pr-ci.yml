@@ -1,21 +1,7 @@
+# Mobile PR scanner orchestration and accepted app checks.
+# IOC gates scanner installs and app dependencies. The protected invocation
+# runs scanner enforcement only; app checks remain an ordinary PR job.
 name: PR CI
-
-# PR-time CI orchestrator (#919 §5.2). Calls build.yml via workflow_call to
-# run the PR-time suite. The live org baseline ruleset (17153062) requires
-# Gitar and SonarCloud Code Analysis; the live Alpha ruleset (17541948)
-# requires per-tool code-scanning analyses. The trusted required build
-# workflow is sourced from protected main by an Alpha-only organization
-# ruleset (24957423), which also requires `Required PR build result` to be
-# current once reference-documents/runbooks/alpha-ruleset-hardening.md has been applied.
-# The Go lint, static-guards, and workflow-lint jobs remain advisory; the West
-# deployment-access lab is required when deployment inputs change. It also
-# runs the SPA-deploy contract verifier
-# (`verify-spa-env.sh --mode=pr`), and exercises the deploy scripts in
-# --dry-run mode against the staging target (Invariant 2: PR runners cannot
-# resolve production-scoped secrets, so dry-runs against staging are the only
-# safe rehearsal of script logic before merge).
-#
-# Spec: reference-documents/superpowers/specs/2026-05-09-919-spa-deploy-trust-chain-design.md §5.2
 
 on:
   workflow_call:
@@ -71,9 +57,7 @@ jobs:
       contents: read
       pull-requests: read  # dorny/paths-filter lists changed files
 
-  # ─── PR-time suite (build.yml via workflow_call) ───────────────────────
-  # Spec §6 row 6 — workflow_call invocation. build.yml's workflow_call
-  # declaration keeps coverage outputs available to the protected caller.
+  # PR scanners use the immutable-source enforcement contract when requested.
   semgrep:
     name: semgrep
     needs: [ioc, detect-changes]
@@ -316,18 +300,14 @@ jobs:
           # explicit null; an empty or any other value is not a confirmation.
           jq -e -s 'any(.[][]; .type == "workflows" and
             any(.parameters.workflows[]?;
-              .repository_id == 1158152129 and
+              .repository_id == 1359565586 and
               .path == ".github/workflows/required-pr-build.yml" and
               (.ref == "main" or .ref == "refs/heads/main") and
               .sha == null))' \
             "$pages" >/dev/null || exit 0
           echo 'confirmed=true' >> "$GITHUB_OUTPUT"
 
-  # ─── Workflow-file structural guards (#920 PR-A trust-model lock-ins) ─
-  # Lint checks codifying invariants surfaced by the 2026-05-09 cascade
-  # (#893/#900/#904/#906/#910). The shared workflow_lint family selects this
-  # runner from the union of its policy inputs and the former inline fast-path
-  # inputs; each selected check still validates its full governed surface.
+      # Mobile has no Go, Sonar or other-product coverage lanes.
       - name: Select the Mobile scanner surface
         id: mobile-selection
         env:

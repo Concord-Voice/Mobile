@@ -3,9 +3,9 @@ name: Labeler
 # Auto-apply path-based labels to PRs.
 #
 # Currently this workflow applies a single label, `workflow-validation: dispatch`,
-# on PRs touching .github/workflows/**. The label triggers
-# .github/workflows/workflow-validate.yml's L3 dispatch sandbox per the
-# job-level `if:` gate in that file.
+# on PRs touching .github/workflows/**. Validation also listens directly to
+# PR revision events; it never relies on this GITHUB_TOKEN-generated label
+# event to start. Applying this label manually can request validation again.
 #
 # Filed under #1237 as part of #1109's CI Speed Epic. See
 # reference-documents/superpowers/specs/2026-05-29-1237-workflow-validate-trigger-design.md

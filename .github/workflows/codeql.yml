@@ -1,27 +1,9 @@
-# CodeQL advanced setup — per-tool Code Scanning workflow (ADR-0017 End-state A).
-# Replaces GitHub default setup (disabled in lockstep with the PR that added this
-# file — see reference-documents/superpowers/specs/2026-06-10-1424-codeql-advanced-setup-design.md).
-# Feeds the `code_scanning` rule (tool: CodeQL) in the Default Branch Ruleset.
-#
-# Language selection rationale:
-#   - go: manual build (module-discovering `go build ./...` loop — autobuild
-#     traces only ONE module; toolchain preinstalled via setup-go from go.mod)
-#   - javascript-typescript: no build needed for analysis
-#   - actions: workflow-file analysis (supply-chain posture)
-#   - python deliberately omitted: dev-tooling scripts only, no production Python
-#     (documented coverage delta — issue #1424 scope decision).
-# Queries: security-extended = parity with default setup's "extended" suite.
+# Mobile advanced CodeQL: JavaScript/TypeScript and Actions, no native build.
+# security-extended matches Alpha's query suite. PRs call via codeql-pr.yml;
+# scanner-baseline.yml analyzes main on pushes and daily, after IOC.
 name: CodeQL Advanced
 
-# PR leg invoked by codeql-pr.yml with `needs: ioc` (ADR-0018 IOC-first, #1476)
-# — the manual Go build downloads modules and must not race the supply-chain
-# verdict. Nightly owns the scheduled baseline; main-ci calls the Hotfix
-# push leg. All three use this reusable workflow.
 on:
-  # The weekly cron ('45 16 * * 0') is retired: nightly-ci.yml analyses main
-  # every night, which strictly supersedes a Sunday run. Every leg is now
-  # orchestrated (codeql-pr, main-ci on hotfix, nightly-ci) — see ADR-0018's
-  # 2026-08-26 amendment.
   workflow_call:
     inputs:
       codeql-matrix:
@@ -49,7 +31,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    # ADR-0013 §2 sizing. Per-leg runner: the three languages have genuinely
+    # ADR-0013 §2 sizing. Per-leg runner: the two languages have genuinely
     # different resource profiles, so a single job-level tier over-provisions
     # one and starves another. GitHub Actions has no "job default, override one
     # leg" syntax, so a differential tier across matrix legs requires this

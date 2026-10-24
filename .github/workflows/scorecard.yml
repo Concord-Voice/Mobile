@@ -7,18 +7,13 @@
 # to the OpenSSF REST API, which publish_results: false disables (least
 # privilege; re-add only if the repo goes public and publishing is enabled).
 # No pull_request trigger: Scorecard scores repo posture, not PR diffs —
-# first real run happens post-merge on push:main.
+# first normal run happens post-merge through scanner-baseline.yml.
 name: Scorecard supply-chain security
 
 on:
-  # Re-score when branch-protection settings change (default branch only).
+  # Refresh immediately for branch-protection edits; normal baseline runs are
+  # IOC-gated by scanner-baseline.yml on main pushes and daily.
   branch_protection_rule:
-  # The weekly posture refresh ('0 15 * * 0', #1428) is retired: nightly-ci.yml
-  # scores main every night, which keeps the Maintained check fresher than a
-  # Sunday cron did. See ADR-0018's 2026-08-26 amendment.
-  #
-  # Invoked by nightly-ci.yml every night, and by main-ci.yml on a `risk: hotfix`
-  # merge — both with `needs: ioc` (#1477).
   workflow_call:
 
 concurrency:
