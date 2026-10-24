@@ -19,10 +19,13 @@ async function render() {
   return mounted as unknown as ReactTestRenderer.ReactTestRenderer;
 }
 
+const actions = useSession.getState();
+
 afterEach(async () => {
   await ReactTestRenderer.act(() => mounted?.unmount());
   mounted = null;
   useSession.setState({
+    ...actions,
     stage: { kind: 'signed_out' },
     api: null,
     error: null,
@@ -45,6 +48,24 @@ test('offers only the code methods the account has', async () => {
   const tree = await render();
   expect(text(tree)).toContain('Emailed code');
   expect(text(tree)).not.toContain('Authenticator code');
+});
+
+test('lets an email-only account request its code', async () => {
+  const sendMfaEmail = jest.fn(async () => {});
+  useSession.setState({
+    stage: { kind: 'mfa', challengeToken: 'c', methods: ['email'] },
+    sendMfaEmail,
+  });
+  const tree = await render();
+  let send = tree.root
+    .findAllByType('Text' as never)
+    .find(t => t.props.children === 'Email me a code') as
+    | ReactTestRenderer.ReactTestInstance
+    | null
+    | undefined;
+  while (send && !send.props.onPress) send = send.parent;
+  await ReactTestRenderer.act(async () => send?.props.onPress());
+  expect(sendMfaEmail).toHaveBeenCalledTimes(1);
 });
 
 test('explains a passkey-only account', async () => {

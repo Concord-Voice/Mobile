@@ -127,10 +127,7 @@ export function MfaCode({ methods }: { methods: string[] }) {
               accessibilityRole="button"
               accessibilityState={{ selected: m === method }}
               style={[styles.chip, m === method && styles.chipActive]}
-              onPress={() => {
-                setMethod(m);
-                if (m === 'email') sendMfaEmail();
-              }}
+              onPress={() => setMethod(m)}
             >
               <Text style={styles.chipText}>{METHOD_LABELS[m]}</Text>
             </Pressable>
@@ -144,6 +141,11 @@ export function MfaCode({ methods }: { methods: string[] }) {
           onChangeText={setCode}
           keyboard={method === 'backup_code' ? undefined : 'number-pad'}
         />
+      ) : null}
+      {method === 'email' ? (
+        <Pressable accessibilityRole="button" onPress={sendMfaEmail}>
+          <Text style={styles.link}>Email me a code</Text>
+        </Pressable>
       ) : null}
       <ErrorLine />
       <Submit
