@@ -289,7 +289,7 @@ jobs:
             --volume "$RUNNER_TEMP/osv-results:/results" \
             --workdir /github/workspace \
             ghcr.io/google/osv-scanner@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa \
-            scan --config=/results/config.toml --format=json --output=/results/old-results.json -r ./
+            scan --config=/results/config.toml --format=json --output=/results/old-results.json --no-ignore -r ./
           scan_status=$?
           set -e
           [[ "$scan_status" == 0 || "$scan_status" == 1 ]] || { echo "::error::OSV base engine failed ($scan_status)"; exit 1; }
@@ -313,7 +313,7 @@ jobs:
             --volume "$RUNNER_TEMP/osv-results:/results" \
             --workdir /github/workspace \
             ghcr.io/google/osv-scanner@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa \
-            scan --config=/results/config.toml --format=json --output=/results/new-results.json -r ./
+            scan --config=/results/config.toml --format=json --output=/results/new-results.json --no-ignore -r ./
           scan_status=$?
           set -e
           [[ "$scan_status" == 0 || "$scan_status" == 1 ]] || { echo "::error::OSV test-merge engine failed ($scan_status)"; exit 1; }

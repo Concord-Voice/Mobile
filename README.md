@@ -53,3 +53,9 @@ Scanner workflows are ported from Alpha. The IOC-gated app checks run `npm ci`,
 job was accepted on 2026-10-24; Alpha had no Mobile app-level CI.
 
 IOC-gated CodeQL and Scorecard scans also run on pushes to `main` and daily.
+
+Protected scanner runs read Semgrep rules and exclusions from the immutable
+workflow revision, while scanning PR source. PR ignore files and inline Semgrep
+suppressions cannot narrow that coverage. Protected OSV scans also include
+Git-ignored lockfiles. Scanner-policy changes must land on `main` before the
+required workflow is repinned to their merge commit.

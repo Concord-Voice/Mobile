@@ -73,6 +73,7 @@ jobs:
     uses: ./.github/workflows/semgrep.yml
     with:
       external-verdict: ${{ inputs.enforcement-only == true }}
+      trusted-source: ${{ inputs.trusted-source == true }}
       run-custom: ${{ needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).selected.semgrep_custom }}
       run-community: ${{ needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).selected.semgrep_community }}
       run-canary: ${{ needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).selected.semgrep_canary }}
@@ -457,11 +458,14 @@ jobs:
           echo "${ACTIONLINT_SHA256}  /tmp/${TARBALL}" | sha256sum -c -
           tar -xzf "/tmp/${TARBALL}" -C /tmp actionlint
           /tmp/actionlint -config-file=.actionlint.yaml
+      - name: Install pinned Semgrep for adversarial policy tests
+        run: python3 -m pip install --user "semgrep==1.121.0"
       - name: Scanner and workflow contracts
         run: |
           set -euo pipefail
           python3 -m unittest discover -s .github/scripts/tests -p test_mobile_notice.py
           python3 -m unittest discover -s .github/scripts/tests -p test_mobile_scanner_contract.py
+          python3 -m unittest discover -s .github/scripts/tests -p test_protected_scanner_policy.py
           python3 -m unittest discover -s .github/scripts/tests -p test_ci_scan_verdict.py
           python3 -m unittest discover -s .github/scripts/tests -p test_print_codeql_results.py
           bash .github/scripts/tests/parse-dispatched-workflow.test.sh
