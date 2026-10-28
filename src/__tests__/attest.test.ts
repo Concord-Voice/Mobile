@@ -46,6 +46,11 @@ function server(verify: (body: Record<string, unknown>) => [number, unknown]) {
             },
           },
         ];
+      } else if (key === 'POST /auth/refresh') {
+        reply = [
+          200,
+          { access_token: 'a2', refresh_token: 'r2', session_id: 's1' },
+        ];
       } else if (key === 'POST /auth/logout') {
         reply = [200, {}];
       } else if (key === 'POST /attestation/challenge') {
@@ -185,6 +190,38 @@ describe('App Attest', () => {
     const { impl, calls } = server(() => [200, { attestation_token: 'tok' }]);
     const api = await signedIn(impl, attester(null));
     await Promise.all([api.conversations(), api.conversations()]);
+    expect(verifyKeys(calls)).toHaveLength(1);
+  });
+
+  it('refreshes once when the access token expires during the proof', async () => {
+    let verifies = 0;
+    const { impl, calls } = server(() =>
+      ++verifies === 1 ? [401, {}] : [200, { attestation_token: 'tok' }],
+    );
+    const api = await signedIn(impl, attester(KEY));
+    await expect(api.conversations()).resolves.toEqual([]);
+    expect(calls.filter(c => c.key === 'POST /auth/refresh')).toHaveLength(1);
+    expect(verifyKeys(calls)).toHaveLength(2);
+  });
+
+  it('gives up when the proof is refused again after a refresh', async () => {
+    const { impl, calls } = server(() => [401, {}]);
+    const api = await signedIn(impl, attester(KEY));
+    await expect(api.conversations()).rejects.toEqual(
+      new ApiError(401, undefined),
+    );
+    expect(verifyKeys(calls)).toHaveLength(2);
+  });
+
+  it('keeps the proof when another request refreshes the token meanwhile', async () => {
+    const { impl, calls } = server(() => [200, { attestation_token: 'tok' }]);
+    const a = attester(KEY);
+    const api = await signedIn(impl, a);
+    a.generateAssertion.mockImplementationOnce(async (k: string, c: string) => {
+      await api.refresh();
+      return `as:${k}:${c}`;
+    });
+    await expect(api.conversations()).resolves.toEqual([]);
     expect(verifyKeys(calls)).toHaveLength(1);
   });
 

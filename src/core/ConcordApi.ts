@@ -139,7 +139,22 @@ export class ConcordApi {
           ATTEST_AND_RETRY.has(error.code ?? '')
         ) {
           attested = true;
-          await this.attest();
+          try {
+            await this.attest();
+          } catch (proofError) {
+            // The access token can expire while the proof is generated: refresh once
+            // and start over, which allows one more proof.
+            if (
+              !(proofError instanceof ApiError) ||
+              proofError.status !== 401 ||
+              refreshed
+            ) {
+              throw proofError;
+            }
+            refreshed = true;
+            attested = false;
+            await this.refresh();
+          }
         } else {
           throw error;
         }
@@ -309,7 +324,8 @@ export class ConcordApi {
       );
     }
     // A sign-out or new sign-in meanwhile wins: its state is not overwritten.
-    if (this.session === session) {
+    // A token refresh keeps the session id, so the proof still holds.
+    if (this.session?.sessionId === session.sessionId) {
       this.attestation = {
         token: text(result.attestation_token),
         sessionId: session.sessionId,
