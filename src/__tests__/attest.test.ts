@@ -72,13 +72,15 @@ function server(verify: (body: Record<string, unknown>) => [number, unknown]) {
 }
 
 function attester(keyId: string | null, supported = true) {
-  return {
+  const a = {
     info: jest.fn(async () => ({ supported, version: '1.0.0(5)', keyId })),
     generateKey: jest.fn(async () => NEW_KEY),
     forgetKey: jest.fn(async () => {}),
     attestKey: jest.fn(async (k: string, c: string) => `att:${k}:${c}`),
     generateAssertion: jest.fn(async (k: string, c: string) => `as:${k}:${c}`),
-  } satisfies Attester;
+  };
+  const typed: Attester = a; // compile-time check that the fake fits
+  return typed && a;
 }
 
 async function signedIn(
