@@ -1,6 +1,7 @@
 # Native message crypto for the Concord mobile client (#206), carried over from the #663 probe.
 # Core: Swift CryptoKit (AES-256-GCM), Security.framework (RSA-OAEP-4096/SHA-256) and the
 # vendored Argon2 reference C (Vendor/argon2, see Vendor/README.md). Keys never reach JS.
+# Also Apple App Attest (DeviceCheck) for control-plane client attestation, ADR-0010 D17.
 Pod::Spec.new do |s|
   s.name         = 'ConcordCrypto'
   s.version      = '0.0.1'
@@ -15,11 +16,11 @@ Pod::Spec.new do |s|
 
   s.subspec 'Core' do |core|
     core.source_files = 'Sources/ConcordCrypto.swift', 'Sources/ConcordKeyStore.swift',
-                        'Sources/ConcordKeychain.swift',
+                        'Sources/ConcordKeychain.swift', 'Sources/ConcordAttest.swift',
                         'Vendor/argon2/include/argon2.h', 'Vendor/argon2/src/**/*.{c,h}'
     core.public_header_files = 'Vendor/argon2/include/argon2.h'
     core.private_header_files = 'Vendor/argon2/src/**/*.h'
-    core.frameworks = 'CryptoKit', 'Security', 'LocalAuthentication'
+    core.frameworks = 'CryptoKit', 'Security', 'LocalAuthentication', 'DeviceCheck'
     core.pod_target_xcconfig = {
       'DEFINES_MODULE' => 'YES',
       # Lanes are still 4 (the derived key depends on them); they are computed on one thread.
@@ -31,7 +32,7 @@ Pod::Spec.new do |s|
   s.subspec 'ReactNative' do |rn|
     rn.dependency 'ConcordCrypto/Core'
     rn.dependency 'React-Core'
-    rn.source_files = 'Sources/ConcordCryptoModule.{swift,m}'
+    rn.source_files = 'Sources/ConcordCryptoModule.{swift,m}', 'Sources/ConcordAttestModule.{swift,m}'
   end
 
   s.test_spec 'Tests' do |test|

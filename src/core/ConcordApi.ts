@@ -4,6 +4,8 @@
  * Not yet covered: WebAuthn MFA and persisted sessions.
  */
 
+import { INVALID_KEY, type Attester } from '../ConcordAttest';
+
 export type Fetch = typeof fetch;
 
 export type Session = {
@@ -45,6 +47,13 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 const CREDENTIAL_ROUTE = /^\/auth\/(login|register|mfa\/|refresh|logout)/;
 
+/** Attestation refusals that a fresh App Attest proof can cure (ADR-0010 D17). */
+const ATTEST_AND_RETRY = new Set([
+  'ATTESTATION_MISSING',
+  'ATTESTATION_EXPIRED',
+  'ATTESTATION_INVALID',
+]);
+
 /** http only for the local dev stack; anything else must be https. */
 export function checkBaseUrl(base: string): string {
   const match = /^(https?):\/\/([A-Za-z0-9.-]+)(:\d+)?$/.exec(base);
@@ -74,6 +83,10 @@ export class ConcordApi {
   private readonly base: string;
   /** Called when the server refuses a rotation and the session ends on its own. */
   onExpired: (() => void) | null = null;
+  /** App Attest, used only when the server asks for attestation. Null: never attest. */
+  attester: Attester | null = null;
+  private attestation: { token: string; sessionId: string } | null = null;
+  private attesting: Promise<void> | null = null;
 
   constructor(
     base: string,
@@ -100,21 +113,37 @@ export class ConcordApi {
     path: string,
     body?: unknown,
   ): Promise<Record<string, unknown>> {
-    try {
-      return await this.request(method, path, body);
-    } catch (error) {
-      // An expired access token gets one refresh and one retry. Credential routes
-      // never retry: their 401 means a wrong password or code, not a stale token.
-      if (
-        !(error instanceof ApiError) ||
-        error.status !== 401 ||
-        !this.session ||
-        CREDENTIAL_ROUTE.test(path)
-      ) {
-        throw error;
+    let refreshed = false;
+    let attested = false;
+    for (;;) {
+      try {
+        return await this.request(method, path, body);
+      } catch (error) {
+        // Credential routes never retry: their 401 means a wrong password or code.
+        if (
+          !(error instanceof ApiError) ||
+          !this.session ||
+          CREDENTIAL_ROUTE.test(path)
+        ) {
+          throw error;
+        }
+        // An expired access token gets one refresh, and a missing or stale
+        // attestation one fresh proof; each retries the request once.
+        if (error.status === 401 && !refreshed) {
+          refreshed = true;
+          await this.refresh();
+        } else if (
+          error.status === 403 &&
+          !attested &&
+          this.attester &&
+          ATTEST_AND_RETRY.has(error.code ?? '')
+        ) {
+          attested = true;
+          await this.attest();
+        } else {
+          throw error;
+        }
       }
-      await this.refresh();
-      return this.request(method, path, body);
     }
   }
 
@@ -130,8 +159,13 @@ export class ConcordApi {
       'X-Machine-Id': this.machineId,
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (this.session)
+    if (this.session) {
       headers.Authorization = `Bearer ${this.session.accessToken}`;
+      headers['X-Session-ID'] = this.session.sessionId;
+      // The token is bound to the session that minted it.
+      if (this.attestation?.sessionId === this.session.sessionId)
+        headers['X-Attestation-Token'] = this.attestation.token;
+    }
     // A stalled server must not hold a caller (and its native key handles) forever:
     // the abort covers the headers and the body read.
     const abort = new AbortController();
@@ -227,7 +261,79 @@ export class ConcordApi {
       });
     } finally {
       this.session = null;
+      this.attestation = null;
     }
+  }
+
+  /**
+   * Proves this is the genuine app on a genuine device with App Attest and stores
+   * the server's attestation token. Reuses the stored key (an assertion) and falls
+   * back to a new key (an attestation) when the server or Apple no longer knows it.
+   * Concurrent callers share one run, since each proof spends a challenge.
+   */
+  attest(): Promise<void> {
+    if (!this.attesting) {
+      this.attesting = this.runAttest().finally(() => {
+        this.attesting = null;
+      });
+    }
+    return this.attesting;
+  }
+
+  private async runAttest(): Promise<void> {
+    const attester = this.attester;
+    const session = this.session;
+    if (!attester || !session) throw new Error('Not signed in');
+    const info = await attester.info();
+    if (!info.supported) throw new Error('App Attest is unavailable');
+
+    let result: Record<string, unknown> | null = null;
+    if (info.keyId) {
+      try {
+        result = await this.prove(info.keyId, info.version, 'assertion', c =>
+          attester.generateAssertion(info.keyId as string, c),
+        );
+      } catch (error) {
+        const stale =
+          (error instanceof ApiError &&
+            error.code === 'ATTESTATION_KEY_UNKNOWN') ||
+          (error as { code?: unknown } | null)?.code === INVALID_KEY;
+        if (!stale) throw error;
+        await attester.forgetKey();
+      }
+    }
+    if (!result) {
+      const keyId = await attester.generateKey();
+      result = await this.prove(keyId, info.version, 'attestation', c =>
+        attester.attestKey(keyId, c),
+      );
+    }
+    // A sign-out or new sign-in meanwhile wins: its state is not overwritten.
+    if (this.session === session) {
+      this.attestation = {
+        token: text(result.attestation_token),
+        sessionId: session.sessionId,
+      };
+    }
+  }
+
+  private async prove(
+    keyId: string,
+    version: string,
+    field: 'attestation' | 'assertion',
+    sign: (challenge: string) => Promise<string>,
+  ): Promise<Record<string, unknown>> {
+    const challenge = text(
+      (await this.request('POST', '/attestation/challenge')).challenge,
+    );
+    return this.request('POST', '/attestation/verify', {
+      version,
+      platform: 'ios',
+      machine_id: this.machineId,
+      key_id: keyId,
+      challenge,
+      [field]: await sign(challenge),
+    });
   }
 
   private loginKeys(result: Record<string, unknown>): LoginKeys {
