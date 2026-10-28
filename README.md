@@ -11,6 +11,15 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   still ask for a channel key to be wrapped to any public key it passes, so the JS
   bundle is inside the trust boundary.
 - `src/ConcordCrypto.ts`: the typed JS bridge to that module.
+- `native/ConcordCrypto/Sources/ConcordAttest*.swift` and `src/ConcordAttest.ts`:
+  Apple App Attest for the control plane's client attestation (Alpha ADR-0010 D17).
+  The key stays in the Secure Enclave; its id is kept in a device-only Keychain item.
+  `ConcordApi` attests only when the server refuses a request with
+  `ATTESTATION_MISSING`, `EXPIRED` or `INVALID`: it asserts with the stored key, makes
+  and attests a new key when the server or Apple no longer knows it, and retries once.
+  The app carries the `appattest-environment` entitlement (`development` for Xcode
+  installs; TestFlight and App Store builds always use production). App Attest does
+  not work on the simulator, and Android has no attestation yet.
 - `src/core/`: the control-plane REST client (sign-in with code-based MFA, token
   refresh with one shared rotation and a single retry on 401, logout), the DM WebSocket,
   and `createSocket`, which opens every socket with the app's fixed origin
