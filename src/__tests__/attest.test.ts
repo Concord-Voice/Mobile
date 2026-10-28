@@ -181,7 +181,9 @@ describe('App Attest', () => {
     for (const a of [null, attester(null, false)]) {
       const { impl, calls } = server(() => [200, { attestation_token: 'tok' }]);
       const api = await signedIn(impl, a);
-      await expect(api.conversations()).rejects.toBeTruthy();
+      await expect(api.conversations()).rejects.toEqual(
+        new ApiError(403, 'ATTESTATION_MISSING'),
+      );
       expect(verifyKeys(calls)).toHaveLength(0);
     }
   });

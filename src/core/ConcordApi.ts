@@ -142,15 +142,11 @@ export class ConcordApi {
           try {
             await this.attest();
           } catch (proofError) {
+            // No App Attest here (simulator, old device): the caller sees the refusal.
+            if (!(proofError instanceof ApiError)) throw error;
             // The access token can expire while the proof is generated: refresh once
             // and start over, which allows one more proof.
-            if (
-              !(proofError instanceof ApiError) ||
-              proofError.status !== 401 ||
-              refreshed
-            ) {
-              throw proofError;
-            }
+            if (proofError.status !== 401 || refreshed) throw proofError;
             refreshed = true;
             attested = false;
             await this.refresh();
