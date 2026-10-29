@@ -44,6 +44,8 @@ export function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Wrong email, password or code.';
     if (error.status === 429) return 'Too many attempts. Try again later.';
+    if (error.status === 403 && error.code === 'ATTESTATION_REVOKED')
+      return 'This version of the app is no longer supported. Update it to continue.';
     if (error.status === 403)
       return 'This server does not accept this app yet.';
     return 'The server could not complete that. Try again.';
