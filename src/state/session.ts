@@ -6,6 +6,7 @@ import {
   releaseKey,
   unlockIdentity,
 } from '../ConcordCrypto';
+import { nativeAttester } from '../ConcordAttest';
 import {
   ApiError,
   ConcordApi,
@@ -66,8 +67,11 @@ export function describeError(error: unknown): string {
 }
 
 export function createSessionStore(
-  makeApi: (server: string, machineId: string) => ConcordApi = (s, m) =>
-    new ConcordApi(s, m),
+  makeApi: (server: string, machineId: string) => ConcordApi = (s, m) => {
+    const api = new ConcordApi(s, m);
+    api.attester = nativeAttester();
+    return api;
+  },
 ) {
   // Held only between the password step and the MFA step, never in state.
   let pendingPassword: string | null = null;

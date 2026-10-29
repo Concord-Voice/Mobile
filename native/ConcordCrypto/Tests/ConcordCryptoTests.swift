@@ -373,6 +373,21 @@ final class ConcordCryptoTests: XCTestCase {
     XCTAssertEqual(ConcordKeychain.error(errSecAuthFailed), .authenticationFailed)
     XCTAssertEqual(ConcordKeychain.error(errSecMissingEntitlement), .keychainFailure)
   }
+
+  // MARK: App Attest (the DeviceCheck calls themselves need a device)
+
+  func testAttestClientDataHashIsSha256OfTheChallenge() throws {
+    // SHA-256("abc"); the server recomputes exactly this from the challenge it issued.
+    XCTAssertEqual(
+      try ConcordAttest.clientDataHash(challengeBase64: "YWJj").hexString,
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    XCTAssertThrowsError(try ConcordAttest.clientDataHash(challengeBase64: "")) {
+      XCTAssertEqual($0 as? ConcordAttestError, .invalidInput)
+    }
+    XCTAssertThrowsError(try ConcordAttest.clientDataHash(challengeBase64: "not base64!")) {
+      XCTAssertEqual($0 as? ConcordAttestError, .invalidInput)
+    }
+  }
 }
 
 private extension Data {
