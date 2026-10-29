@@ -189,6 +189,9 @@ describe('describeError', () => {
     expect(describeError(new ApiError(403, 'ATTESTATION_MISSING'))).toMatch(
       /does not accept this app/,
     );
+    expect(describeError(new ApiError(403, 'ATTESTATION_REVOKED'))).toMatch(
+      /Update it to continue/,
+    );
     expect(describeError(new ApiError(500, undefined))).toMatch(
       /could not complete/,
     );
