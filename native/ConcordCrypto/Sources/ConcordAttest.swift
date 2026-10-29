@@ -25,7 +25,7 @@ public struct ConcordAttest {
   /// False on the simulator and on devices without a Secure Enclave.
   public static var isSupported: Bool { DCAppAttestService.shared.isSupported }
 
-  /// "1.0.0(5)": marketing version plus build. Client-reported, used for revocation only.
+  /// "1.0.0(5)": marketing version plus build. Signed into each proof, used for revocation.
   public static var appVersion: String {
     let info = Bundle.main.infoDictionary ?? [:]
     let version = info["CFBundleShortVersionString"] as? String ?? "0"
@@ -33,12 +33,20 @@ public struct ConcordAttest {
     return "\(version)(\(build))"
   }
 
-  /// SHA-256 of the server challenge, which is what the server recomputes.
-  public static func clientDataHash(challengeBase64: String) throws -> Data {
+  /// SHA-256("concord-appattest-v1" ‖ 0 ‖ challenge ‖ 0 ‖ version), which the server
+  /// recomputes. Signing the version stops a proxy from claiming an unrevoked one.
+  public static func clientDataHash(challengeBase64: String, version: String = appVersion)
+    throws -> Data
+  {
     guard let challenge = Data(base64Encoded: challengeBase64), !challenge.isEmpty else {
       throw ConcordAttestError.invalidInput
     }
-    return Data(SHA256.hash(data: challenge))
+    var input = Data("concord-appattest-v1".utf8)
+    input.append(0)
+    input.append(challenge)
+    input.append(0)
+    input.append(Data(version.utf8))
+    return Data(SHA256.hash(data: input))
   }
 
   public func storedKeyId() throws -> String? {
