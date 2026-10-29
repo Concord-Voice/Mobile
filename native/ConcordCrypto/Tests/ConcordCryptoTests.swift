@@ -376,11 +376,14 @@ final class ConcordCryptoTests: XCTestCase {
 
   // MARK: App Attest (the DeviceCheck calls themselves need a device)
 
-  func testAttestClientDataHashIsSha256OfTheChallenge() throws {
-    // SHA-256("abc"); the server recomputes exactly this from the challenge it issued.
+  func testAttestClientDataHashBindsChallengeAndVersion() throws {
+    // Same vector as the control plane's TestIOSClientDataHashVector.
     XCTAssertEqual(
-      try ConcordAttest.clientDataHash(challengeBase64: "YWJj").hexString,
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+      try ConcordAttest.clientDataHash(challengeBase64: "YWJj", version: "1.0.0(5)").hexString,
+      "c91da518ff44ebf880c7e5979668a8d85ce21238a2fec9aa08cfa2027eadd381")
+    XCTAssertNotEqual(
+      try ConcordAttest.clientDataHash(challengeBase64: "YWJj", version: "1.0.0(6)"),
+      try ConcordAttest.clientDataHash(challengeBase64: "YWJj", version: "1.0.0(5)"))
     XCTAssertThrowsError(try ConcordAttest.clientDataHash(challengeBase64: "")) {
       XCTAssertEqual($0 as? ConcordAttestError, .invalidInput)
     }
