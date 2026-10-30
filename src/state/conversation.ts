@@ -83,6 +83,8 @@ export class Conversation {
   /** The key for an epoch (0: the current one), fetched and unwrapped once. */
   private keyFor(version: number): Promise<KeyHandle> {
     if (this.closed) return Promise.reject(new Error('Conversation closed'));
+    // "Current" is the newest epoch proven so far; only before any is the server asked.
+    if (version === 0 && this.confirmed > 0) return this.keyFor(this.confirmed);
     let key = this.keys.get(version);
     if (key) return key;
     const failedAt = this.refused.get(version);
@@ -206,7 +208,9 @@ export class Conversation {
     const newer = this.lines.slice(split);
     this.lines = [...older, ...lines, ...newer];
     this.onChange?.();
-    this.api.markDmRead(this.id).catch(() => {});
+    // A read receipt only once the newest line could actually be shown.
+    if (!this.lines.at(-1)?.unreadable)
+      this.api.markDmRead(this.id).catch(() => {});
   }
 
   /** Encrypts under the current key and sends; resolves once the server stores it. */

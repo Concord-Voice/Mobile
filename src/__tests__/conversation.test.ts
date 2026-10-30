@@ -427,3 +427,22 @@ test('shows a dropped socket until reopened', async () => {
   expect(conv.dropped).toBe(true);
   expect(changes).toHaveBeenCalled();
 });
+
+test('follows the newest proven epoch for unlabelled and legacy rows', async () => {
+  const { api, socket, conv } = setup([row('m1', '2:old', 0)]);
+  await conv.start();
+  // The current key is proven as epoch 2; a peer then proves epoch 3.
+  socket.onMessage?.(live('a', '3:new', 3));
+  // A legacy row labelled 1 but written under epoch 3 opens with the newest key.
+  socket.onMessage?.(live('b', '3:legacy', 1));
+  await flush();
+  expect(conv.lines.map(l => l.text)).toEqual(['old', 'new', 'legacy']);
+  expect(api.dmKey).toHaveBeenCalledTimes(3);
+});
+
+test('sends no startup read receipt when the newest line is unreadable', async () => {
+  const { api, conv } = setup([row('m1', '1:hi'), row('m2', '9:bad', 2)]);
+  await conv.start();
+  expect(conv.lines.at(-1)?.unreadable).toBe(true);
+  expect(api.markDmRead).not.toHaveBeenCalled();
+});
