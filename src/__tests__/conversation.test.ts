@@ -266,3 +266,37 @@ test('allocates no key after close, even mid-fetch', async () => {
   await flush();
   expect(crypto.releaseKey).toHaveBeenCalledWith('Kw1');
 });
+
+test('keeps live arrival order across a slow key lookup and marks them read', async () => {
+  const { api, socket, conv } = setup([]);
+  await conv.start();
+  api.markDmRead.mockClear();
+  let releaseKey3!: () => void;
+  api.dmKey.mockImplementationOnce(
+    (_id: string, version?: number) =>
+      new Promise(resolve => {
+        releaseKey3 = () =>
+          resolve({ wrappedKey: `w${version}`, keyVersion: version as number });
+      }),
+  );
+  socket.onMessage?.({
+    id: 'a',
+    conversationId: 'c1',
+    userId: PEER,
+    content: '3:first',
+    keyVersion: 3,
+  });
+  socket.onMessage?.({
+    id: 'b',
+    conversationId: 'c1',
+    userId: PEER,
+    content: '2:second',
+    keyVersion: 2,
+  });
+  await flush();
+  releaseKey3();
+  await flush();
+  await flush();
+  expect(conv.lines.map(l => l.text)).toEqual(['first', 'second']);
+  expect(api.markDmRead).toHaveBeenCalledTimes(2);
+});

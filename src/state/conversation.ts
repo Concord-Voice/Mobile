@@ -54,6 +54,8 @@ export class Conversation {
   private current: number | null = null;
   private socket: DmSocket | null = null;
   private closed = false;
+  /** Live messages decrypt one at a time, so a slow key lookup cannot reorder them. */
+  private live: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly api: ConcordApi,
@@ -124,7 +126,14 @@ export class Conversation {
       // A peer already on a newer epoch means the key rotated: send under it too.
       if (this.current !== null && m.keyVersion > this.current)
         this.current = m.keyVersion;
-      this.decrypt(m).then(line => this.add(line));
+      this.live = this.live
+        .then(() => this.decrypt(m))
+        .then(line => {
+          this.add(line);
+          // Shown while open, so it is read; the list's unread badge follows.
+          if (m.userId !== this.me && !this.closed)
+            this.api.markDmRead(this.id).catch(() => {});
+        });
     };
     // ponytail: no reconnect; a dropped socket fails the next send and reopening the conversation reconnects.
     await socket.subscribe(this.id);
