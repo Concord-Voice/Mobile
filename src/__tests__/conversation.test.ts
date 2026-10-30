@@ -100,13 +100,16 @@ test('decrypts history under each message epoch and follows live', async () => {
 
 test('marks what it cannot decrypt and unwraps GIF envelopes', async () => {
   const { conv } = setup([
-    row('m1', '2:garbage', 1),
+    row('m0', '2:legacy', 1),
+    row('m1', '3:garbage', 2),
     row('m2', `2:${JSON.stringify({ text: 'look', gif_slug: 'g' })}`, 2),
     row('m3', `2:${JSON.stringify({ text: '', gif_slug: 'g' })}`, 2),
     row('m4', '2:{"just":"json"}', 2),
   ]);
   await conv.start();
   expect(conv.lines.map(l => [l.text, !!l.unreadable])).toEqual([
+    // Older clients labelled every write 1: the current key opens it.
+    ['legacy', false],
     ['This message could not be decrypted.', true],
     ['look', false],
     ['GIF', false],
@@ -137,6 +140,8 @@ test('sends under the current epoch and shows the stored message once', async ()
   expect(conv.lines).toEqual([
     { id: 'sent-1', userId: ME, sender: 'You', text: 'hello' },
   ]);
+  // Our own echo is not a read receipt; start() sent the only one.
+  expect(api.markDmRead).toHaveBeenCalledTimes(1);
 });
 
 test('moves to a newer epoch a peer uses and retries the lookup after a failure', async () => {
@@ -324,4 +329,77 @@ test('keeps an acknowledged send below an earlier message still decrypting', asy
   releaseKey1();
   await sending;
   expect(conv.lines.map(l => l.text)).toEqual(['earlier', 'later']);
+});
+
+const live = (id: string, content: string, keyVersion: number): DmMessage => ({
+  id,
+  conversationId: 'c1',
+  userId: PEER,
+  content,
+  keyVersion,
+});
+
+test('backs off a refused epoch, then fetches it again', async () => {
+  const { api, socket, conv } = setup([]);
+  await conv.start();
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  api.dmKey.mockRejectedValueOnce(new Error('404'));
+  socket.onMessage?.(live('a', '2:one', 2));
+  socket.onMessage?.(live('b', '2:two', 2));
+  await flush();
+  expect(conv.lines.map(l => [l.text, !!l.unreadable])).toEqual([
+    [expect.stringMatching(/could not be loaded/), true],
+    [expect.stringMatching(/could not be loaded/), true],
+  ]);
+  // Refused once: the second message did not ask again.
+  expect(api.dmKey).toHaveBeenCalledTimes(1);
+  now.mockReturnValue(40_000);
+  socket.onMessage?.(live('c', '2:three', 2));
+  await flush();
+  expect(conv.lines.at(-1)?.text).toBe('three');
+  expect(api.dmKey).toHaveBeenCalledTimes(2);
+  expect(api.dmKey).toHaveBeenLastCalledWith('c1', 2);
+  now.mockRestore();
+});
+
+test('refuses a key the server serves for another epoch', async () => {
+  const { api, socket, conv } = setup([]);
+  await conv.start();
+  api.dmKey.mockResolvedValueOnce({ wrappedKey: 'w9', keyVersion: 9 });
+  socket.onMessage?.(live('a', '3:x', 3));
+  await flush();
+  expect(conv.lines[0].unreadable).toBe(true);
+  expect(crypto.unwrapChannelKey).not.toHaveBeenCalled();
+});
+
+test('moves epochs only on a message that decrypts, and skips far-off labels', async () => {
+  const { api, socket, conv } = setup([row('m1', '2:hi', 2)]);
+  await conv.start();
+  await conv.send('a');
+  api.dmKey.mockClear();
+  api.markDmRead.mockClear();
+  // Within one of the epoch seen: fetched, but it does not decrypt.
+  socket.onMessage?.(live('x', '2:forged', 3));
+  // Far past it: not even fetched.
+  socket.onMessage?.(live('y', '9:far', 9));
+  await flush();
+  expect(conv.lines.slice(-2).map(l => l.unreadable)).toEqual([true, true]);
+  expect(api.dmKey).toHaveBeenCalledTimes(1);
+  expect(api.dmKey).toHaveBeenCalledWith('c1', 3);
+  // No read receipt for what could not be shown, and sends stay on epoch 2.
+  expect(api.markDmRead).not.toHaveBeenCalled();
+  await conv.send('b');
+  expect(socket.send).toHaveBeenLastCalledWith(
+    'c1',
+    '2:b',
+    2,
+    expect.any(String),
+  );
+});
+
+test('opens an unlabelled row with the current key', async () => {
+  const { api, conv } = setup([row('m1', '2:old', 0)]);
+  await conv.start();
+  expect(conv.lines[0].text).toBe('old');
+  expect(api.dmKey).toHaveBeenCalledWith('c1', undefined);
 });

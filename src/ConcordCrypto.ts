@@ -45,6 +45,7 @@ type NativeCrypto = {
   saveSession(record: string): Promise<unknown>;
   loadSession(): Promise<unknown>;
   deleteSession(): Promise<unknown>;
+  randomId(): Promise<unknown>;
 };
 
 const HANDLE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
@@ -188,6 +189,16 @@ export async function loadSession(): Promise<string | null> {
 
 export async function deleteSession(): Promise<void> {
   await native().deleteSession();
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** A random lowercase UUID from the platform CSPRNG, e.g. for the machine id. */
+export async function randomId(): Promise<string> {
+  const value = await native().randomId();
+  if (typeof value !== 'string' || !UUID.test(value))
+    throw new Error('Invalid native crypto output');
+  return value;
 }
 
 /** The stable native rejection code, e.g. E_CONCORD_CRYPTO_NOTFOUND, or null. */

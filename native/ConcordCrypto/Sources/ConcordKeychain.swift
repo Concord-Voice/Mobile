@@ -70,8 +70,8 @@ public struct ConcordKeychain {
   }
 }
 
-/// Keeps the signed-in session record (server, machine id, refresh token) so the app resumes
-/// after a relaunch. Device-only and readable after first unlock, without a prompt: the record
+/// Keeps the signed-in session record (server, machine id, refresh token, session and user ids)
+/// so the app resumes after a relaunch. Device-only and readable after first unlock, without a prompt: the record
 /// alone opens no messages, because the identity key stays behind Face ID in ConcordKeychain.
 public struct ConcordSessionKeychain {
   let service: String

@@ -3,13 +3,17 @@ import {
   createIdentity,
   decryptMessage,
   deleteIdentity,
+  deleteSession,
   encryptMessage,
   generateChannelKey,
   loadIdentity,
+  loadSession,
   nativeErrorCode,
   persistIdentity,
+  randomId,
   releaseAll,
   releaseKey,
+  saveSession,
   unlockIdentity,
   unwrapChannelKey,
   wrapChannelKey,
@@ -146,6 +150,29 @@ describe('ConcordCrypto', () => {
       'E_CONCORD_CRYPTO_NOTFOUND',
     );
     expect(nativeErrorCode({ code: 'ENOENT' })).toBeNull();
+  });
+
+  it('passes the session record through and checks native output', async () => {
+    const module = install({
+      saveSession: jest.fn().mockResolvedValue(null),
+      loadSession: jest.fn().mockResolvedValueOnce('{"a":1}'),
+      deleteSession: jest.fn().mockResolvedValue(null),
+      randomId: jest
+        .fn()
+        .mockResolvedValueOnce('0f8fad5b-d9cb-469f-a165-70867728950e')
+        .mockResolvedValueOnce('nope'),
+    });
+    await saveSession('rec');
+    expect(module.saveSession).toHaveBeenCalledWith('rec');
+    expect(await loadSession()).toBe('{"a":1}');
+    module.loadSession.mockResolvedValueOnce(undefined);
+    expect(await loadSession()).toBeNull();
+    module.loadSession.mockResolvedValueOnce(42);
+    await expect(loadSession()).rejects.toThrow('Invalid native crypto output');
+    await deleteSession();
+    expect(module.deleteSession).toHaveBeenCalled();
+    expect(await randomId()).toBe('0f8fad5b-d9cb-469f-a165-70867728950e');
+    await expect(randomId()).rejects.toThrow('Invalid native crypto output');
   });
 
   it('rejects a malformed handle from the Keychain', async () => {

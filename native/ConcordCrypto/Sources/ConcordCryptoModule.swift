@@ -166,4 +166,11 @@ final class ConcordCryptoModule: NSObject {
       return NSNull()
     }
   }
+
+  /// UUID() draws from the system CSPRNG.
+  @objc func randomId(
+    _ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(UUID().uuidString.lowercased())
+  }
 }

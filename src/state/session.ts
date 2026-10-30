@@ -7,6 +7,7 @@ import {
   loadSession,
   nativeErrorCode,
   persistIdentity,
+  randomId,
   releaseAll,
   releaseKey,
   saveSession,
@@ -55,20 +56,34 @@ function account(p: { server: string; userId: string }): string {
 function parsePersisted(raw: string): Persisted | null {
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
-    const keys = ['server', 'machineId', 'refreshToken', 'sessionId', 'userId'];
-    if (!keys.every(k => typeof v[k] === 'string' && v[k] !== '')) return null;
-    return v as unknown as Persisted;
+    const field = (k: string) =>
+      typeof v[k] === 'string' && v[k] !== '' ? (v[k] as string) : null;
+    const [server, machineId, refreshToken, sessionId, userId] = [
+      'server',
+      'machineId',
+      'refreshToken',
+      'sessionId',
+      'userId',
+    ].map(field);
+    if (!server || !machineId || !refreshToken || !sessionId || !userId)
+      return null;
+    // Only the known fields: anything else in the record never reaches the api.
+    return { server, machineId, refreshToken, sessionId, userId };
   } catch {
     return null;
   }
 }
 
-// One id per sign-in, persisted with the session it belongs to.
-function newMachineId(): string {
-  const hex = () => Math.floor(Math.random() * 16).toString(16);
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c =>
-    c === 'x' ? hex() : '89ab'[Math.floor(Math.random() * 4)],
-  );
+/** Writes the session record; best effort, since a lost write only costs a sign-in later. */
+function persist(at: Origin, saved: SavedSession | null): void {
+  if (saved)
+    saveSession(
+      JSON.stringify({
+        server: at.server,
+        machineId: at.machineId,
+        ...saved,
+      }),
+    ).catch(() => {});
 }
 
 /** What a person sees: never a raw server body, which may echo their input. */
@@ -112,9 +127,12 @@ export function createSessionStore(
   // Where the current api points, for persisting and forgetting its session.
   let origin: Origin | null = null;
 
-  /** Drops the saved session and the Face ID copy of the identity; best effort. */
-  const forget = (p: { server: string; userId: string }) =>
-    Promise.allSettled([deleteSession(), deleteIdentity(account(p))]);
+  /** Drops the saved session and the Face ID copy of the identity, retrying once; rejects if either survives. */
+  const forget = async (p?: { server: string; userId: string }) => {
+    const wipe = () =>
+      Promise.all([deleteSession(), p && deleteIdentity(account(p))]);
+    await wipe().catch(wipe);
+  };
 
   return create<SessionState>((set, get) => {
     const run = async (work: () => Promise<void>) => {
@@ -145,25 +163,18 @@ export function createSessionStore(
           error: 'Your session ended. Log in again.',
         });
         releaseAll().catch(() => {});
-        (userId ? forget({ ...at, userId }) : deleteSession()).catch(() => {});
+        // A record that survives is refused again next launch, which retries this.
+        forget(userId ? { ...at, userId } : undefined).catch(() => {});
       };
       origin = at;
       set({ api });
       return api;
     };
 
-    /** Saves the current token pair, so the persisted copy never holds a spent refresh token. */
+    /** Saves each rotated token pair while this api is the live one, best effort. */
     const writer = (api: ConcordApi, at: Origin) => () => {
-      const saved = api.saved();
-      // ponytail: a write racing a sign-out can outlive it; the next launch's refresh is refused and cleans up.
-      if (saved && get().api === api)
-        saveSession(
-          JSON.stringify({
-            server: at.server,
-            machineId: at.machineId,
-            ...saved,
-          }),
-        ).catch(() => {});
+      // ponytail: a write racing a sign-out can outlive it; the next launch finds no identity and cleans up.
+      if (get().api === api) persist(at, api.saved());
     };
 
     /** Keeps the session across launches: the identity behind Face ID, the tokens beside it. */
@@ -173,7 +184,10 @@ export function createSessionStore(
       try {
         await persistIdentity(identity, account({ ...at, userId: api.userId }));
       } catch {
-        return; // No biometrics enrolled: this device signs in on every launch.
+        // No biometrics enrolled (native reports it as a Keychain failure, so the two look
+        // alike): sign in on every launch, and drop any older record so it is not offered.
+        await deleteSession().catch(() => {});
+        return;
       }
       api.onRotated = writer(api, at);
       api.onRotated();
@@ -234,15 +248,23 @@ export function createSessionStore(
             identity = await loadIdentity(account(saved), UNLOCK_REASON);
           } catch (error) {
             set({ stage: { kind: 'signed_out' } });
-            // Cancelled: keep everything, so "Unlock" can try again.
+            // Anything but a missing key (cancel, lockout): keep everything, so "Unlock" can try again.
             if (nativeErrorCode(error) !== 'E_CONCORD_CRYPTO_NOTFOUND') return;
             // Face ID set changed, so the key copy is gone: end the server session too.
             const api = makeApi(saved.server, saved.machineId);
-            await api
-              .resume(saved)
-              .then(() => api.logout())
-              .catch(() => {});
-            await forget(saved);
+            api.onRotated = () => persist(saved, api.saved());
+            let revoked = true;
+            try {
+              await api.resume(saved);
+              await api.logout();
+            } catch (e) {
+              revoked = e instanceof ApiError && e.status === 401;
+            }
+            // Not revoked (offline): keep the rotated record, so the next launch tries again.
+            await (revoked
+              ? forget(saved)
+              : deleteIdentity(account(saved))
+            ).catch(() => {});
             set({
               canResume: false,
               error: 'Log in again to unlock your messages on this device.',
@@ -252,11 +274,10 @@ export function createSessionStore(
           const api = connect(saved, saved.userId);
           try {
             await api.resume(saved);
-          } catch (error) {
+          } catch {
+            // Only a refusal (401) gets here, and onExpired has already reset the store.
             await releaseKey(identity).catch(() => {});
-            // A refused rotation already reset the store through onExpired.
-            if (error instanceof ApiError && error.status === 401) return;
-            throw error;
+            return;
           }
           if (get().api !== api) {
             await releaseKey(identity).catch(() => {});
@@ -271,7 +292,8 @@ export function createSessionStore(
         run(async () => {
           const api = connect({
             server: server.trim().replace(/\/+$/, ''),
-            machineId: newMachineId(),
+            // One id per sign-in, persisted with the session it belongs to.
+            machineId: await randomId(),
           });
           const result = await api.login(email.trim(), password);
           if (get().api !== api) return api.logout().catch(() => {});
@@ -323,13 +345,21 @@ export function createSessionStore(
           error: null,
         });
         // Local state is gone first; server revocation and key release are best effort.
-        await Promise.allSettled([
+        const [, , wiped] = await Promise.allSettled([
           api?.logout(),
           releaseAll(),
-          at && stage.kind === 'signed_in'
-            ? forget({ ...at, userId: stage.userId })
-            : deleteSession(),
+          forget(
+            at && stage.kind === 'signed_in'
+              ? { ...at, userId: stage.userId }
+              : undefined,
+          ),
         ]);
+        // The saved sign-in survived: say so rather than reopen it silently next launch.
+        if (wiped.status === 'rejected')
+          set({
+            error:
+              'Signed out, but this device could not remove your saved sign-in. If the app reopens it, sign out again.',
+          });
       },
     };
   });

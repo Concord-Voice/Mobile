@@ -20,6 +20,13 @@ export type ChatLine = {
 };
 
 const UNREADABLE = 'This message could not be decrypted.';
+const NO_KEY =
+  'The key for this message could not be loaded. Reopen the conversation to retry.';
+/** How long a refused epoch is not asked for again: labels are the sender's choice. */
+const REFUSED_MS = 30_000;
+
+/** The key could not be fetched or unwrapped, as opposed to a message that will not decrypt. */
+class KeyUnavailable extends Error {}
 
 /** Desktop wraps a message with a GIF as {"text", "gif_slug"} before encrypting it. */
 function messageText(plaintext: string): string {
@@ -34,6 +41,7 @@ function messageText(plaintext: string): string {
   return plaintext;
 }
 
+// ponytail: Math.random is enough here; the nonce only pairs a send with its ack and is no secret.
 function randomNonce(): string {
   return Array.from({ length: 4 }, () =>
     Math.floor(Math.random() * 0x100000000)
@@ -51,6 +59,10 @@ export class Conversation {
   /** Called after every change to lines. */
   onChange: (() => void) | null = null;
   private readonly keys = new Map<number, Promise<KeyHandle>>();
+  /** Epochs whose fetch failed, by when: not asked for again until REFUSED_MS passes. */
+  private readonly refused = new Map<number, number>();
+  /** Highest epoch whose key unwrapped; live labels far beyond it are not fetched. */
+  private confirmed = 0;
   private current: number | null = null;
   private socket: DmSocket | null = null;
   private closed = false;
@@ -66,25 +78,38 @@ export class Conversation {
       DmSocket.open(url, createSocket),
   ) {}
 
-  /** The key for an epoch, fetched and unwrapped once. */
+  /** The key for an epoch (0: the current one), fetched and unwrapped once. */
   private keyFor(version: number): Promise<KeyHandle> {
     if (this.closed) return Promise.reject(new Error('Conversation closed'));
     let key = this.keys.get(version);
-    if (!key) {
-      key = this.api.dmKey(this.id, version).then(async k => {
+    if (key) return key;
+    const failedAt = this.refused.get(version);
+    if (failedAt !== undefined && Date.now() - failedAt < REFUSED_MS)
+      return Promise.reject(new KeyUnavailable());
+    key = this.api.dmKey(this.id, version || undefined).then(
+      async k => {
         if (this.closed) throw new Error('Conversation closed');
+        // The server is authoritative: a key served for another epoch must not be used under this label.
+        if (version && k.keyVersion !== version) throw new KeyUnavailable();
         const handle = await unwrapChannelKey(k.wrappedKey, this.identity);
         // Closed while unwrapping: close() could not see this handle, so release it here.
         if (this.closed) {
           await releaseKey(handle).catch(() => {});
           throw new Error('Conversation closed');
         }
+        this.confirmed = Math.max(this.confirmed, k.keyVersion);
         return handle;
-      });
-      // A failed fetch is not cached, so the next message tries again.
-      key.catch(() => this.keys.delete(version));
-      this.keys.set(version, key);
-    }
+      },
+      () => {
+        throw new KeyUnavailable();
+      },
+    );
+    // A failed fetch is not cached, but is not retried for a while either.
+    key.catch(() => {
+      this.keys.delete(version);
+      this.refused.set(version, Date.now());
+    });
+    this.keys.set(version, key);
     return key;
   }
 
@@ -94,15 +119,32 @@ export class Conversation {
     },
   ): Promise<ChatLine> {
     const base = { id: m.id, userId: m.userId, sender: m.sender ?? '' };
+    const open = async (version: number) =>
+      messageText(await decryptMessage(m.content, await this.keyFor(version)));
     try {
-      const plain = await decryptMessage(
-        m.content,
-        await this.keyFor(m.keyVersion),
-      );
-      return { ...base, text: messageText(plain) };
-    } catch {
-      return { ...base, text: UNREADABLE, unreadable: true };
+      return { ...base, text: await open(m.keyVersion) };
+    } catch (error) {
+      // Older clients labelled every write 1 whatever key they used: try the current key too.
+      if (m.keyVersion === 1) {
+        try {
+          return { ...base, text: await open(0) };
+        } catch {
+          // Report the labelled epoch's failure below.
+        }
+      }
+      const text = error instanceof KeyUnavailable ? NO_KEY : UNREADABLE;
+      return { ...base, text, unreadable: true };
     }
+  }
+
+  private unreadable(m: DmMessage): ChatLine {
+    return {
+      id: m.id,
+      userId: m.userId,
+      sender: m.sender ?? '',
+      text: UNREADABLE,
+      unreadable: true,
+    };
   }
 
   private add(line: ChatLine): void {
@@ -123,15 +165,21 @@ export class Conversation {
     this.socket = socket;
     socket.onMessage = (m: DmMessage) => {
       if (m.conversationId !== this.id) return;
-      // A peer already on a newer epoch means the key rotated: send under it too.
-      if (this.current !== null && m.keyVersion > this.current)
-        this.current = m.keyVersion;
       this.live = this.live
-        .then(() => this.decrypt(m))
+        .then(() =>
+          // A label far past any epoch seen is not worth a fetch (and a key handle).
+          this.confirmed && m.keyVersion > this.confirmed + 1
+            ? this.unreadable(m)
+            : this.decrypt(m),
+        )
         .then(line => {
           this.add(line);
+          if (line.unreadable || this.closed) return;
+          // A peer proven on a newer epoch means the key rotated: send under it too.
+          if (this.current !== null && m.keyVersion > this.current)
+            this.current = m.keyVersion;
           // Shown while open, so it is read; the list's unread badge follows.
-          if (m.userId !== this.me && !this.closed)
+          if (m.userId !== this.me)
             this.api.markDmRead(this.id).catch(() => {});
         });
     };

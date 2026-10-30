@@ -361,6 +361,14 @@ describe('ConcordApi', () => {
               key_version: 2,
               created_at: 't1',
             },
+            {
+              id: 'm0',
+              user_id: PEER,
+              username: 'peer',
+              display_name: '',
+              content: 'YQ==',
+              created_at: 't0',
+            },
           ],
         },
       ],
@@ -376,8 +384,16 @@ describe('ConcordApi', () => {
       keyVersion: 2,
     });
     await expect(api.dmKey('bad')).rejects.toThrow('Invalid API response');
-    // Oldest first, server-authored rows left out.
+    // Oldest first, server-authored rows left out, an unlabelled row kept as epoch 0.
     expect(await api.dmHistory('c1')).toEqual([
+      {
+        id: 'm0',
+        userId: PEER,
+        sender: 'peer',
+        content: 'YQ==',
+        keyVersion: 0,
+        createdAt: 't0',
+      },
       {
         id: 'm1',
         userId: PEER,
@@ -426,7 +442,11 @@ describe('ConcordApi', () => {
       ],
       'POST /auth/ws-ticket': () => [200, { ticket: 'tkt' }],
     });
-    await next.resume(saved as NonNullable<typeof saved>);
+    // A tampered record's extra fields are not picked up.
+    await next.resume({
+      ...(saved as NonNullable<typeof saved>),
+      accessToken: 'INJECTED',
+    } as NonNullable<typeof saved>);
     const refresh = calls.find(c => c.key === 'POST /auth/refresh');
     expect(refresh?.headers['X-Refresh-Token']).toBe('r2');
     // No access token yet, so none is sent.
@@ -751,6 +771,38 @@ describe('DmSocket', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('maps the sender and time of live messages', async () => {
+    let socket!: FakeSocket;
+    const dm = await DmSocket.open(
+      'ws://x',
+      () => (socket = new FakeSocket(() => undefined)),
+    );
+    const got: Array<[string | undefined, string | undefined]> = [];
+    dm.onMessage = m => got.push([m.sender, m.createdAt]);
+    const frame = { conversation_id: CONV, user_id: PEER, content: 'c' };
+    socket.emit('dm_message', {
+      ...frame,
+      id: 'a',
+      key_version: 1,
+      display_name: 'Peer P',
+      username: 'peer',
+      created_at: 't',
+    });
+    socket.emit('dm_message', {
+      ...frame,
+      id: 'b',
+      key_version: 1,
+      display_name: '',
+      username: 'peer',
+    });
+    socket.emit('dm_message', { ...frame, id: 'c', key_version: 1 });
+    expect(got).toEqual([
+      ['Peer P', 't'],
+      ['peer', undefined],
+      [undefined, undefined],
+    ]);
   });
 
   it('ignores malformed and unrelated frames and fails waiters on error frames', async () => {

@@ -1,6 +1,6 @@
 /**
  * Control-plane client for the mobile app, carried over from the #663 probe.
- * Holds tokens in memory only; key material never passes through here.
+ * Holds tokens in memory; key material never passes through here.
  * Not yet covered: WebAuthn MFA. The session store persists what `saved()` returns.
  */
 
@@ -100,7 +100,7 @@ export class ConcordApi {
   private readonly base: string;
   /** Called when the server refuses a rotation and the session ends on its own. */
   onExpired: (() => void) | null = null;
-  /** Called whenever the token pair changes, so a persisted copy never holds a spent token. */
+  /** Called whenever the token pair changes, so a persisted copy can be rewritten (best effort). */
   onRotated: (() => void) | null = null;
   /** App Attest, used only when the server asks for attestation. Null: never attest. */
   attester: Attester | null = null;
@@ -257,7 +257,9 @@ export class ConcordApi {
    * network failure keeps it, and the next call refreshes again.
    */
   async resume(saved: SavedSession): Promise<void> {
-    this.session = { accessToken: '', ...saved };
+    // Picked field by field: a tampered record cannot smuggle in an access token.
+    const { refreshToken, sessionId, userId } = saved;
+    this.session = { accessToken: '', refreshToken, sessionId, userId };
     try {
       await this.refresh();
     } catch (error) {
@@ -560,12 +562,7 @@ export class ConcordApi {
   async dmHistory(conversationId: string): Promise<DmEncrypted[]> {
     const rows = await this.dmMessages(conversationId);
     return rows
-      .filter(
-        m =>
-          (m.type ?? 'text') === 'text' &&
-          Number.isSafeInteger(m.key_version) &&
-          (m.key_version as number) >= 1,
-      )
+      .filter(m => (m.type ?? 'text') === 'text')
       .map(m => ({
         id: text(m.id),
         userId: text(m.user_id),
@@ -574,7 +571,11 @@ export class ConcordApi {
             ? m.display_name
             : text(m.username),
         content: text(m.content),
-        keyVersion: m.key_version as number,
+        // Unlabelled (or garbled) rows predate epochs: 0 means the current key, as on desktop.
+        keyVersion:
+          Number.isSafeInteger(m.key_version) && (m.key_version as number) >= 1
+            ? (m.key_version as number)
+            : 0,
         createdAt: text(m.created_at),
       }))
       .reverse();

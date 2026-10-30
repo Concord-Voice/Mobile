@@ -31,7 +31,35 @@ afterEach(async () => {
     api: null,
     identity: null,
     error: null,
+    canResume: false,
   });
+});
+
+const pressText = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  label: string,
+) => {
+  let node = tree.root
+    .findAllByType('Text' as never)
+    .find(t => t.props.children === label) as
+    | ReactTestRenderer.ReactTestInstance
+    | null
+    | undefined;
+  while (node && !node.props.onPress) node = node.parent;
+  await ReactTestRenderer.act(async () => node?.props.onPress());
+};
+
+test('shows nothing while starting, then offers Face ID for a saved session', async () => {
+  const restore = jest.fn(async () => {});
+  useSession.setState({ stage: { kind: 'starting' }, restore });
+  const tree = await render();
+  expect(restore).toHaveBeenCalledTimes(1);
+  expect(text(tree)).not.toContain('Log in');
+  await ReactTestRenderer.act(async () =>
+    useSession.setState({ stage: { kind: 'signed_out' }, canResume: true }),
+  );
+  await pressText(tree, 'Unlock with Face ID');
+  expect(restore).toHaveBeenCalledTimes(2);
 });
 
 test('starts on the sign-in screen', async () => {
@@ -179,6 +207,17 @@ test('keeps edits made while a send is in flight and restores a failed draft', a
     await sending;
   });
   expect(input().props.value).toBe('three');
+
+  // A new draft typed while a send fails is kept, not replaced by the failed text.
+  await ReactTestRenderer.act(async () => {
+    sending = pressSend();
+  });
+  await ReactTestRenderer.act(async () => input().props.onChangeText('four'));
+  await ReactTestRenderer.act(async () => {
+    finish(false);
+    await sending;
+  });
+  expect(input().props.value).toBe('four');
 });
 
 test('sends a message and shows decrypted lines', async () => {
