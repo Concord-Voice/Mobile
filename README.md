@@ -25,6 +25,11 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   refresh with one shared rotation and a single retry on 401, logout), the DM WebSocket,
   and `createSocket`, which opens every socket with the app's fixed origin
   `app://concord-mobile`. Servers must list that origin in `ALLOWED_ORIGINS`.
+  Every request and the socket URL also carry the app's version (the bundle's marketing
+  version as major.minor.patch) and platform (`X-Concord-Client-Version`,
+  `X-Concord-Client-Platform`; `client_version`, `client_platform` on the socket), for the
+  server's minimum-version check. A refusal (`CLIENT_VERSION_TOO_OLD`) asks the user to
+  update.
 - DM conversations (`src/state/conversation.ts`, `src/ui/Chat.tsx`): opening a
   conversation loads the newest page, fetches and unwraps each key epoch it uses once
   (`GET /e2ee/keys/:id?version=N`), decrypts natively, then follows new messages over
