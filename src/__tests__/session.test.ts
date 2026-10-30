@@ -5,6 +5,12 @@ jest.mock('../ConcordCrypto', () => ({
   unlockIdentity: jest.fn(async () => 'HANDLE'),
   releaseAll: jest.fn(async () => {}),
   releaseKey: jest.fn(async () => {}),
+  persistIdentity: jest.fn(async () => {}),
+  loadIdentity: jest.fn(async () => 'SAVED_HANDLE'),
+  deleteIdentity: jest.fn(async () => {}),
+  saveSession: jest.fn(async () => {}),
+  loadSession: jest.fn(async () => null),
+  deleteSession: jest.fn(async () => {}),
   nativeErrorCode: (e: unknown) =>
     (e as { code?: string } | null)?.code ?? null,
 }));
@@ -12,7 +18,23 @@ const crypto = jest.requireMock('../ConcordCrypto') as {
   unlockIdentity: jest.Mock;
   releaseAll: jest.Mock;
   releaseKey: jest.Mock;
+  persistIdentity: jest.Mock;
+  loadIdentity: jest.Mock;
+  deleteIdentity: jest.Mock;
+  saveSession: jest.Mock;
+  loadSession: jest.Mock;
+  deleteSession: jest.Mock;
 };
+
+const SAVED = {
+  server: 'https://c.test',
+  machineId: 'machine-1',
+  refreshToken: 'rt-old', // pragma: allowlist secret
+  sessionId: 'sess-1',
+  userId: 'user-1',
+};
+const lastSaved = () =>
+  JSON.parse(crypto.saveSession.mock.calls.at(-1)[0]) as typeof SAVED;
 
 const KEYS = {
   wrappedPrivateKey: 'V1JBUA==', // pragma: allowlist secret
@@ -24,6 +46,10 @@ function fakeApi(overrides: Partial<Record<string, jest.Mock>> = {}) {
   const api = {
     userId: 'user-1',
     onExpired: null as (() => void) | null,
+    onRotated: null as (() => void) | null,
+    tokens: { refreshToken: 'rt-1', sessionId: 'sess-1', userId: 'user-1' },
+    saved: jest.fn((): unknown => api.tokens),
+    resume: jest.fn(async () => {}),
     login: jest.fn(async () => ({ kind: 'signed_in', keys: KEYS })),
     verifyMfa: jest.fn(async () => KEYS),
     sendMfaEmail: jest.fn(async () => {}),
@@ -35,7 +61,11 @@ function fakeApi(overrides: Partial<Record<string, jest.Mock>> = {}) {
 
 function store(api: ReturnType<typeof fakeApi>) {
   const makeApi = jest.fn(() => api as unknown as ConcordApi);
-  return { useStore: createSessionStore(makeApi), makeApi };
+  const useStore = createSessionStore(makeApi);
+  expect(useStore.getState().stage.kind).toBe('starting');
+  // As after a launch with nothing saved.
+  useStore.setState({ stage: { kind: 'signed_out' } });
+  return { useStore, makeApi };
 }
 
 beforeEach(() => jest.clearAllMocks());
@@ -180,6 +210,135 @@ describe('session store', () => {
       identity: null,
       error: 'Your session ended. Log in again.',
     });
+  });
+
+  it('keeps the session behind Face ID and saves every rotation', async () => {
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(crypto.persistIdentity).toHaveBeenCalledWith(
+      'HANDLE',
+      'user-1@https://c.test',
+    );
+    expect(lastSaved()).toMatchObject({
+      server: 'https://c.test',
+      refreshToken: 'rt-1',
+      userId: 'user-1',
+    });
+    api.tokens = { ...api.tokens, refreshToken: 'rt-2' };
+    api.onRotated?.();
+    expect(lastSaved().refreshToken).toBe('rt-2');
+  });
+
+  it('saves nothing when the device has no biometrics', async () => {
+    crypto.persistIdentity.mockRejectedValueOnce(new Error('no biometrics'));
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(crypto.saveSession).not.toHaveBeenCalled();
+    expect(useStore.getState().stage.kind).toBe('signed_in');
+  });
+
+  it('resumes a saved session with Face ID on launch', async () => {
+    crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
+    const api = fakeApi();
+    const { useStore, makeApi } = store(api);
+    await useStore.getState().restore();
+    expect(makeApi).toHaveBeenCalledWith('https://c.test', 'machine-1');
+    expect(crypto.loadIdentity).toHaveBeenCalledWith(
+      'user-1@https://c.test',
+      expect.any(String),
+    );
+    expect(api.resume).toHaveBeenCalledWith(SAVED);
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_in', userId: 'user-1' },
+      identity: 'SAVED_HANDLE',
+    });
+    expect(lastSaved()).toMatchObject({
+      machineId: 'machine-1',
+      refreshToken: 'rt-1',
+    });
+  });
+
+  it('starts signed out with nothing or garbage saved', async () => {
+    for (const raw of [null, '{"server":"x"}', 'not json']) {
+      crypto.loadSession.mockResolvedValueOnce(raw);
+      const { useStore } = store(fakeApi());
+      await useStore.getState().restore();
+      expect(useStore.getState()).toMatchObject({
+        stage: { kind: 'signed_out' },
+        canResume: false,
+      });
+    }
+    expect(crypto.loadIdentity).not.toHaveBeenCalled();
+  });
+
+  it('keeps the saved session when Face ID is cancelled', async () => {
+    crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
+    crypto.loadIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_USERCANCELLED' }),
+    );
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().restore();
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      canResume: true,
+    });
+    expect(crypto.deleteSession).not.toHaveBeenCalled();
+    expect(api.resume).not.toHaveBeenCalled();
+  });
+
+  it('revokes and forgets a session whose Face ID key is gone', async () => {
+    crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
+    crypto.loadIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_NOTFOUND' }),
+    );
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().restore();
+    expect(api.resume).toHaveBeenCalledWith(SAVED);
+    expect(api.logout).toHaveBeenCalled();
+    expect(crypto.deleteSession).toHaveBeenCalled();
+    expect(crypto.deleteIdentity).toHaveBeenCalledWith('user-1@https://c.test');
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      canResume: false,
+      error: expect.stringMatching(/Log in again/),
+    });
+  });
+
+  it('forgets a saved session the server refuses', async () => {
+    crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
+    const api = fakeApi();
+    api.resume.mockImplementationOnce(async () => {
+      api.onExpired?.();
+      throw new ApiError(401, undefined);
+    });
+    const { useStore } = store(api);
+    await useStore.getState().restore();
+    expect(crypto.releaseKey).toHaveBeenCalledWith('SAVED_HANDLE');
+    expect(crypto.deleteSession).toHaveBeenCalled();
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      api: null,
+      error: 'Your session ended. Log in again.',
+    });
+  });
+
+  it('never restores over a live session', async () => {
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    await useStore.getState().restore();
+    expect(crypto.loadSession).not.toHaveBeenCalled();
+  });
+
+  it('forgets the saved session on sign-out', async () => {
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    await useStore.getState().signOut();
+    expect(crypto.deleteSession).toHaveBeenCalled();
+    expect(crypto.deleteIdentity).toHaveBeenCalledWith('user-1@https://c.test');
   });
 });
 

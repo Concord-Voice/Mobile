@@ -316,6 +316,65 @@ describe('ConcordApi', () => {
     expect(api.userId).toBe(ME);
   });
 
+  it('reports every rotation and resumes a saved session', async () => {
+    const { api } = signedIn({
+      'POST /auth/refresh': () => [
+        200,
+        { access_token: 'a2', refresh_token: 'r2', session_id: 's1' },
+      ],
+    });
+    expect(api.saved()).toBeNull();
+    const rotated = jest.fn();
+    api.onRotated = rotated;
+    await api.login('e', 'p');
+    await api.refresh();
+    expect(rotated).toHaveBeenCalledTimes(2);
+    const saved = api.saved();
+    expect(saved).toEqual({
+      refreshToken: 'r2',
+      sessionId: 's1',
+      userId: ME,
+    });
+
+    const { api: next, calls } = signedIn({
+      'POST /auth/refresh': () => [
+        200,
+        { access_token: 'a3', refresh_token: 'r3', session_id: 's1' },
+      ],
+      'POST /auth/ws-ticket': () => [200, { ticket: 'tkt' }],
+    });
+    await next.resume(saved as NonNullable<typeof saved>);
+    const refresh = calls.find(c => c.key === 'POST /auth/refresh');
+    expect(refresh?.headers['X-Refresh-Token']).toBe('r2');
+    // No access token yet, so none is sent.
+    expect(refresh?.headers.Authorization).toBeUndefined();
+    await next.wsTicket();
+    expect(calls.at(-1)?.headers.Authorization).toBe('Bearer a3');
+    expect(next.userId).toBe(ME);
+  });
+
+  it('keeps a resumed session through a network failure, not a refusal', async () => {
+    const saved = { refreshToken: 'r1', sessionId: 's1', userId: ME };
+    const offline = new ConcordApi(
+      'https://api.example.test',
+      MACHINE,
+      (async () => {
+        throw new TypeError('Network request failed');
+      }) as unknown as typeof fetch,
+    );
+    await offline.resume(saved);
+    expect(offline.saved()).toEqual(saved);
+
+    const { api } = signedIn({
+      'POST /auth/refresh': () => [401, { code: 'invalid_refresh' }],
+    });
+    const expired = jest.fn();
+    api.onExpired = expired;
+    await expect(api.resume(saved)).rejects.toMatchObject({ status: 401 });
+    expect(expired).toHaveBeenCalledTimes(1);
+    expect(api.saved()).toBeNull();
+  });
+
   it('ends the session when the refresh token is refused', async () => {
     const { api } = signedIn({
       'POST /auth/refresh': () => [401, { code: 'invalid_refresh' }],

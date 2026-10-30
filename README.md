@@ -24,6 +24,14 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   refresh with one shared rotation and a single retry on 401, logout), the DM WebSocket,
   and `createSocket`, which opens every socket with the app's fixed origin
   `app://concord-mobile`. Servers must list that origin in `ALLOWED_ORIGINS`.
+- Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
+  is stored behind Face ID / Touch ID, and the session record (server, machine id,
+  refresh token) in a device-only Keychain item readable after first unlock. The record
+  is rewritten on every token rotation. On launch, Face ID reopens the key and the
+  refresh token rotates back into the same server session. A cancelled prompt keeps
+  everything for an "Unlock with Face ID" retry; a changed Face ID set, a refused
+  refresh or a sign-out revokes the session and deletes both items. Devices with no
+  biometrics enrolled save nothing and sign in on every launch.
 
 The crypto and core code come from the #663 framework probe.
 
@@ -56,8 +64,6 @@ accounts can unlock; a legacy key-derivation account is refused with a distinct 
 ## Not built yet
 
 - Any real UI.
-- Persisted sessions: tokens live in memory, so each launch signs in again until a
-  native secure store holds the refresh token.
 - WebAuthn (passkey) MFA.
 - An Android native crypto module.
 - Native build and store-release CI.

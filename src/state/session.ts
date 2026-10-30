@@ -1,9 +1,15 @@
 import { create } from 'zustand';
 import {
+  deleteIdentity,
+  deleteSession,
   type KeyHandle,
+  loadIdentity,
+  loadSession,
   nativeErrorCode,
+  persistIdentity,
   releaseAll,
   releaseKey,
+  saveSession,
   unlockIdentity,
 } from '../ConcordCrypto';
 import { nativeAttester } from '../ConcordAttest';
@@ -12,9 +18,11 @@ import {
   ConcordApi,
   type LoginKeys,
   type MfaCodeMethod,
+  type SavedSession,
 } from '../core/ConcordApi';
 
 export type Stage =
+  | { kind: 'starting' }
   | { kind: 'signed_out' }
   | { kind: 'mfa'; challengeToken: string; methods: string[] }
   | { kind: 'signed_in'; userId: string };
@@ -25,13 +33,37 @@ export type SessionState = {
   error: string | null;
   api: ConcordApi | null;
   identity: KeyHandle | null;
+  /** A saved session exists that Face ID can reopen. */
+  canResume: boolean;
+  restore(): Promise<void>;
   signIn(server: string, email: string, password: string): Promise<void>;
   sendMfaEmail(): Promise<void>;
   verifyMfa(method: MfaCodeMethod, code: string): Promise<void>;
   signOut(): Promise<void>;
 };
 
-// ponytail: per-launch id; persist it with the session once a secure store exists.
+/** Where a session lives; the machine id must match the one the server session was minted for. */
+type Origin = { server: string; machineId: string };
+type Persisted = Origin & SavedSession;
+
+const UNLOCK_REASON = 'Unlock your Concord messages';
+
+function account(p: { server: string; userId: string }): string {
+  return `${p.userId}@${p.server}`;
+}
+
+function parsePersisted(raw: string): Persisted | null {
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    const keys = ['server', 'machineId', 'refreshToken', 'sessionId', 'userId'];
+    if (!keys.every(k => typeof v[k] === 'string' && v[k] !== '')) return null;
+    return v as unknown as Persisted;
+  } catch {
+    return null;
+  }
+}
+
+// One id per sign-in, persisted with the session it belongs to.
 function newMachineId(): string {
   const hex = () => Math.floor(Math.random() * 16).toString(16);
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c =>
@@ -77,6 +109,12 @@ export function createSessionStore(
 ) {
   // Held only between the password step and the MFA step, never in state.
   let pendingPassword: string | null = null;
+  // Where the current api points, for persisting and forgetting its session.
+  let origin: Origin | null = null;
+
+  /** Drops the saved session and the Face ID copy of the identity; best effort. */
+  const forget = (p: { server: string; userId: string }) =>
+    Promise.allSettled([deleteSession(), deleteIdentity(account(p))]);
 
   return create<SessionState>((set, get) => {
     const run = async (work: () => Promise<void>) => {
@@ -88,6 +126,53 @@ export function createSessionStore(
       } finally {
         set({ busy: false });
       }
+    };
+
+    const connect = (at: Origin): ConcordApi => {
+      const api = makeApi(at.server, at.machineId);
+      api.onExpired = () => {
+        if (get().api !== api) return;
+        pendingPassword = null;
+        set({
+          stage: { kind: 'signed_out' },
+          api: null,
+          identity: null,
+          canResume: false,
+          error: 'Your session ended. Log in again.',
+        });
+        releaseAll().catch(() => {});
+        forget({ ...at, userId: api.userId }).catch(() => {});
+      };
+      origin = at;
+      set({ api });
+      return api;
+    };
+
+    /** Saves the current token pair, so the persisted copy never holds a spent refresh token. */
+    const writer = (api: ConcordApi, at: Origin) => () => {
+      const saved = api.saved();
+      // ponytail: a write racing a sign-out can outlive it; the next launch's refresh is refused and cleans up.
+      if (saved && get().api === api)
+        saveSession(
+          JSON.stringify({
+            server: at.server,
+            machineId: at.machineId,
+            ...saved,
+          }),
+        ).catch(() => {});
+    };
+
+    /** Keeps the session across launches: the identity behind Face ID, the tokens beside it. */
+    const remember = async (api: ConcordApi, identity: KeyHandle) => {
+      const at = origin;
+      if (!at) return;
+      try {
+        await persistIdentity(identity, account({ ...at, userId: api.userId }));
+      } catch {
+        return; // No biometrics enrolled: this device signs in on every launch.
+      }
+      api.onRotated = writer(api, at);
+      api.onRotated();
     };
 
     const finish = async (
@@ -117,33 +202,73 @@ export function createSessionStore(
         return;
       }
       set({ identity, stage: { kind: 'signed_in', userId: api.userId } });
+      await remember(api, identity);
     };
 
     return {
-      stage: { kind: 'signed_out' },
+      stage: { kind: 'starting' },
       busy: false,
       error: null,
       api: null,
       identity: null,
+      canResume: false,
+
+      restore: () =>
+        run(async () => {
+          // Only from launch or the sign-in screen: never over a live session or MFA step.
+          const { kind } = get().stage;
+          if (kind !== 'starting' && kind !== 'signed_out') return;
+          const raw = await loadSession().catch(() => null);
+          const saved = raw === null ? null : parsePersisted(raw);
+          if (!saved) {
+            set({ stage: { kind: 'signed_out' }, canResume: false });
+            return;
+          }
+          set({ canResume: true });
+          let identity: KeyHandle;
+          try {
+            identity = await loadIdentity(account(saved), UNLOCK_REASON);
+          } catch (error) {
+            set({ stage: { kind: 'signed_out' } });
+            // Cancelled: keep everything, so "Unlock" can try again.
+            if (nativeErrorCode(error) !== 'E_CONCORD_CRYPTO_NOTFOUND') return;
+            // Face ID set changed, so the key copy is gone: end the server session too.
+            const api = makeApi(saved.server, saved.machineId);
+            await api
+              .resume(saved)
+              .then(() => api.logout())
+              .catch(() => {});
+            await forget(saved);
+            set({
+              canResume: false,
+              error: 'Log in again to unlock your messages on this device.',
+            });
+            return;
+          }
+          const api = connect(saved);
+          try {
+            await api.resume(saved);
+          } catch (error) {
+            await releaseKey(identity).catch(() => {});
+            // A refused rotation already reset the store through onExpired.
+            if (error instanceof ApiError && error.status === 401) return;
+            throw error;
+          }
+          if (get().api !== api) {
+            await releaseKey(identity).catch(() => {});
+            return;
+          }
+          api.onRotated = writer(api, saved);
+          api.onRotated();
+          set({ identity, stage: { kind: 'signed_in', userId: api.userId } });
+        }),
 
       signIn: (server, email, password) =>
         run(async () => {
-          const api = makeApi(
-            server.trim().replace(/\/+$/, ''),
-            newMachineId(),
-          );
-          api.onExpired = () => {
-            if (get().api !== api) return;
-            pendingPassword = null;
-            set({
-              stage: { kind: 'signed_out' },
-              api: null,
-              identity: null,
-              error: 'Your session ended. Log in again.',
-            });
-            releaseAll().catch(() => {});
-          };
-          set({ api });
+          const api = connect({
+            server: server.trim().replace(/\/+$/, ''),
+            machineId: newMachineId(),
+          });
           const result = await api.login(email.trim(), password);
           if (get().api !== api) return api.logout().catch(() => {});
           if (result.kind === 'mfa') {
@@ -183,16 +308,24 @@ export function createSessionStore(
         }),
 
       signOut: async () => {
-        const { api } = get();
+        const { api, stage } = get();
+        const at = origin;
         pendingPassword = null;
         set({
           stage: { kind: 'signed_out' },
           api: null,
           identity: null,
+          canResume: false,
           error: null,
         });
         // Local state is gone first; server revocation and key release are best effort.
-        await Promise.allSettled([api?.logout(), releaseAll()]);
+        await Promise.allSettled([
+          api?.logout(),
+          releaseAll(),
+          at && stage.kind === 'signed_in'
+            ? forget({ ...at, userId: stage.userId })
+            : deleteSession(),
+        ]);
       },
     };
   });

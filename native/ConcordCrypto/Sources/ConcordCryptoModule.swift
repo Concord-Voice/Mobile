@@ -136,4 +136,34 @@ final class ConcordCryptoModule: NSObject {
       return NSNull()
     }
   }
+
+  private let sessions = ConcordSessionKeychain()
+
+  @objc func saveSession(
+    _ record: String, resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject) {
+      try self.sessions.save(record)
+      return NSNull()
+    }
+  }
+
+  @objc func loadSession(
+    _ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject) {
+      guard let record = try self.sessions.load() else { return NSNull() }
+      return record
+    }
+  }
+
+  @objc func deleteSession(
+    _ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject) {
+      try self.sessions.delete()
+      return NSNull()
+    }
+  }
 }

@@ -1,12 +1,19 @@
 /**
  * Control-plane client for the mobile app, carried over from the #663 probe.
  * Holds tokens in memory only; key material never passes through here.
- * Not yet covered: WebAuthn MFA and persisted sessions.
+ * Not yet covered: WebAuthn MFA. The session store persists what `saved()` returns.
  */
 
 import { INVALID_KEY, type Attester } from '../ConcordAttest';
 
 export type Fetch = typeof fetch;
+
+/** What survives a relaunch: enough to rotate back into the same server session. */
+export type SavedSession = {
+  refreshToken: string;
+  sessionId: string;
+  userId: string;
+};
 
 export type Session = {
   accessToken: string;
@@ -83,6 +90,8 @@ export class ConcordApi {
   private readonly base: string;
   /** Called when the server refuses a rotation and the session ends on its own. */
   onExpired: (() => void) | null = null;
+  /** Called whenever the token pair changes, so a persisted copy never holds a spent token. */
+  onRotated: (() => void) | null = null;
   /** App Attest, used only when the server asks for attestation. Null: never attest. */
   attester: Attester | null = null;
   private attestation: { token: string; sessionId: string } | null = null;
@@ -171,7 +180,9 @@ export class ConcordApi {
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (this.session) {
-      headers.Authorization = `Bearer ${this.session.accessToken}`;
+      // A resumed session has no access token until its first rotation.
+      if (this.session.accessToken)
+        headers.Authorization = `Bearer ${this.session.accessToken}`;
       headers['X-Session-ID'] = this.session.sessionId;
       // The token is bound to the session that minted it.
       if (this.attestation?.sessionId === this.session.sessionId)
@@ -222,6 +233,26 @@ export class ConcordApi {
       sessionId: text(result.session_id),
       userId: userId ?? text(record(result.user).id),
     };
+    this.onRotated?.();
+  }
+
+  saved(): SavedSession | null {
+    if (!this.session) return null;
+    const { refreshToken, sessionId, userId } = this.session;
+    return { refreshToken, sessionId, userId };
+  }
+
+  /**
+   * Picks a persisted session back up and rotates it. Only a refusal (401) ends it; a
+   * network failure keeps it, and the next call refreshes again.
+   */
+  async resume(saved: SavedSession): Promise<void> {
+    this.session = { accessToken: '', ...saved };
+    try {
+      await this.refresh();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) throw error;
+    }
   }
 
   private refreshing: Promise<void> | null = null;

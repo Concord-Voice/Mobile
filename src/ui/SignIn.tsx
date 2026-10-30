@@ -64,13 +64,20 @@ function ErrorLine() {
 }
 
 export function SignIn() {
-  const signIn = useSession(s => s.signIn);
+  const { signIn, restore, canResume } = useSession();
   const [server, setServer] = useState('https://');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>Concord Voice</Text>
+      {canResume ? (
+        <Submit
+          title="Unlock with Face ID"
+          disabled={false}
+          onPress={restore}
+        />
+      ) : null}
       <Field
         label="Server"
         value={server}
