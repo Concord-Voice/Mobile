@@ -128,10 +128,14 @@ export function createSessionStore(
       }
     };
 
-    const connect = (at: Origin): ConcordApi => {
+    /** knownUserId: the account a resumed session belongs to, before any stage says so. */
+    const connect = (at: Origin, knownUserId?: string): ConcordApi => {
       const api = makeApi(at.server, at.machineId);
       api.onExpired = () => {
         if (get().api !== api) return;
+        // The api has already dropped its session, so its userId is gone: read ours.
+        const { stage } = get();
+        const userId = stage.kind === 'signed_in' ? stage.userId : knownUserId;
         pendingPassword = null;
         set({
           stage: { kind: 'signed_out' },
@@ -141,7 +145,7 @@ export function createSessionStore(
           error: 'Your session ended. Log in again.',
         });
         releaseAll().catch(() => {});
-        forget({ ...at, userId: api.userId }).catch(() => {});
+        (userId ? forget({ ...at, userId }) : deleteSession()).catch(() => {});
       };
       origin = at;
       set({ api });
@@ -245,7 +249,7 @@ export function createSessionStore(
             });
             return;
           }
-          const api = connect(saved);
+          const api = connect(saved, saved.userId);
           try {
             await api.resume(saved);
           } catch (error) {

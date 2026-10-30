@@ -204,3 +204,65 @@ test('closes a socket that opens after the conversation closed', async () => {
   expect(socket.close).toHaveBeenCalled();
   expect(socket.subscribe).not.toHaveBeenCalled();
 });
+
+test('subscribes before reading history, so a message sent in between is kept', async () => {
+  const { api, socket, conv } = setup([row('m1', '1:hi')]);
+  const order: string[] = [];
+  socket.subscribe.mockImplementationOnce(async () => {
+    order.push('subscribe');
+  });
+  api.dmHistory.mockImplementationOnce(async () => {
+    order.push('history');
+    // Arrives after the subscription, before the history page is decrypted.
+    socket.onMessage?.({
+      id: 'm2',
+      conversationId: 'c1',
+      userId: PEER,
+      content: '1:between',
+      keyVersion: 1,
+    });
+    return [row('m1', '1:hi')];
+  });
+  await conv.start();
+  await flush();
+  expect(order).toEqual(['subscribe', 'history']);
+  expect(conv.lines.map(l => l.text)).toEqual(['hi', 'between']);
+});
+
+test('allocates no key after close, even mid-fetch', async () => {
+  const { api, conv } = setup();
+  let resolveKey!: (k: { wrappedKey: string; keyVersion: number }) => void;
+  api.dmKey.mockImplementationOnce(
+    () =>
+      new Promise(resolve => {
+        resolveKey = resolve;
+      }),
+  );
+  const starting = conv.start();
+  await flush();
+  conv.close();
+  resolveKey({ wrappedKey: 'w1', keyVersion: 1 });
+  await starting;
+  await flush();
+  // Epoch 1's wrap arrived after close and was never unwrapped; epoch 2's, unwrapped
+  // before close, was released by it.
+  expect(crypto.unwrapChannelKey).not.toHaveBeenCalledWith('w1', 'ID');
+  expect(crypto.releaseKey).toHaveBeenCalledWith('Kw2');
+
+  // A key whose unwrap finishes after close is released at once.
+  const late = setup();
+  let finishUnwrap!: (h: string) => void;
+  crypto.unwrapChannelKey.mockImplementationOnce(
+    () =>
+      new Promise(resolve => {
+        finishUnwrap = resolve;
+      }),
+  );
+  const lateStart = late.conv.start();
+  await flush();
+  late.conv.close();
+  finishUnwrap('Kw1');
+  await lateStart;
+  await flush();
+  expect(crypto.releaseKey).toHaveBeenCalledWith('Kw1');
+});

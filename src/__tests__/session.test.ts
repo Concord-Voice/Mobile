@@ -325,6 +325,24 @@ describe('session store', () => {
     });
   });
 
+  it('forgets the right account when a resumed session expires later', async () => {
+    crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().restore();
+    // Like ConcordApi: the session (and its userId) is gone before onExpired runs.
+    Object.defineProperty(api, 'userId', {
+      get: () => {
+        throw new Error('Not signed in');
+      },
+    });
+    api.onExpired?.();
+    await new Promise(setImmediate);
+    expect(crypto.deleteSession).toHaveBeenCalled();
+    expect(crypto.deleteIdentity).toHaveBeenCalledWith('user-1@https://c.test');
+    expect(useStore.getState().stage).toEqual({ kind: 'signed_out' });
+  });
+
   it('never restores over a live session', async () => {
     const api = fakeApi();
     const { useStore } = store(api);

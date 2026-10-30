@@ -53,10 +53,12 @@ export function Chat({
     if (!conversation || !text) return;
     setSending(true);
     setError(null);
+    // Cleared now, so edits made while sending are kept; restored if the send fails.
+    setDraft('');
     try {
       await conversation.send(text);
-      setDraft('');
     } catch (e) {
+      setDraft(current => current || text);
       setError(describeError(e));
     } finally {
       setSending(false);

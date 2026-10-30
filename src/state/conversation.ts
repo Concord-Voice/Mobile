@@ -66,11 +66,19 @@ export class Conversation {
 
   /** The key for an epoch, fetched and unwrapped once. */
   private keyFor(version: number): Promise<KeyHandle> {
+    if (this.closed) return Promise.reject(new Error('Conversation closed'));
     let key = this.keys.get(version);
     if (!key) {
-      key = this.api
-        .dmKey(this.id, version)
-        .then(k => unwrapChannelKey(k.wrappedKey, this.identity));
+      key = this.api.dmKey(this.id, version).then(async k => {
+        if (this.closed) throw new Error('Conversation closed');
+        const handle = await unwrapChannelKey(k.wrappedKey, this.identity);
+        // Closed while unwrapping: close() could not see this handle, so release it here.
+        if (this.closed) {
+          await releaseKey(handle).catch(() => {});
+          throw new Error('Conversation closed');
+        }
+        return handle;
+      });
       // A failed fetch is not cached, so the next message tries again.
       key.catch(() => this.keys.delete(version));
       this.keys.set(version, key);
@@ -101,17 +109,11 @@ export class Conversation {
     this.onChange?.();
   }
 
-  /** Loads and decrypts the newest page, then follows new messages live. */
+  /**
+   * Subscribes first, buffering live messages, then loads and decrypts the newest page,
+   * so nothing sent in between is missed. History and live lines merge by id.
+   */
   async start(): Promise<void> {
-    const history = await this.api.dmHistory(this.id);
-    const lines = await Promise.all(history.map(m => this.decrypt(m)));
-    if (this.closed) return;
-    // Live messages may have arrived meanwhile; history goes before them.
-    const seen = new Set(lines.map(l => l.id));
-    this.lines = [...lines, ...this.lines.filter(l => !seen.has(l.id))];
-    this.onChange?.();
-    this.api.markDmRead(this.id).catch(() => {});
-
     const socket = await this.openSocket(
       this.api.wsUrl(await this.api.wsTicket()),
     );
@@ -126,6 +128,16 @@ export class Conversation {
     };
     // ponytail: no reconnect; a dropped socket fails the next send and reopening the conversation reconnects.
     await socket.subscribe(this.id);
+
+    const history = await this.api.dmHistory(this.id);
+    if (this.closed) return;
+    const lines = await Promise.all(history.map(m => this.decrypt(m)));
+    if (this.closed) return;
+    // Live messages may have arrived meanwhile; history goes before them.
+    const seen = new Set(lines.map(l => l.id));
+    this.lines = [...lines, ...this.lines.filter(l => !seen.has(l.id))];
+    this.onChange?.();
+    this.api.markDmRead(this.id).catch(() => {});
   }
 
   /** Encrypts under the current key and sends; resolves once the server stores it. */

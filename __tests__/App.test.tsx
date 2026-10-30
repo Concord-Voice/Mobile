@@ -118,11 +118,67 @@ test('opens a conversation from the list and comes back', async () => {
     await ReactTestRenderer.act(async () => node?.props.onPress());
   };
   await press('Peer');
-  expect(api.dmHistory).toHaveBeenCalledWith('d1');
+  expect(api.wsTicket).toHaveBeenCalled();
   expect(text(tree)).toContain('Back');
   expect(text(tree)).toContain('Could not reach the server');
   await press('‹ Back');
   expect(text(tree)).toContain('Messages');
+});
+
+test('keeps edits made while a send is in flight and restores a failed draft', async () => {
+  let finish!: (ok: boolean) => void;
+  const fake = {
+    lines: [],
+    onChange: null,
+    start: jest.fn(async () => {}),
+    send: jest.fn(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          finish = ok => (ok ? resolve() : reject(new Error('offline')));
+        }),
+    ),
+    close: jest.fn(),
+  };
+  useSession.setState({
+    stage: { kind: 'signed_in', userId: 'u' },
+    api: {} as ConcordApi,
+    identity: 'HANDLE' as never,
+  });
+  const dm = { id: 'd1', title: 'Peer', unreadCount: 0, lastActivity: 'now' };
+  await ReactTestRenderer.act(async () => {
+    mounted = ReactTestRenderer.create(
+      <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+    );
+  });
+  const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+  const input = () => tree.root.findByProps({ accessibilityLabel: 'Message' });
+  const pressSend = () =>
+    tree.root
+      .findAll(
+        n => n.props.accessibilityLabel === 'Send' && !!n.props.onPress,
+      )[0]
+      .props.onPress();
+  await ReactTestRenderer.act(async () => input().props.onChangeText('one'));
+  let sending!: Promise<void>;
+  await ReactTestRenderer.act(async () => {
+    sending = pressSend();
+  });
+  await ReactTestRenderer.act(async () => input().props.onChangeText('two'));
+  await ReactTestRenderer.act(async () => {
+    finish(true);
+    await sending;
+  });
+  expect(input().props.value).toBe('two');
+
+  await ReactTestRenderer.act(async () => input().props.onChangeText('three'));
+  await ReactTestRenderer.act(async () => {
+    sending = pressSend();
+  });
+  await ReactTestRenderer.act(async () => {
+    finish(false);
+    await sending;
+  });
+  expect(input().props.value).toBe('three');
 });
 
 test('sends a message and shows decrypted lines', async () => {
