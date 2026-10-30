@@ -471,6 +471,44 @@ describe('session store edges', () => {
   });
 });
 
+describe('session store unlock failures and races', () => {
+  it('says so when Face ID is locked out, and keeps the record', async () => {
+    crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
+    crypto.loadIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('x'), {
+        code: 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+      }),
+    );
+    const { useStore } = store(fakeApi());
+    await useStore.getState().restore();
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      canResume: true,
+      error: expect.stringMatching(/Face ID could not unlock/),
+    });
+    expect(crypto.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('undoes an identity save that finishes after sign-out', async () => {
+    let saved!: () => void;
+    crypto.persistIdentity.mockReturnValueOnce(
+      new Promise<void>(resolve => {
+        saved = resolve;
+      }),
+    );
+    const { useStore } = store(fakeApi());
+    const signingIn = useStore.getState().signIn('https://c.test', 'm', 'pw');
+    await new Promise(setImmediate);
+    await useStore.getState().signOut();
+    crypto.deleteIdentity.mockClear();
+    crypto.saveSession.mockClear();
+    saved();
+    await signingIn;
+    expect(crypto.deleteIdentity).toHaveBeenCalledWith('user-1@https://c.test');
+    expect(crypto.saveSession).not.toHaveBeenCalled();
+  });
+});
+
 describe('describeError', () => {
   it('maps failures to plain messages', () => {
     expect(describeError(new ApiError(429, undefined))).toMatch(/Too many/);

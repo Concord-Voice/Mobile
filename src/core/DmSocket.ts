@@ -75,6 +75,8 @@ export class DmSocket {
   private waiters: Array<Waiter<unknown>> = [];
   /** Every valid incoming DM, for a live conversation view. */
   onMessage: ((message: DmMessage) => void) | null = null;
+  /** Called when the server or network drops the socket (not on close()). */
+  onDropped: (() => void) | null = null;
 
   private constructor(
     private readonly socket: SocketLike,
@@ -97,7 +99,10 @@ export class DmSocket {
         }
       }
     };
-    socket.onclose = () => this.failAll(new Error('Socket closed'));
+    socket.onclose = () => {
+      this.failAll(new Error('Socket closed'));
+      this.onDropped?.();
+    };
   }
 
   static open(

@@ -23,7 +23,10 @@ export function Chat({
   onBack: () => void;
   open?: (
     ...args: ConstructorParameters<typeof Conversation>
-  ) => Pick<Conversation, 'lines' | 'onChange' | 'start' | 'send' | 'close'>;
+  ) => Pick<
+    Conversation,
+    'lines' | 'dropped' | 'onChange' | 'start' | 'send' | 'close'
+  >;
 }) {
   const { api, identity, stage } = useSession();
   const me = stage.kind === 'signed_in' ? stage.userId : '';
@@ -77,6 +80,11 @@ export function Chat({
         </Text>
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {conversation?.dropped ? (
+        <Text style={styles.error}>
+          Disconnected. Go back and reopen the conversation to reconnect.
+        </Text>
+      ) : null}
       {loading && lines.length === 0 ? (
         <Text style={styles.note}>Decrypting messages…</Text>
       ) : null}

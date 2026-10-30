@@ -157,6 +157,7 @@ test('keeps edits made while a send is in flight and restores a failed draft', a
   let finish!: (ok: boolean) => void;
   const fake = {
     lines: [],
+    dropped: false,
     onChange: null,
     start: jest.fn(async () => {}),
     send: jest.fn(
@@ -232,6 +233,7 @@ test('sends a message and shows decrypted lines', async () => {
         unreadable: true,
       },
     ],
+    dropped: true,
     onChange: null,
     start: jest.fn(async () => {}),
     send: jest.fn(async () => {}),
@@ -251,6 +253,7 @@ test('sends a message and shows decrypted lines', async () => {
   const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
   expect(text(tree)).toContain('hi');
   expect(text(tree)).toContain('could not be decrypted');
+  expect(text(tree)).toContain('Disconnected');
   const input = tree.root.findByProps({ accessibilityLabel: 'Message' });
   await ReactTestRenderer.act(async () => input.props.onChangeText(' yo '));
   const send = tree.root.findAll(

@@ -831,8 +831,11 @@ describe('DmSocket', () => {
     socket.emit('error', { message: 'nope' });
     await expect(pending).rejects.toThrow('Server error frame');
     const closed = dm.nextMessage(CONV, PEER);
+    const dropped = jest.fn();
+    dm.onDropped = dropped;
     socket.onclose?.();
     await expect(closed).rejects.toThrow('Socket closed');
+    expect(dropped).toHaveBeenCalledTimes(1);
   });
 
   it('times out waits and failed opens', async () => {

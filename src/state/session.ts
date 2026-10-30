@@ -182,7 +182,14 @@ export function createSessionStore(
       const at = origin;
       if (!at) return;
       try {
-        await persistIdentity(identity, account({ ...at, userId: api.userId }));
+        const userId = api.userId;
+        await persistIdentity(identity, account({ ...at, userId }));
+        // Signed out while saving: the sign-out's wipe may have run first, so undo the save.
+        if (get().api === null) {
+          await forget({ ...at, userId }).catch(() => {});
+          return;
+        }
+        if (get().api !== api) return;
       } catch {
         // No biometrics enrolled (native reports it as a Keychain failure, so the two look
         // alike): sign in on every launch, and drop any older record so it is not offered.
@@ -248,8 +255,17 @@ export function createSessionStore(
             identity = await loadIdentity(account(saved), UNLOCK_REASON);
           } catch (error) {
             set({ stage: { kind: 'signed_out' } });
-            // Anything but a missing key (cancel, lockout): keep everything, so "Unlock" can try again.
-            if (nativeErrorCode(error) !== 'E_CONCORD_CRYPTO_NOTFOUND') return;
+            const code = nativeErrorCode(error);
+            // Anything but a missing key: keep everything, so "Unlock" can try again.
+            if (code === 'E_CONCORD_CRYPTO_USERCANCELLED') return;
+            if (code !== 'E_CONCORD_CRYPTO_NOTFOUND') {
+              // Lockout or a Keychain fault: say so, and leave the password as the way in.
+              set({
+                error:
+                  'Face ID could not unlock your saved sign-in. Try again, or log in with your password.',
+              });
+              return;
+            }
             // Face ID set changed, so the key copy is gone: end the server session too.
             const api = makeApi(saved.server, saved.machineId);
             api.onRotated = () => persist(saved, api.saved());

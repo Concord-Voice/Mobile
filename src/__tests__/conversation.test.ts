@@ -45,6 +45,7 @@ function setup(history = [row('m1', '1:hi'), row('m2', '2:rotated', 2)]) {
   };
   const socket = {
     onMessage: null as ((m: DmMessage) => void) | null,
+    onDropped: null as (() => void) | null,
     subscribe: jest.fn(async () => {}),
     send: jest.fn(async () => 'sent-1'),
     close: jest.fn(),
@@ -402,4 +403,27 @@ test('opens an unlabelled row with the current key', async () => {
   await conv.start();
   expect(conv.lines[0].text).toBe('old');
   expect(api.dmKey).toHaveBeenCalledWith('c1', undefined);
+});
+
+test('puts live messages older than the history page before it', async () => {
+  const { api, socket, conv } = setup([]);
+  api.dmHistory.mockImplementationOnce(async () => {
+    for (const id of ['a', 'b', 'c', 'd'])
+      socket.onMessage?.(live(id, `1:${id}`, 1));
+    await flush();
+    // The page already ends at c; a fell off its start and d came after it.
+    return [row('b', '1:b'), row('c', '1:c')];
+  });
+  await conv.start();
+  await flush();
+  expect(conv.lines.map(l => l.id)).toEqual(['a', 'b', 'c', 'd']);
+});
+
+test('shows a dropped socket until reopened', async () => {
+  const { socket, conv, changes } = setup([]);
+  await conv.start();
+  changes.mockClear();
+  socket.onDropped?.();
+  expect(conv.dropped).toBe(true);
+  expect(changes).toHaveBeenCalled();
 });

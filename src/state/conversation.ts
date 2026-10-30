@@ -56,6 +56,8 @@ function randomNonce(): string {
  */
 export class Conversation {
   lines: ChatLine[] = [];
+  /** The socket dropped: nothing new arrives until the conversation is reopened. */
+  dropped = false;
   /** Called after every change to lines. */
   onChange: (() => void) | null = null;
   private readonly keys = new Map<number, Promise<KeyHandle>>();
@@ -163,6 +165,11 @@ export class Conversation {
     );
     if (this.closed) return socket.close();
     this.socket = socket;
+    socket.onDropped = () => {
+      if (this.closed) return;
+      this.dropped = true;
+      this.onChange?.();
+    };
     socket.onMessage = (m: DmMessage) => {
       if (m.conversationId !== this.id) return;
       this.live = this.live
@@ -190,9 +197,14 @@ export class Conversation {
     if (this.closed) return;
     const lines = await Promise.all(history.map(m => this.decrypt(m)));
     if (this.closed) return;
-    // Live messages may have arrived meanwhile; history goes before them.
+    // Live messages may have arrived meanwhile. Those that arrived before the last one the
+    // page also holds are older than the page's end and go before it; the rest after it.
     const seen = new Set(lines.map(l => l.id));
-    this.lines = [...lines, ...this.lines.filter(l => !seen.has(l.id))];
+    let split = this.lines.length;
+    while (split > 0 && !seen.has(this.lines[split - 1].id)) split--;
+    const older = this.lines.slice(0, split).filter(l => !seen.has(l.id));
+    const newer = this.lines.slice(split);
+    this.lines = [...older, ...lines, ...newer];
     this.onChange?.();
     this.api.markDmRead(this.id).catch(() => {});
   }

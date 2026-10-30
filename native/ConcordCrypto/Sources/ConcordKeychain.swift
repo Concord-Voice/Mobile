@@ -81,16 +81,22 @@ public struct ConcordSessionKeychain {
     self.service = service
   }
 
+  /// Updates in place, so a failed write leaves the previous record rather than none.
   public func save(_ record: String) throws {
-    try delete()
-    let status = SecItemAdd(
-      [
-        kSecClass: kSecClassGenericPassword,
-        kSecAttrService: service,
-        kSecAttrAccount: account,
-        kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-        kSecValueData: Data(record.utf8),
-      ] as CFDictionary, nil)
+    let query =
+      [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account]
+      as CFDictionary
+    var status = SecItemUpdate(query, [kSecValueData: Data(record.utf8)] as CFDictionary)
+    if status == errSecItemNotFound {
+      status = SecItemAdd(
+        [
+          kSecClass: kSecClassGenericPassword,
+          kSecAttrService: service,
+          kSecAttrAccount: account,
+          kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+          kSecValueData: Data(record.utf8),
+        ] as CFDictionary, nil)
+    }
     guard status == errSecSuccess else { throw ConcordKeychain.error(status) }
   }
 
