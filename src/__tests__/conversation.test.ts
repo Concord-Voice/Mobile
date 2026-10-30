@@ -402,7 +402,7 @@ test('opens an unlabelled row with the current key', async () => {
   const { api, conv } = setup([row('m1', '2:old', 0)]);
   await conv.start();
   expect(conv.lines[0].text).toBe('old');
-  expect(api.dmKey).toHaveBeenCalledWith('c1', undefined);
+  expect(api.dmKey).toHaveBeenCalledWith('c1');
 });
 
 test('puts live messages older than the history page before it', async () => {
@@ -437,7 +437,8 @@ test('follows the newest proven epoch for unlabelled and legacy rows', async () 
   socket.onMessage?.(live('b', '3:legacy', 1));
   await flush();
   expect(conv.lines.map(l => l.text)).toEqual(['old', 'new', 'legacy']);
-  expect(api.dmKey).toHaveBeenCalledTimes(3);
+  // Current (no version), then 2, 3 and 1 by version; the fallback reuses 3.
+  expect(api.dmKey).toHaveBeenCalledTimes(4);
 });
 
 test('sends no startup read receipt when the newest line is unreadable', async () => {
@@ -445,4 +446,12 @@ test('sends no startup read receipt when the newest line is unreadable', async (
   await conv.start();
   expect(conv.lines.at(-1)?.unreadable).toBe(true);
   expect(api.markDmRead).not.toHaveBeenCalled();
+});
+
+test('asks the server for the current epoch when only an old key is proven', async () => {
+  // Labelled 1 but written under the current epoch 2; the epoch-1 key unwraps fine.
+  const { api, conv } = setup([row('m1', '2:legacy', 1)]);
+  await conv.start();
+  expect(conv.lines[0].text).toBe('legacy');
+  expect(api.dmKey).toHaveBeenCalledWith('c1');
 });

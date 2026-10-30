@@ -65,7 +65,9 @@ export class Conversation {
   private readonly refused = new Map<number, number>();
   /** Highest epoch whose key unwrapped; live labels far beyond it are not fetched. */
   private confirmed = 0;
+  /** The epoch to send under: the server's current one, or newer once a peer proves it. */
   private current: number | null = null;
+  private lookup: Promise<number> | null = null;
   private socket: DmSocket | null = null;
   private closed = false;
   /** Live messages decrypt one at a time, so a slow key lookup cannot reorder them. */
@@ -80,21 +82,40 @@ export class Conversation {
       DmSocket.open(url, createSocket),
   ) {}
 
+  /** The current epoch, asked of the server once (shared) until a send failure resets it. */
+  private currentEpoch(): Promise<number> {
+    if (this.current !== null) return Promise.resolve(this.current);
+    // ponytail: one extra key request; keyFor then fetches the wrap by version.
+    this.lookup ??= this.api
+      .dmKey(this.id)
+      .then(k => (this.current = Math.max(this.current ?? 0, k.keyVersion)))
+      .finally(() => {
+        this.lookup = null;
+      });
+    return this.lookup;
+  }
+
   /** The key for an epoch (0: the current one), fetched and unwrapped once. */
   private keyFor(version: number): Promise<KeyHandle> {
     if (this.closed) return Promise.reject(new Error('Conversation closed'));
-    // "Current" is the newest epoch proven so far; only before any is the server asked.
-    if (version === 0 && this.confirmed > 0) return this.keyFor(this.confirmed);
+    // A historical key proves nothing about the current epoch: ask (or follow a proven rotation).
+    if (version === 0)
+      return this.currentEpoch().then(
+        v => this.keyFor(v),
+        () => {
+          throw new KeyUnavailable();
+        },
+      );
     let key = this.keys.get(version);
     if (key) return key;
     const failedAt = this.refused.get(version);
     if (failedAt !== undefined && Date.now() - failedAt < REFUSED_MS)
       return Promise.reject(new KeyUnavailable());
-    key = this.api.dmKey(this.id, version || undefined).then(
+    key = this.api.dmKey(this.id, version).then(
       async k => {
         if (this.closed) throw new Error('Conversation closed');
         // The server is authoritative: a key served for another epoch must not be used under this label.
-        if (version && k.keyVersion !== version) throw new KeyUnavailable();
+        if (k.keyVersion !== version) throw new KeyUnavailable();
         const handle = await unwrapChannelKey(k.wrappedKey, this.identity);
         // Closed while unwrapping: close() could not see this handle, so release it here.
         if (this.closed) {
@@ -217,10 +238,7 @@ export class Conversation {
   async send(text: string): Promise<void> {
     const socket = this.socket;
     if (!socket) throw new Error('Not connected');
-    // ponytail: one extra key request per conversation; keyFor fetches the wrap by version.
-    if (this.current === null)
-      this.current = (await this.api.dmKey(this.id)).keyVersion;
-    const version = this.current;
+    const version = await this.currentEpoch();
     let id: string;
     try {
       const ciphertext = await encryptMessage(text, await this.keyFor(version));
