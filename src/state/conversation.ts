@@ -207,7 +207,7 @@ export class Conversation {
     };
     socket.onMessage = (m: DmMessage) => {
       if (m.conversationId !== this.id) return;
-      this.live = this.live
+      const next: Promise<void> = this.live
         .then(() =>
           // A label far past any epoch seen is not worth a fetch (and a key handle).
           this.confirmed && m.keyVersion > this.confirmed + 1
@@ -220,10 +220,12 @@ export class Conversation {
           // A peer proven on a newer epoch means the key rotated: send under it too.
           if (this.current !== null && m.keyVersion > this.current)
             this.current = m.keyVersion;
-          // Shown while open, so it is read; the list's unread badge follows.
-          if (m.userId !== this.me)
+          // Shown while open, so it is read; the list's unread badge follows. The receipt
+          // has no message boundary, so it waits until nothing queued behind this is pending.
+          if (m.userId !== this.me && this.live === next)
             this.api.markDmRead(this.id).catch(() => {});
         });
+      this.live = next;
     };
     // ponytail: no reconnect; a dropped socket fails the next send and reopening the conversation reconnects.
     await socket.subscribe(this.id);

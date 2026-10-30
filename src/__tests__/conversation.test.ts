@@ -304,7 +304,8 @@ test('keeps live arrival order across a slow key lookup and marks them read', as
   await flush();
   await flush();
   expect(conv.lines.map(l => l.text)).toEqual(['first', 'second']);
-  expect(api.markDmRead).toHaveBeenCalledTimes(2);
+  // Both arrived together, so one receipt covers them.
+  expect(api.markDmRead).toHaveBeenCalledTimes(1);
 });
 
 test('keeps an acknowledged send below an earlier message still decrypting', async () => {
@@ -497,4 +498,34 @@ test('waits for live messages still decrypting before the startup read receipt',
   await starting;
   expect(conv.lines.at(-1)?.unreadable).toBe(true);
   expect(api.markDmRead).not.toHaveBeenCalled();
+});
+
+test('sends a live read receipt only once queued messages settle', async () => {
+  const { api, socket, conv } = setup([]);
+  await conv.start();
+  api.markDmRead.mockClear();
+  let release!: () => void;
+  api.dmKey.mockImplementationOnce(async () => ({
+    wrappedKey: 'w1',
+    keyVersion: 1,
+  }));
+  api.dmKey.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        release = () => reject(new Error('404'));
+      }),
+  );
+  socket.onMessage?.(live('a', '1:first', 1));
+  socket.onMessage?.(live('b', '2:second', 2));
+  await flush();
+  // The first is shown, but the second is still pending: no receipt yet.
+  expect(conv.lines.map(l => l.id)).toEqual(['a']);
+  expect(api.markDmRead).not.toHaveBeenCalled();
+  release();
+  await flush();
+  expect(conv.lines[1].unreadable).toBe(true);
+  expect(api.markDmRead).not.toHaveBeenCalled();
+  socket.onMessage?.(live('c', '1:third', 1));
+  await flush();
+  expect(api.markDmRead).toHaveBeenCalledTimes(1);
 });
