@@ -363,7 +363,8 @@ export class ConcordApi {
       );
     }
     // A sign-out or new sign-in meanwhile wins: its state is not overwritten.
-    // A token refresh keeps the session id, so the proof still holds.
+    // A token refresh mints a new session id, so the token is sent only until the
+    // next refresh; the server then asks again and the stored key re-proves.
     if (this.session?.sessionId === session.sessionId) {
       this.attestation = {
         token: text(result.attestation_token),

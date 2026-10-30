@@ -1,10 +1,7 @@
 import { create } from 'zustand';
 import {
-  decryptMessage,
   deleteIdentity,
   deleteSession,
-  encryptMessage,
-  generateChannelKey,
   type KeyHandle,
   loadIdentity,
   loadSession,
@@ -15,8 +12,6 @@ import {
   releaseKey,
   saveSession,
   unlockIdentity,
-  unwrapChannelKey,
-  wrapChannelKey,
 } from '../ConcordCrypto';
 import { nativeAttester } from '../ConcordAttest';
 import {
@@ -50,18 +45,7 @@ export type SessionState = {
 
 /** Where a session lives; the machine id must match the one the server session was minted for. */
 type Origin = { server: string; machineId: string };
-/**
- * The saved record. The refresh token is sealed: encrypted under a key wrapped to the
- * account's own public key, so only the identity behind Face ID opens it, while a rotation
- * can still re-seal the new token without a prompt.
- */
-type Persisted = Origin &
-  Omit<SavedSession, 'refreshToken'> & {
-    sealedKey: string;
-    sealedToken: string;
-  };
-/** The sealing key of the live session, and its wrapped form for the record. */
-type Seal = { key: KeyHandle; wrapped: string };
+type Persisted = Origin & SavedSession;
 
 const UNLOCK_REASON = 'Unlock your Concord messages';
 
@@ -74,60 +58,32 @@ function parsePersisted(raw: string): Persisted | null {
     const v = JSON.parse(raw) as Record<string, unknown>;
     const field = (k: string) =>
       typeof v[k] === 'string' && v[k] !== '' ? (v[k] as string) : null;
-    const [server, machineId, sessionId, userId, sealedKey, sealedToken] = [
+    const [server, machineId, refreshToken, sessionId, userId] = [
       'server',
       'machineId',
+      'refreshToken',
       'sessionId',
       'userId',
-      'sealedKey',
-      'sealedToken',
     ].map(field);
-    if (
-      !server ||
-      !machineId ||
-      !sessionId ||
-      !userId ||
-      !sealedKey ||
-      !sealedToken
-    )
+    if (!server || !machineId || !refreshToken || !sessionId || !userId)
       return null;
     // Only the known fields: anything else in the record never reaches the api.
-    return { server, machineId, sessionId, userId, sealedKey, sealedToken };
+    return { server, machineId, refreshToken, sessionId, userId };
   } catch {
     return null;
   }
 }
 
-/** Writes the session record with the refresh token sealed. */
-async function persist(
-  at: Origin,
-  seal: Seal,
-  { refreshToken, sessionId, userId }: SavedSession,
-): Promise<void> {
-  const record: Persisted = {
-    server: at.server,
-    machineId: at.machineId,
-    sessionId,
-    userId,
-    sealedKey: seal.wrapped,
-    sealedToken: await encryptMessage(refreshToken, seal.key),
-  };
-  await saveSession(JSON.stringify(record));
-}
-
-/** A fresh sealing key, wrapped to the account's public key and proven to open with its identity. */
-async function newSeal(api: ConcordApi, identity: KeyHandle): Promise<Seal> {
-  const { publicKey } = await api.publicKey(api.userId);
-  const key = await generateChannelKey();
-  try {
-    const wrapped = await wrapChannelKey(key, publicKey);
-    // A record sealed to any other key could never reopen: refuse it now.
-    await releaseKey(await unwrapChannelKey(wrapped, identity));
-    return { key, wrapped };
-  } catch (error) {
-    await releaseKey(key).catch(() => {});
-    throw error;
-  }
+/** Writes the session record; best effort, since a lost write only costs a sign-in later. */
+function persist(at: Origin, saved: SavedSession | null): void {
+  if (saved)
+    saveSession(
+      JSON.stringify({
+        server: at.server,
+        machineId: at.machineId,
+        ...saved,
+      }),
+    ).catch(() => {});
 }
 
 /** What a person sees: never a raw server body, which may echo their input. */
@@ -215,49 +171,33 @@ export function createSessionStore(
       return api;
     };
 
-    /**
-     * Saves each rotated token while this api is the live one, best effort, since a lost
-     * write only costs a sign-in later. Writes queue, each saving the newest token, so a
-     * slow seal cannot land an older one last.
-     */
-    const writer = (api: ConcordApi, at: Origin, seal: Seal) => {
-      let writes = Promise.resolve();
-      return () => {
-        writes = writes
-          .then(async () => {
-            // ponytail: a write racing a sign-out can outlive it; the next launch finds no identity and cleans up.
-            const saved = api.saved();
-            if (get().api === api && saved) await persist(at, seal, saved);
-          })
-          .catch(() => {});
-        return writes;
-      };
+    /** Saves each rotated token pair while this api is the live one, best effort. */
+    const writer = (api: ConcordApi, at: Origin) => () => {
+      // ponytail: a write racing a sign-out can outlive it; the next launch finds no identity and cleans up.
+      if (get().api === api) persist(at, api.saved());
     };
 
-    /** Keeps the session across launches: the identity behind Face ID, the sealed token beside it. */
+    /** Keeps the session across launches: the identity behind Face ID, the tokens beside it. */
     const remember = async (api: ConcordApi, identity: KeyHandle) => {
       const at = origin;
       if (!at) return;
-      const p = { ...at, userId: api.userId };
-      let seal: Seal;
       try {
-        seal = await newSeal(api, identity);
-        await persistIdentity(identity, account(p));
+        const userId = api.userId;
+        await persistIdentity(identity, account({ ...at, userId }));
+        // Signed out while saving: the sign-out's wipe may have run first, so undo the save.
+        if (get().api === null) {
+          await forget({ ...at, userId }).catch(() => {});
+          return;
+        }
+        if (get().api !== api) return;
       } catch {
         // No biometrics enrolled (native reports it as a Keychain failure, so the two look
-        // alike), or no sealing key: sign in on every launch, and drop any older record.
-        await forget(p).catch(() => {});
+        // alike): sign in on every launch, and drop any older record so it is not offered.
+        await deleteSession().catch(() => {});
         return;
       }
-      // Signed out while saving: the sign-out's wipe may have run first, so undo the save.
-      if (get().api === null) {
-        await forget(p).catch(() => {});
-        return;
-      }
-      if (get().api !== api) return;
-      const write = writer(api, at, seal);
-      api.onRotated = write;
-      await write();
+      api.onRotated = writer(api, at);
+      api.onRotated();
     };
 
     const finish = async (
@@ -306,8 +246,6 @@ export function createSessionStore(
           const raw = await loadSession().catch(() => null);
           const saved = raw === null ? null : parsePersisted(raw);
           if (!saved) {
-            // Unreadable, or an older record that kept the token unsealed: drop it.
-            if (raw !== null) await deleteSession().catch(() => {});
             set({ stage: { kind: 'signed_out' }, canResume: false });
             return;
           }
@@ -328,36 +266,30 @@ export function createSessionStore(
               });
               return;
             }
-            // Face ID set changed, so the key copy is gone, and with it the only way to read
-            // the token: the server session cannot be revoked from here and lapses on its own.
-            await forget(saved).catch(() => {});
+            // Face ID set changed, so the key copy is gone: end the server session too.
+            const api = makeApi(saved.server, saved.machineId);
+            api.onRotated = () => persist(saved, api.saved());
+            let revoked = true;
+            try {
+              await api.resume(saved);
+              await api.logout();
+            } catch (e) {
+              revoked = e instanceof ApiError && e.status === 401;
+            }
+            // Not revoked (offline): keep the rotated record, so the next launch tries again.
+            await (revoked
+              ? forget(saved)
+              : deleteIdentity(account(saved))
+            ).catch(() => {});
             set({
-              canResume: false,
-              error: 'Log in again to unlock your messages on this device.',
-            });
-            return;
-          }
-          let seal: Seal;
-          let refreshToken: string;
-          try {
-            const key = await unwrapChannelKey(saved.sealedKey, identity);
-            seal = { key, wrapped: saved.sealedKey };
-            refreshToken = await decryptMessage(saved.sealedToken, key);
-          } catch {
-            // The record does not open with this identity: nothing in it is usable.
-            await releaseAll().catch(() => {});
-            await forget(saved).catch(() => {});
-            set({
-              stage: { kind: 'signed_out' },
               canResume: false,
               error: 'Log in again to unlock your messages on this device.',
             });
             return;
           }
           const api = connect(saved, saved.userId);
-          const { sessionId, userId } = saved;
           try {
-            await api.resume({ refreshToken, sessionId, userId });
+            await api.resume(saved);
           } catch {
             // Only a refusal (401) gets here, and onExpired has already reset the store.
             await releaseKey(identity).catch(() => {});
@@ -367,10 +299,9 @@ export function createSessionStore(
             await releaseKey(identity).catch(() => {});
             return;
           }
-          const write = writer(api, saved, seal);
-          api.onRotated = write;
+          api.onRotated = writer(api, saved);
+          api.onRotated();
           set({ identity, stage: { kind: 'signed_in', userId: api.userId } });
-          await write();
         }),
 
       signIn: (server, email, password) =>

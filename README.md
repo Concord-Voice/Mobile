@@ -40,21 +40,17 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   rotation, edits, reactions, attachments and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
-  session id, user id, sealed refresh token) in a device-only Keychain item readable after
-  first unlock. The refresh token is sealed: encrypted under a key wrapped to the
-  account's own public key, which is proven to open with the identity before anything is
-  saved. So only the identity behind Face ID reads the token, while every rotation re-seals
-  it in place, best effort, without a prompt. On launch, one Face ID prompt reopens the key,
-  unseals the token, and the token rotates back into the same server session. Any unlock
-  failure other than a missing key keeps everything for an "Unlock with Face ID" retry; a
-  lockout or Keychain fault (unlike a cancel) also says so, and the password still signs
-  in. A refused refresh or a sign-out ends the session (server revocation is best effort)
-  and deletes both items, and a sign-out whose delete fails is retried once and then
-  reported. A changed Face ID set deletes both items too, but cannot revoke the server
-  session, since the token was sealed to the lost key; that session lapses on its own. A
-  record that does not unseal, or an older one that kept the token unsealed, is deleted.
-  Devices with no biometrics enrolled save nothing and sign in on every launch. The machine
-  id is a native random UUID.
+  refresh token, session id, user id) in a device-only Keychain item readable after
+  first unlock. The record is rewritten in place, best effort, on every token rotation. On
+  launch, Face ID reopens the key and the refresh token rotates back into the same
+  server session. Any unlock failure other than a missing key keeps everything for an
+  "Unlock with Face ID" retry; a lockout or Keychain fault (unlike a cancel) also says
+  so, and the password still signs in. A changed Face ID set, a refused
+  refresh or a sign-out ends the session (server revocation is best effort) and deletes
+  both items; a changed Face ID set that cannot reach the server keeps the record so
+  the next launch retries the revocation, and a sign-out whose delete fails is retried
+  once and then reported. Devices with no biometrics enrolled save nothing and sign in
+  on every launch. The machine id is a native random UUID.
 
 The crypto and core code come from the #663 framework probe.
 
