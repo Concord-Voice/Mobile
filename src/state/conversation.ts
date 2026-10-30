@@ -241,6 +241,9 @@ export class Conversation {
     const newer = this.lines.slice(split);
     this.lines = [...older, ...lines, ...newer];
     this.onChange?.();
+    // Live messages still decrypting are newer than the page: decide after them.
+    await this.live;
+    if (this.closed) return;
     // A read receipt only once the newest line could actually be shown.
     if (!this.lines.at(-1)?.unreadable)
       this.api.markDmRead(this.id).catch(() => {});

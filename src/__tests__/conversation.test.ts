@@ -476,3 +476,25 @@ test('looks the current epoch up again when a legacy fallback stops working', as
   expect(conv.lines[2].text).toBe('later');
   now.mockRestore();
 });
+
+test('waits for live messages still decrypting before the startup read receipt', async () => {
+  const { api, socket, conv } = setup([row('m1', '1:hi')]);
+  let release!: () => void;
+  api.dmHistory.mockImplementationOnce(async () => {
+    // A newer live message whose key arrives late and then fails.
+    api.dmKey.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          release = () => reject(new Error('404'));
+        }),
+    );
+    socket.onMessage?.(live('m2', '5:late', 5));
+    return [row('m1', '1:hi')];
+  });
+  const starting = conv.start();
+  await flush();
+  release();
+  await starting;
+  expect(conv.lines.at(-1)?.unreadable).toBe(true);
+  expect(api.markDmRead).not.toHaveBeenCalled();
+});
