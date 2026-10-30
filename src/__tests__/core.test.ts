@@ -316,6 +316,89 @@ describe('ConcordApi', () => {
     expect(api.userId).toBe(ME);
   });
 
+  it('fetches DM keys and history for decryption', async () => {
+    const { api, calls } = signedIn({
+      'GET /e2ee/keys/c1': () => [
+        200,
+        { key: { wrapped_key: 'd3JhcA==', key_version: 4 } },
+      ],
+      'GET /e2ee/keys/c1?version=2': () => [
+        200,
+        { key: { wrapped_key: 'b2xk', key_version: 2 } },
+      ],
+      'GET /e2ee/keys/bad': () => [
+        200,
+        { key: { wrapped_key: 'x', key_version: 0 } },
+      ],
+      'GET /dm/conversations/c1/messages': () => [
+        200,
+        {
+          messages: [
+            {
+              id: 'm3',
+              user_id: ME,
+              username: 'me',
+              content: 'Yw==',
+              type: 'text',
+              key_version: 4,
+              created_at: 't3',
+            },
+            {
+              id: 'call',
+              user_id: PEER,
+              username: 'peer',
+              content: '',
+              type: 'call_event',
+              key_version: 4,
+              created_at: 't2',
+            },
+            {
+              id: 'm1',
+              user_id: PEER,
+              username: 'peer',
+              display_name: 'Peer P',
+              content: 'Yg==',
+              key_version: 2,
+              created_at: 't1',
+            },
+          ],
+        },
+      ],
+      'POST /dm/conversations/c1/read': () => [200, {}],
+    });
+    await api.login('e', 'p');
+    expect(await api.dmKey('c1')).toEqual({
+      wrappedKey: 'd3JhcA==',
+      keyVersion: 4,
+    });
+    expect(await api.dmKey('c1', 2)).toEqual({
+      wrappedKey: 'b2xk',
+      keyVersion: 2,
+    });
+    await expect(api.dmKey('bad')).rejects.toThrow('Invalid API response');
+    // Oldest first, server-authored rows left out.
+    expect(await api.dmHistory('c1')).toEqual([
+      {
+        id: 'm1',
+        userId: PEER,
+        sender: 'Peer P',
+        content: 'Yg==',
+        keyVersion: 2,
+        createdAt: 't1',
+      },
+      {
+        id: 'm3',
+        userId: ME,
+        sender: 'me',
+        content: 'Yw==',
+        keyVersion: 4,
+        createdAt: 't3',
+      },
+    ]);
+    await api.markDmRead('c1');
+    expect(calls.at(-1)?.key).toBe('POST /dm/conversations/c1/read');
+  });
+
   it('reports every rotation and resumes a saved session', async () => {
     const { api } = signedIn({
       'POST /auth/refresh': () => [
@@ -627,6 +710,8 @@ describe('DmSocket', () => {
         })),
     );
     await dm.subscribe(CONV);
+    const live: string[] = [];
+    dm.onMessage = m => live.push(m.id);
     const reply = dm.nextMessage(CONV, PEER);
     expect(await dm.send(CONV, 'c', 1, 'n1')).toBe('m1');
     expect(await reply).toEqual({
@@ -636,6 +721,8 @@ describe('DmSocket', () => {
       content: 'cipher',
       keyVersion: 1,
     });
+    // The live listener sees every valid frame; filtering is the caller's job.
+    expect(live).toEqual(['spoof', 'm2']);
     const pending = dm.nextMessage(CONV, PEER);
     dm.close();
     await expect(pending).rejects.toThrow('Socket closed');

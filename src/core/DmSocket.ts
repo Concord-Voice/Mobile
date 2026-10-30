@@ -9,7 +9,13 @@ export type DmMessage = {
   userId: string;
   content: string;
   keyVersion: number;
+  /** Display name, else username; absent on frames that omit both. */
+  sender?: string;
+  createdAt?: string;
 };
+
+const optionalText = (v: unknown) =>
+  typeof v === 'string' && v ? v : undefined;
 
 type Waiter<T> = {
   accept: (frame: Frame) => T | undefined;
@@ -60,11 +66,15 @@ function dmMessage(frame: Frame): DmMessage | undefined {
     userId: d.user_id,
     content: d.content,
     keyVersion: d.key_version as number,
+    sender: optionalText(d.display_name) ?? optionalText(d.username),
+    createdAt: optionalText(d.created_at),
   };
 }
 
 export class DmSocket {
   private waiters: Array<Waiter<unknown>> = [];
+  /** Every valid incoming DM, for a live conversation view. */
+  onMessage: ((message: DmMessage) => void) | null = null;
 
   private constructor(
     private readonly socket: SocketLike,
@@ -77,6 +87,8 @@ export class DmSocket {
         this.failAll(new Error('Server error frame'));
         return;
       }
+      const message = dmMessage(frame);
+      if (message) this.onMessage?.(message);
       for (const waiter of [...this.waiters]) {
         const value = waiter.accept(frame);
         if (value !== undefined) {

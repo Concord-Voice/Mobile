@@ -35,6 +35,16 @@ export type LoginKeys = {
   keyDerivationAlg: string;
 };
 
+/** A stored DM, still encrypted. Server-authored rows (call and expiration events) are left out. */
+export type DmEncrypted = {
+  id: string;
+  userId: string;
+  sender: string;
+  content: string;
+  keyVersion: number;
+  createdAt: string;
+};
+
 /** A DM conversation as the conversation list shows it. */
 export type DmSummary = {
   id: string;
@@ -521,6 +531,60 @@ export class ConcordApi {
       `/dm/conversations/${encodeURIComponent(conversationId)}/messages`,
     );
     return Array.isArray(result.messages) ? result.messages.map(record) : [];
+  }
+
+  /** The caller's wrapped copy of a conversation key: the current one, or a given epoch. */
+  async dmKey(
+    conversationId: string,
+    version?: number,
+  ): Promise<{ wrappedKey: string; keyVersion: number }> {
+    const query = version === undefined ? '' : `?version=${version}`;
+    const key = record(
+      (
+        await this.call(
+          'GET',
+          `/e2ee/keys/${encodeURIComponent(conversationId)}${query}`,
+        )
+      ).key,
+    );
+    const keyVersion = key.key_version;
+    if (!Number.isSafeInteger(keyVersion) || (keyVersion as number) < 1)
+      throw new Error('Invalid API response');
+    return {
+      wrappedKey: text(key.wrapped_key),
+      keyVersion: keyVersion as number,
+    };
+  }
+
+  /** The newest page of a conversation, oldest first, ready to decrypt. */
+  async dmHistory(conversationId: string): Promise<DmEncrypted[]> {
+    const rows = await this.dmMessages(conversationId);
+    return rows
+      .filter(
+        m =>
+          (m.type ?? 'text') === 'text' &&
+          Number.isSafeInteger(m.key_version) &&
+          (m.key_version as number) >= 1,
+      )
+      .map(m => ({
+        id: text(m.id),
+        userId: text(m.user_id),
+        sender:
+          typeof m.display_name === 'string' && m.display_name
+            ? m.display_name
+            : text(m.username),
+        content: text(m.content),
+        keyVersion: m.key_version as number,
+        createdAt: text(m.created_at),
+      }))
+      .reverse();
+  }
+
+  async markDmRead(conversationId: string): Promise<void> {
+    await this.call(
+      'POST',
+      `/dm/conversations/${encodeURIComponent(conversationId)}/read`,
+    );
   }
 
   /** The caller's DM conversations, newest activity first as the server orders them. */

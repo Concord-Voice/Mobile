@@ -4,7 +4,8 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
 
 ## Layout
 
-- `App.tsx`: a placeholder shell. The UI will be built from the internal design prototype.
+- `App.tsx`: the app shell: sign-in, MFA, and Home (Messages and You tabs; Servers and
+  Alerts are placeholders). Screens follow the internal design prototype's dark scheme.
 - `native/ConcordCrypto/`: the native message-crypto pod, which uses CryptoKit
   AES-256-GCM, Security.framework RSA-OAEP-4096, vendored reference Argon2id, and a
   biometry-bound Keychain. Keys stay native, and JS holds only opaque handles. JS can
@@ -24,6 +25,13 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   refresh with one shared rotation and a single retry on 401, logout), the DM WebSocket,
   and `createSocket`, which opens every socket with the app's fixed origin
   `app://concord-mobile`. Servers must list that origin in `ALLOWED_ORIGINS`.
+- DM conversations (`src/state/conversation.ts`, `src/ui/Chat.tsx`): opening a
+  conversation loads the newest page, fetches and unwraps each key epoch it uses once
+  (`GET /e2ee/keys/:id?version=N`), decrypts natively, then follows new messages over
+  the DM socket. Sending encrypts under the current epoch and moves to a newer one when
+  a peer's message shows the key rotated. Messages that will not decrypt are shown as
+  such, never dropped. Not yet: older pages, starting a new DM, edits, reactions,
+  attachments and socket reconnect (reopen the conversation).
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token) in a device-only Keychain item readable after first unlock. The record
@@ -63,7 +71,7 @@ accounts can unlock; a legacy key-derivation account is refused with a distinct 
 
 ## Not built yet
 
-- Any real UI.
+- Servers, channels, alerts, voice and the rest of the prototype's screens.
 - WebAuthn (passkey) MFA.
 - An Android native crypto module.
 - Native build and store-release CI.
