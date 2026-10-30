@@ -669,7 +669,7 @@ describe('ConcordApi', () => {
       'POST /auth/ws-ticket': () => [200, { ticket: 't' }],
     });
     const api = new ConcordApi('https://api.example.test', MACHINE, impl);
-    api.client = Promise.resolve({ platform: 'ios', version: '1.0.0' });
+    api.client = async () => ({ platform: 'ios', version: '1.0.0' });
     await api.wsTicket().catch(() => {});
     expect(calls[0].headers).toMatchObject({
       'X-Concord-Client-Version': '1.0.0',

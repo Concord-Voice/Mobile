@@ -122,15 +122,22 @@ export function describeError(error: unknown): string {
   return 'Could not reach the server. Check your connection.';
 }
 
-/** This build's platform and version, read once from the bundle via the attest module. */
+/**
+ * This build's platform and version, read from the bundle via the attest module.
+ * A failed lookup is not cached, so the next request retries it.
+ * ponytail: Android has no native module yet, so it sends no version until one lands.
+ */
 let client: Promise<ClientInfo | null> | null = null;
-function appClient(): Promise<ClientInfo | null> {
+export function appClient(): Promise<ClientInfo | null> {
   client ??= (nativeAttester()?.info() ?? Promise.resolve(null)).then(
     info =>
       info
         ? { platform: Platform.OS, version: clientVersion(info.version) }
         : null,
-    () => null,
+    () => {
+      client = null;
+      return null;
+    },
   );
   return client;
 }
@@ -139,7 +146,7 @@ export function createSessionStore(
   makeApi: (server: string, machineId: string) => ConcordApi = (s, m) => {
     const api = new ConcordApi(s, m);
     api.attester = nativeAttester();
-    api.client = appClient();
+    api.client = appClient;
     return api;
   },
 ) {

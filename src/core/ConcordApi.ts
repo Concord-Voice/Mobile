@@ -116,7 +116,7 @@ export class ConcordApi {
   attester: Attester | null = null;
   private attestation: { token: string; sessionId: string } | null = null;
   /** Sent on every request and the socket URL; null sends nothing (tests, unknown builds). */
-  client: Promise<ClientInfo | null> = Promise.resolve(null);
+  client: () => Promise<ClientInfo | null> = () => Promise.resolve(null);
   private clientNow: ClientInfo | null = null;
   private attesting: Promise<void> | null = null;
 
@@ -207,7 +207,7 @@ export class ConcordApi {
       'X-Machine-Id': this.machineId,
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    this.clientNow = await this.client.catch(() => null);
+    this.clientNow = await this.client().catch(() => null);
     if (this.clientNow) {
       headers['X-Concord-Client-Version'] = this.clientNow.version;
       headers['X-Concord-Client-Platform'] = this.clientNow.platform;
