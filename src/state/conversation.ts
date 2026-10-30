@@ -166,7 +166,10 @@ export class Conversation {
       this.current = null;
       throw error;
     }
-    this.add({ id, userId: this.me, sender: 'You', text });
+    // Queued behind live messages still decrypting, so an earlier arrival stays above it.
+    const line = { id, userId: this.me, sender: 'You', text };
+    this.live = this.live.then(() => this.add(line));
+    await this.live;
   }
 
   close(): void {

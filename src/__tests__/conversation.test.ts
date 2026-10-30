@@ -300,3 +300,28 @@ test('keeps live arrival order across a slow key lookup and marks them read', as
   expect(conv.lines.map(l => l.text)).toEqual(['first', 'second']);
   expect(api.markDmRead).toHaveBeenCalledTimes(2);
 });
+
+test('keeps an acknowledged send below an earlier message still decrypting', async () => {
+  const { api, socket, conv } = setup([]);
+  await conv.start();
+  let releaseKey1!: () => void;
+  api.dmKey.mockImplementationOnce(
+    () =>
+      new Promise(resolve => {
+        releaseKey1 = () => resolve({ wrappedKey: 'w1', keyVersion: 1 });
+      }),
+  );
+  socket.onMessage?.({
+    id: 'early',
+    conversationId: 'c1',
+    userId: PEER,
+    content: '1:earlier',
+    keyVersion: 1,
+  });
+  await flush();
+  const sending = conv.send('later');
+  await flush();
+  releaseKey1();
+  await sending;
+  expect(conv.lines.map(l => l.text)).toEqual(['earlier', 'later']);
+});
