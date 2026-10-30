@@ -68,6 +68,8 @@ export class Conversation {
   /** The epoch to send under: the server's current one, or newer once a peer proves it. */
   private current: number | null = null;
   private lookup: Promise<number> | null = null;
+  /** A shown peer message has not been acknowledged yet. */
+  private owesReceipt = false;
   /** When the server was last asked for the current epoch. */
   private lookedUpAt = 0;
   private socket: DmSocket | null = null;
@@ -174,6 +176,23 @@ export class Conversation {
     }
   }
 
+  /**
+   * Shown while open, so peer messages are read; the list's unread badge follows. The
+   * receipt has no message boundary, so it goes out only once nothing queued is pending
+   * and the newest line could be shown.
+   */
+  private settle(item: Promise<void>): void {
+    if (
+      !this.owesReceipt ||
+      this.closed ||
+      this.live !== item ||
+      this.lines.at(-1)?.unreadable
+    )
+      return;
+    this.owesReceipt = false;
+    this.api.markDmRead(this.id).catch(() => {});
+  }
+
   private unreadable(m: DmMessage): ChatLine {
     return {
       id: m.id,
@@ -216,14 +235,13 @@ export class Conversation {
         )
         .then(line => {
           this.add(line);
-          if (line.unreadable || this.closed) return;
-          // A peer proven on a newer epoch means the key rotated: send under it too.
-          if (this.current !== null && m.keyVersion > this.current)
-            this.current = m.keyVersion;
-          // Shown while open, so it is read; the list's unread badge follows. The receipt
-          // has no message boundary, so it waits until nothing queued behind this is pending.
-          if (m.userId !== this.me && this.live === next)
-            this.api.markDmRead(this.id).catch(() => {});
+          if (!line.unreadable) {
+            // A peer proven on a newer epoch means the key rotated: send under it too.
+            if (this.current !== null && m.keyVersion > this.current)
+              this.current = m.keyVersion;
+            if (m.userId !== this.me) this.owesReceipt = true;
+          }
+          this.settle(next);
         });
       this.live = next;
     };
@@ -267,8 +285,12 @@ export class Conversation {
     }
     // Queued behind live messages still decrypting, so an earlier arrival stays above it.
     const line = { id, userId: this.me, sender: 'You', text };
-    this.live = this.live.then(() => this.add(line));
-    await this.live;
+    const next: Promise<void> = this.live.then(() => {
+      this.add(line);
+      this.settle(next);
+    });
+    this.live = next;
+    await next;
   }
 
   close(): void {

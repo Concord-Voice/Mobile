@@ -529,3 +529,24 @@ test('sends a live read receipt only once queued messages settle', async () => {
   await flush();
   expect(api.markDmRead).toHaveBeenCalledTimes(1);
 });
+
+test('flushes a pending read receipt after a queued send', async () => {
+  const { api, socket, conv } = setup([]);
+  await conv.start();
+  api.markDmRead.mockClear();
+  let release!: () => void;
+  api.dmKey.mockImplementationOnce(
+    () =>
+      new Promise(resolve => {
+        release = () => resolve({ wrappedKey: 'w1', keyVersion: 1 });
+      }),
+  );
+  socket.onMessage?.(live('in', '1:incoming', 1));
+  await flush();
+  const sending = conv.send('reply');
+  await flush();
+  release();
+  await sending;
+  expect(conv.lines.map(l => l.id)).toEqual(['in', 'sent-1']);
+  expect(api.markDmRead).toHaveBeenCalledTimes(1);
+});
