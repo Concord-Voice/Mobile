@@ -455,3 +455,24 @@ test('asks the server for the current epoch when only an old key is proven', asy
   expect(conv.lines[0].text).toBe('legacy');
   expect(api.dmKey).toHaveBeenCalledWith('c1');
 });
+
+test('looks the current epoch up again when a legacy fallback stops working', async () => {
+  const { api, socket, conv } = setup([row('m1', '2:old', 1)]);
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+  await conv.start();
+  expect(conv.lines[0].text).toBe('old');
+  // The server rotates to 3; a legacy peer still labels its writes 1.
+  api.dmKey.mockImplementation(async (_id: string, version?: number) => ({
+    wrappedKey: `w${version ?? 3}`,
+    keyVersion: version ?? 3,
+  }));
+  socket.onMessage?.(live('a', '3:soon', 1));
+  await flush();
+  // Within the back-off: no new lookup, so it stays unreadable.
+  expect(conv.lines[1].unreadable).toBe(true);
+  now.mockReturnValue(40_000);
+  socket.onMessage?.(live('b', '3:later', 1));
+  await flush();
+  expect(conv.lines[2].text).toBe('later');
+  now.mockRestore();
+});

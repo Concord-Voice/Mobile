@@ -68,6 +68,8 @@ export class Conversation {
   /** The epoch to send under: the server's current one, or newer once a peer proves it. */
   private current: number | null = null;
   private lookup: Promise<number> | null = null;
+  /** When the server was last asked for the current epoch. */
+  private lookedUpAt = 0;
   private socket: DmSocket | null = null;
   private closed = false;
   /** Live messages decrypt one at a time, so a slow key lookup cannot reorder them. */
@@ -86,6 +88,7 @@ export class Conversation {
   private currentEpoch(): Promise<number> {
     if (this.current !== null) return Promise.resolve(this.current);
     // ponytail: one extra key request; keyFor then fetches the wrap by version.
+    this.lookedUpAt = Date.now();
     this.lookup ??= this.api
       .dmKey(this.id)
       .then(k => (this.current = Math.max(this.current ?? 0, k.keyVersion)))
@@ -154,7 +157,16 @@ export class Conversation {
         try {
           return { ...base, text: await open(0) };
         } catch {
-          // Report the labelled epoch's failure below.
+          // The current epoch may have rotated since it was looked up: ask again, at most
+          // once per REFUSED_MS, since the label (and so this retry) is the sender's choice.
+          if (Date.now() - this.lookedUpAt >= REFUSED_MS) {
+            this.current = null;
+            try {
+              return { ...base, text: await open(0) };
+            } catch {
+              // Report the labelled epoch's failure below.
+            }
+          }
         }
       }
       const text = error instanceof KeyUnavailable ? NO_KEY : UNREADABLE;
