@@ -1,12 +1,19 @@
 /**
  * Control-plane client for the mobile app, carried over from the #663 probe.
- * Holds tokens in memory only; key material never passes through here.
- * Not yet covered: WebAuthn MFA and persisted sessions.
+ * Holds tokens in memory; key material never passes through here.
+ * Not yet covered: WebAuthn MFA. The session store persists what `saved()` returns.
  */
 
 import { INVALID_KEY, type Attester } from '../ConcordAttest';
 
 export type Fetch = typeof fetch;
+
+/** What survives a relaunch: enough to rotate back into the same server session. */
+export type SavedSession = {
+  refreshToken: string;
+  sessionId: string;
+  userId: string;
+};
 
 export type Session = {
   accessToken: string;
@@ -26,6 +33,16 @@ export type LoginKeys = {
   wrappedPrivateKey: string;
   keyDerivationSalt: string;
   keyDerivationAlg: string;
+};
+
+/** A stored DM, still encrypted. Server-authored rows (call and expiration events) are left out. */
+export type DmEncrypted = {
+  id: string;
+  userId: string;
+  sender: string;
+  content: string;
+  keyVersion: number;
+  createdAt: string;
 };
 
 /** A DM conversation as the conversation list shows it. */
@@ -83,6 +100,8 @@ export class ConcordApi {
   private readonly base: string;
   /** Called when the server refuses a rotation and the session ends on its own. */
   onExpired: (() => void) | null = null;
+  /** Called whenever the token pair changes, so a persisted copy can be rewritten (best effort). */
+  onRotated: (() => void) | null = null;
   /** App Attest, used only when the server asks for attestation. Null: never attest. */
   attester: Attester | null = null;
   private attestation: { token: string; sessionId: string } | null = null;
@@ -171,7 +190,9 @@ export class ConcordApi {
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (this.session) {
-      headers.Authorization = `Bearer ${this.session.accessToken}`;
+      // A resumed session has no access token until its first rotation.
+      if (this.session.accessToken)
+        headers.Authorization = `Bearer ${this.session.accessToken}`;
       headers['X-Session-ID'] = this.session.sessionId;
       // The token is bound to the session that minted it.
       if (this.attestation?.sessionId === this.session.sessionId)
@@ -222,6 +243,28 @@ export class ConcordApi {
       sessionId: text(result.session_id),
       userId: userId ?? text(record(result.user).id),
     };
+    this.onRotated?.();
+  }
+
+  saved(): SavedSession | null {
+    if (!this.session) return null;
+    const { refreshToken, sessionId, userId } = this.session;
+    return { refreshToken, sessionId, userId };
+  }
+
+  /**
+   * Picks a persisted session back up and rotates it. Only a refusal (401) ends it; a
+   * network failure keeps it, and the next call refreshes again.
+   */
+  async resume(saved: SavedSession): Promise<void> {
+    // Picked field by field: a tampered record cannot smuggle in an access token.
+    const { refreshToken, sessionId, userId } = saved;
+    this.session = { accessToken: '', refreshToken, sessionId, userId };
+    try {
+      await this.refresh();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) throw error;
+    }
   }
 
   private refreshing: Promise<void> | null = null;
@@ -320,7 +363,8 @@ export class ConcordApi {
       );
     }
     // A sign-out or new sign-in meanwhile wins: its state is not overwritten.
-    // A token refresh keeps the session id, so the proof still holds.
+    // A token refresh mints a new session id, so the token is sent only until the
+    // next refresh; the server then asks again and the stored key re-proves.
     if (this.session?.sessionId === session.sessionId) {
       this.attestation = {
         token: text(result.attestation_token),
@@ -490,6 +534,59 @@ export class ConcordApi {
       `/dm/conversations/${encodeURIComponent(conversationId)}/messages`,
     );
     return Array.isArray(result.messages) ? result.messages.map(record) : [];
+  }
+
+  /** The caller's wrapped copy of a conversation key: the current one, or a given epoch. */
+  async dmKey(
+    conversationId: string,
+    version?: number,
+  ): Promise<{ wrappedKey: string; keyVersion: number }> {
+    const query = version === undefined ? '' : `?version=${version}`;
+    const key = record(
+      (
+        await this.call(
+          'GET',
+          `/e2ee/keys/${encodeURIComponent(conversationId)}${query}`,
+        )
+      ).key,
+    );
+    const keyVersion = key.key_version;
+    if (!Number.isSafeInteger(keyVersion) || (keyVersion as number) < 1)
+      throw new Error('Invalid API response');
+    return {
+      wrappedKey: text(key.wrapped_key),
+      keyVersion: keyVersion as number,
+    };
+  }
+
+  /** The newest page of a conversation, oldest first, ready to decrypt. */
+  async dmHistory(conversationId: string): Promise<DmEncrypted[]> {
+    const rows = await this.dmMessages(conversationId);
+    return rows
+      .filter(m => (m.type ?? 'text') === 'text')
+      .map(m => ({
+        id: text(m.id),
+        userId: text(m.user_id),
+        sender:
+          typeof m.display_name === 'string' && m.display_name
+            ? m.display_name
+            : text(m.username),
+        content: text(m.content),
+        // Unlabelled (or garbled) rows predate epochs: 0 means the current key, as on desktop.
+        keyVersion:
+          Number.isSafeInteger(m.key_version) && (m.key_version as number) >= 1
+            ? (m.key_version as number)
+            : 0,
+        createdAt: text(m.created_at),
+      }))
+      .reverse();
+  }
+
+  async markDmRead(conversationId: string): Promise<void> {
+    await this.call(
+      'POST',
+      `/dm/conversations/${encodeURIComponent(conversationId)}/read`,
+    );
   }
 
   /** The caller's DM conversations, newest activity first as the server orders them. */

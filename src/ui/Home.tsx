@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DmSummary } from '../core/ConcordApi';
 import { describeError, useSession } from '../state/session';
+import { Chat } from './Chat';
 import { colors } from './theme';
 
 const TABS = ['Messages', 'Servers', 'Alerts', 'You'] as const;
 type Tab = (typeof TABS)[number];
 
-function Messages() {
+function Messages({ onOpen }: { onOpen: (dm: DmSummary) => void }) {
   const api = useSession(s => s.api);
   const [dms, setDms] = useState<DmSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,14 +31,18 @@ function Messages() {
       data={dms}
       keyExtractor={d => d.id}
       renderItem={({ item }) => (
-        <View style={styles.row}>
+        <Pressable
+          accessibilityRole="button"
+          style={styles.row}
+          onPress={() => onOpen(item)}
+        >
           <Text style={styles.rowTitle} numberOfLines={1}>
             {item.title}
           </Text>
           {item.unreadCount > 0 ? (
             <Text style={styles.badge}>{item.unreadCount}</Text>
           ) : null}
-        </View>
+        </Pressable>
       )}
     />
   );
@@ -60,11 +65,13 @@ function You() {
 
 export function Home() {
   const [tab, setTab] = useState<Tab>('Messages');
+  const [openDm, setOpenDm] = useState<DmSummary | null>(null);
+  if (openDm) return <Chat dm={openDm} onBack={() => setOpenDm(null)} />;
   return (
     <View style={styles.screen}>
       <Text style={styles.header}>{tab}</Text>
       <View style={styles.pane}>
-        {tab === 'Messages' ? <Messages /> : null}
+        {tab === 'Messages' ? <Messages onOpen={setOpenDm} /> : null}
         {tab === 'You' ? <You /> : null}
         {tab === 'Servers' || tab === 'Alerts' ? (
           <Text style={styles.note}>Coming next.</Text>

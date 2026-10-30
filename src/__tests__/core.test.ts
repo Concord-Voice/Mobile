@@ -316,6 +316,168 @@ describe('ConcordApi', () => {
     expect(api.userId).toBe(ME);
   });
 
+  it('fetches DM keys and history for decryption', async () => {
+    const { api, calls } = signedIn({
+      'GET /e2ee/keys/c1': () => [
+        200,
+        { key: { wrapped_key: 'd3JhcA==', key_version: 4 } },
+      ],
+      'GET /e2ee/keys/c1?version=2': () => [
+        200,
+        { key: { wrapped_key: 'b2xk', key_version: 2 } },
+      ],
+      'GET /e2ee/keys/bad': () => [
+        200,
+        { key: { wrapped_key: 'x', key_version: 0 } },
+      ],
+      'GET /dm/conversations/c1/messages': () => [
+        200,
+        {
+          messages: [
+            {
+              id: 'm3',
+              user_id: ME,
+              username: 'me',
+              content: 'Yw==',
+              type: 'text',
+              key_version: 4,
+              created_at: 't3',
+            },
+            {
+              id: 'call',
+              user_id: PEER,
+              username: 'peer',
+              content: '',
+              type: 'call_event',
+              key_version: 4,
+              created_at: 't2',
+            },
+            {
+              id: 'm1',
+              user_id: PEER,
+              username: 'peer',
+              display_name: 'Peer P',
+              content: 'Yg==',
+              key_version: 2,
+              created_at: 't1',
+            },
+            {
+              id: 'm0',
+              user_id: PEER,
+              username: 'peer',
+              display_name: '',
+              content: 'YQ==',
+              created_at: 't0',
+            },
+          ],
+        },
+      ],
+      'POST /dm/conversations/c1/read': () => [200, {}],
+    });
+    await api.login('e', 'p');
+    expect(await api.dmKey('c1')).toEqual({
+      wrappedKey: 'd3JhcA==',
+      keyVersion: 4,
+    });
+    expect(await api.dmKey('c1', 2)).toEqual({
+      wrappedKey: 'b2xk',
+      keyVersion: 2,
+    });
+    await expect(api.dmKey('bad')).rejects.toThrow('Invalid API response');
+    // Oldest first, server-authored rows left out, an unlabelled row kept as epoch 0.
+    expect(await api.dmHistory('c1')).toEqual([
+      {
+        id: 'm0',
+        userId: PEER,
+        sender: 'peer',
+        content: 'YQ==',
+        keyVersion: 0,
+        createdAt: 't0',
+      },
+      {
+        id: 'm1',
+        userId: PEER,
+        sender: 'Peer P',
+        content: 'Yg==',
+        keyVersion: 2,
+        createdAt: 't1',
+      },
+      {
+        id: 'm3',
+        userId: ME,
+        sender: 'me',
+        content: 'Yw==',
+        keyVersion: 4,
+        createdAt: 't3',
+      },
+    ]);
+    await api.markDmRead('c1');
+    expect(calls.at(-1)?.key).toBe('POST /dm/conversations/c1/read');
+  });
+
+  it('reports every rotation and resumes a saved session', async () => {
+    const { api } = signedIn({
+      'POST /auth/refresh': () => [
+        200,
+        { access_token: 'a2', refresh_token: 'r2', session_id: 's1' },
+      ],
+    });
+    expect(api.saved()).toBeNull();
+    const rotated = jest.fn();
+    api.onRotated = rotated;
+    await api.login('e', 'p');
+    await api.refresh();
+    expect(rotated).toHaveBeenCalledTimes(2);
+    const saved = api.saved();
+    expect(saved).toEqual({
+      refreshToken: 'r2',
+      sessionId: 's1',
+      userId: ME,
+    });
+
+    const { api: next, calls } = signedIn({
+      'POST /auth/refresh': () => [
+        200,
+        { access_token: 'a3', refresh_token: 'r3', session_id: 's1' },
+      ],
+      'POST /auth/ws-ticket': () => [200, { ticket: 'tkt' }],
+    });
+    // A tampered record's extra fields are not picked up.
+    await next.resume({
+      ...(saved as NonNullable<typeof saved>),
+      accessToken: 'INJECTED',
+    } as NonNullable<typeof saved>);
+    const refresh = calls.find(c => c.key === 'POST /auth/refresh');
+    expect(refresh?.headers['X-Refresh-Token']).toBe('r2');
+    // No access token yet, so none is sent.
+    expect(refresh?.headers.Authorization).toBeUndefined();
+    await next.wsTicket();
+    expect(calls.at(-1)?.headers.Authorization).toBe('Bearer a3');
+    expect(next.userId).toBe(ME);
+  });
+
+  it('keeps a resumed session through a network failure, not a refusal', async () => {
+    const saved = { refreshToken: 'r1', sessionId: 's1', userId: ME };
+    const offline = new ConcordApi(
+      'https://api.example.test',
+      MACHINE,
+      (async () => {
+        throw new TypeError('Network request failed');
+      }) as unknown as typeof fetch,
+    );
+    await offline.resume(saved);
+    expect(offline.saved()).toEqual(saved);
+
+    const { api } = signedIn({
+      'POST /auth/refresh': () => [401, { code: 'invalid_refresh' }],
+    });
+    const expired = jest.fn();
+    api.onExpired = expired;
+    await expect(api.resume(saved)).rejects.toMatchObject({ status: 401 });
+    expect(expired).toHaveBeenCalledTimes(1);
+    expect(api.saved()).toBeNull();
+  });
+
   it('ends the session when the refresh token is refused', async () => {
     const { api } = signedIn({
       'POST /auth/refresh': () => [401, { code: 'invalid_refresh' }],
@@ -568,6 +730,8 @@ describe('DmSocket', () => {
         })),
     );
     await dm.subscribe(CONV);
+    const live: string[] = [];
+    dm.onMessage = m => live.push(m.id);
     const reply = dm.nextMessage(CONV, PEER);
     expect(await dm.send(CONV, 'c', 1, 'n1')).toBe('m1');
     expect(await reply).toEqual({
@@ -577,6 +741,8 @@ describe('DmSocket', () => {
       content: 'cipher',
       keyVersion: 1,
     });
+    // The live listener sees every valid frame; filtering is the caller's job.
+    expect(live).toEqual(['spoof', 'm2']);
     const pending = dm.nextMessage(CONV, PEER);
     dm.close();
     await expect(pending).rejects.toThrow('Socket closed');
@@ -607,6 +773,38 @@ describe('DmSocket', () => {
     }
   });
 
+  it('maps the sender and time of live messages', async () => {
+    let socket!: FakeSocket;
+    const dm = await DmSocket.open(
+      'ws://x',
+      () => (socket = new FakeSocket(() => undefined)),
+    );
+    const got: Array<[string | undefined, string | undefined]> = [];
+    dm.onMessage = m => got.push([m.sender, m.createdAt]);
+    const frame = { conversation_id: CONV, user_id: PEER, content: 'c' };
+    socket.emit('dm_message', {
+      ...frame,
+      id: 'a',
+      key_version: 1,
+      display_name: 'Peer P',
+      username: 'peer',
+      created_at: 't',
+    });
+    socket.emit('dm_message', {
+      ...frame,
+      id: 'b',
+      key_version: 1,
+      display_name: '',
+      username: 'peer',
+    });
+    socket.emit('dm_message', { ...frame, id: 'c', key_version: 1 });
+    expect(got).toEqual([
+      ['Peer P', 't'],
+      ['peer', undefined],
+      [undefined, undefined],
+    ]);
+  });
+
   it('ignores malformed and unrelated frames and fails waiters on error frames', async () => {
     let socket!: FakeSocket;
     const dm = await DmSocket.open(
@@ -633,8 +831,11 @@ describe('DmSocket', () => {
     socket.emit('error', { message: 'nope' });
     await expect(pending).rejects.toThrow('Server error frame');
     const closed = dm.nextMessage(CONV, PEER);
+    const dropped = jest.fn();
+    dm.onDropped = dropped;
     socket.onclose?.();
     await expect(closed).rejects.toThrow('Socket closed');
+    expect(dropped).toHaveBeenCalledTimes(1);
   });
 
   it('times out waits and failed opens', async () => {

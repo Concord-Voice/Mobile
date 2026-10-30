@@ -42,6 +42,10 @@ type NativeCrypto = {
     allowUI: boolean,
   ): Promise<unknown>;
   deleteIdentity(account: string): Promise<unknown>;
+  saveSession(record: string): Promise<unknown>;
+  loadSession(): Promise<unknown>;
+  deleteSession(): Promise<unknown>;
+  randomId(): Promise<unknown>;
 };
 
 const HANDLE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
@@ -167,6 +171,34 @@ export async function loadIdentity(
 
 export async function deleteIdentity(account: string): Promise<void> {
   await native().deleteIdentity(account);
+}
+
+/** Stores the session record (no prompt, device-only); it opens nothing without the identity. */
+export async function saveSession(record: string): Promise<void> {
+  await native().saveSession(record);
+}
+
+/** The stored session record, or null when there is none. */
+export async function loadSession(): Promise<string | null> {
+  const value = await native().loadSession();
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string')
+    throw new Error('Invalid native crypto output');
+  return value;
+}
+
+export async function deleteSession(): Promise<void> {
+  await native().deleteSession();
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** A random lowercase UUID from the platform CSPRNG, e.g. for the machine id. */
+export async function randomId(): Promise<string> {
+  const value = await native().randomId();
+  if (typeof value !== 'string' || !UUID.test(value))
+    throw new Error('Invalid native crypto output');
+  return value;
 }
 
 /** The stable native rejection code, e.g. E_CONCORD_CRYPTO_NOTFOUND, or null. */

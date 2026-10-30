@@ -69,3 +69,60 @@ public struct ConcordKeychain {
     }
   }
 }
+
+/// Keeps the signed-in session record (server, machine id, refresh token, session and user ids)
+/// so the app resumes after a relaunch. Device-only and readable after first unlock, without a prompt: the record
+/// alone opens no messages, because the identity key stays behind Face ID in ConcordKeychain.
+public struct ConcordSessionKeychain {
+  let service: String
+  let account = "session"
+
+  public init(service: String = "com.concordvoice.session") {
+    self.service = service
+  }
+
+  /// Updates in place, so a failed write leaves the previous record rather than none.
+  public func save(_ record: String) throws {
+    let query =
+      [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account]
+      as CFDictionary
+    var status = SecItemUpdate(query, [kSecValueData: Data(record.utf8)] as CFDictionary)
+    if status == errSecItemNotFound {
+      status = SecItemAdd(
+        [
+          kSecClass: kSecClassGenericPassword,
+          kSecAttrService: service,
+          kSecAttrAccount: account,
+          kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+          kSecValueData: Data(record.utf8),
+        ] as CFDictionary, nil)
+    }
+    guard status == errSecSuccess else { throw ConcordKeychain.error(status) }
+  }
+
+  /// Nil when nothing is stored.
+  public func load() throws -> String? {
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(
+      [
+        kSecClass: kSecClassGenericPassword,
+        kSecAttrService: service,
+        kSecAttrAccount: account,
+        kSecReturnData: true,
+      ] as CFDictionary, &result)
+    if status == errSecItemNotFound { return nil }
+    guard status == errSecSuccess, let data = result as? Data,
+      let record = String(data: data, encoding: .utf8)
+    else { throw ConcordKeychain.error(status) }
+    return record
+  }
+
+  public func delete() throws {
+    let status = SecItemDelete(
+      [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account]
+        as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+      throw ConcordKeychain.error(status)
+    }
+  }
+}
