@@ -12,6 +12,11 @@ jest.mock('../ConcordCrypto', () => ({
   loadSession: jest.fn(async () => null),
   deleteSession: jest.fn(async () => {}),
   randomId: jest.fn(async () => '00000000-0000-4000-8000-000000000001'),
+  generateChannelKey: jest.fn(async () => 'SEAL'),
+  wrapChannelKey: jest.fn(async () => 'WRAPPED'),
+  unwrapChannelKey: jest.fn(async () => 'SEAL'),
+  encryptMessage: jest.fn(async (t: string) => `enc:${t}`),
+  decryptMessage: jest.fn(async (c: string) => c.replace(/^enc:/, '')),
   nativeErrorCode: (e: unknown) =>
     (e as { code?: string } | null)?.code ?? null,
 }));
@@ -25,11 +30,21 @@ const crypto = jest.requireMock('../ConcordCrypto') as {
   saveSession: jest.Mock;
   loadSession: jest.Mock;
   deleteSession: jest.Mock;
+  wrapChannelKey: jest.Mock;
+  unwrapChannelKey: jest.Mock;
+  decryptMessage: jest.Mock;
 };
 
 const SAVED = {
   server: 'https://c.test',
   machineId: 'machine-1',
+  sessionId: 'sess-1',
+  userId: 'user-1',
+  sealedKey: 'WRAPPED',
+  sealedToken: 'enc:rt-old',
+};
+/** What resume receives once the record is unsealed. */
+const RESUMED = {
   refreshToken: 'rt-old', // pragma: allowlist secret
   sessionId: 'sess-1',
   userId: 'user-1',
@@ -55,6 +70,7 @@ function fakeApi(overrides: Partial<Record<string, jest.Mock>> = {}) {
     verifyMfa: jest.fn(async () => KEYS),
     sendMfaEmail: jest.fn(async () => {}),
     logout: jest.fn(async () => {}),
+    publicKey: jest.fn(async () => ({ publicKey: 'UFVC', keyVersion: 1 })),
     ...overrides,
   };
   return api;
@@ -221,14 +237,21 @@ describe('session store', () => {
       'HANDLE',
       'user-1@https://c.test',
     );
-    expect(lastSaved()).toMatchObject({
+    expect(crypto.wrapChannelKey).toHaveBeenCalledWith('SEAL', 'UFVC');
+    // The seal must open with this identity before anything is saved.
+    expect(crypto.unwrapChannelKey).toHaveBeenCalledWith('WRAPPED', 'HANDLE');
+    expect(lastSaved()).toEqual({
       server: 'https://c.test',
-      refreshToken: 'rt-1',
+      machineId: expect.any(String),
+      sessionId: 'sess-1',
       userId: 'user-1',
+      sealedKey: 'WRAPPED',
+      sealedToken: 'enc:rt-1',
     });
+    expect(crypto.saveSession.mock.calls.at(-1)[0]).not.toContain('"rt-1"');
     api.tokens = { ...api.tokens, refreshToken: 'rt-2' };
-    api.onRotated?.();
-    expect(lastSaved().refreshToken).toBe('rt-2');
+    await api.onRotated?.();
+    expect(lastSaved().sealedToken).toBe('enc:rt-2');
   });
 
   it('saves nothing when the device has no biometrics', async () => {
@@ -249,19 +272,30 @@ describe('session store', () => {
       'user-1@https://c.test',
       expect.any(String),
     );
-    expect(api.resume).toHaveBeenCalledWith(SAVED);
+    expect(crypto.unwrapChannelKey).toHaveBeenCalledWith(
+      'WRAPPED',
+      'SAVED_HANDLE',
+    );
+    expect(api.resume).toHaveBeenCalledWith(RESUMED);
     expect(useStore.getState()).toMatchObject({
       stage: { kind: 'signed_in', userId: 'user-1' },
       identity: 'SAVED_HANDLE',
     });
     expect(lastSaved()).toMatchObject({
       machineId: 'machine-1',
-      refreshToken: 'rt-1',
+      sealedKey: 'WRAPPED',
+      sealedToken: 'enc:rt-1',
     });
   });
 
-  it('starts signed out with nothing or garbage saved', async () => {
-    for (const raw of [null, '{"server":"x"}', 'not json']) {
+  it('starts signed out with nothing or garbage saved, and drops the garbage', async () => {
+    const unsealed = { ...RESUMED, server: 'https://c.test', machineId: 'm' };
+    for (const raw of [
+      null,
+      '{"server":"x"}',
+      'not json',
+      JSON.stringify(unsealed),
+    ]) {
       crypto.loadSession.mockResolvedValueOnce(raw);
       const { useStore } = store(fakeApi());
       await useStore.getState().restore();
@@ -271,6 +305,8 @@ describe('session store', () => {
       });
     }
     expect(crypto.loadIdentity).not.toHaveBeenCalled();
+    // Every record but the missing one, including an older unsealed one, is deleted.
+    expect(crypto.deleteSession).toHaveBeenCalledTimes(3);
   });
 
   it('keeps the saved session when Face ID is cancelled', async () => {
@@ -289,7 +325,7 @@ describe('session store', () => {
     expect(api.resume).not.toHaveBeenCalled();
   });
 
-  it('revokes and forgets a session whose Face ID key is gone', async () => {
+  it('forgets a session whose Face ID key is gone', async () => {
     crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
     crypto.loadIdentity.mockRejectedValueOnce(
       Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_NOTFOUND' }),
@@ -297,8 +333,8 @@ describe('session store', () => {
     const api = fakeApi();
     const { useStore } = store(api);
     await useStore.getState().restore();
-    expect(api.resume).toHaveBeenCalledWith(SAVED);
-    expect(api.logout).toHaveBeenCalled();
+    // The token is sealed to the lost key, so nothing can reach the server session.
+    expect(api.resume).not.toHaveBeenCalled();
     expect(crypto.deleteSession).toHaveBeenCalled();
     expect(crypto.deleteIdentity).toHaveBeenCalledWith('user-1@https://c.test');
     expect(useStore.getState()).toMatchObject({
@@ -371,7 +407,7 @@ describe('session store edges', () => {
     const rotated = api.onRotated;
     await useStore.getState().signOut();
     crypto.saveSession.mockClear();
-    rotated?.();
+    await rotated?.();
     expect(crypto.saveSession).not.toHaveBeenCalled();
   });
 
@@ -404,26 +440,42 @@ describe('session store edges', () => {
     expect(useStore.getState().error).toBeNull();
   });
 
-  it('keeps the rotated record when the old session cannot be revoked offline', async () => {
+  it('forgets a record that does not open with the identity', async () => {
     crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
-    crypto.loadIdentity.mockRejectedValueOnce(
-      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_NOTFOUND' }),
-    );
-    const api = fakeApi({
-      logout: jest.fn(async () => {
-        throw new Error('offline');
-      }),
-    });
-    api.resume.mockImplementationOnce(async () => {
-      api.tokens = { ...api.tokens, refreshToken: 'rt-2' };
-      api.onRotated?.();
-    });
+    crypto.decryptMessage.mockRejectedValueOnce(new Error('auth tag'));
+    const api = fakeApi();
     const { useStore } = store(api);
     await useStore.getState().restore();
-    expect(lastSaved().refreshToken).toBe('rt-2');
-    expect(crypto.deleteSession).not.toHaveBeenCalled();
+    expect(api.resume).not.toHaveBeenCalled();
+    expect(crypto.releaseAll).toHaveBeenCalled();
+    expect(crypto.deleteSession).toHaveBeenCalled();
     expect(crypto.deleteIdentity).toHaveBeenCalledWith('user-1@https://c.test');
-    expect(useStore.getState().canResume).toBe(false);
+    expect(useStore.getState()).toMatchObject({
+      stage: { kind: 'signed_out' },
+      canResume: false,
+      error: expect.stringMatching(/Log in again/),
+    });
+  });
+
+  it('saves nothing when the seal does not open with this identity', async () => {
+    crypto.unwrapChannelKey.mockRejectedValueOnce(new Error('wrong key'));
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(crypto.saveSession).not.toHaveBeenCalled();
+    expect(crypto.persistIdentity).not.toHaveBeenCalled();
+    expect(crypto.releaseKey).toHaveBeenCalledWith('SEAL');
+    expect(useStore.getState().stage.kind).toBe('signed_in');
+  });
+
+  it('saves rotations in order, each with the newest token', async () => {
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    api.tokens = { ...api.tokens, refreshToken: 'rt-2' };
+    const first = api.onRotated?.();
+    api.tokens = { ...api.tokens, refreshToken: 'rt-3' };
+    await Promise.all([first, api.onRotated?.()]);
+    expect(lastSaved().sealedToken).toBe('enc:rt-3');
   });
 
   it('passes only known fields from a tampered record', async () => {
@@ -433,7 +485,7 @@ describe('session store edges', () => {
     const api = fakeApi();
     const { useStore } = store(api);
     await useStore.getState().restore();
-    expect(api.resume).toHaveBeenCalledWith(SAVED);
+    expect(api.resume).toHaveBeenCalledWith(RESUMED);
   });
 
   it('starts signed out when the Keychain read fails', async () => {

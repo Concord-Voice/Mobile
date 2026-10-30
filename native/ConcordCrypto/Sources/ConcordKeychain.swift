@@ -70,9 +70,10 @@ public struct ConcordKeychain {
   }
 }
 
-/// Keeps the signed-in session record (server, machine id, refresh token, session and user ids)
-/// so the app resumes after a relaunch. Device-only and readable after first unlock, without a prompt: the record
-/// alone opens no messages, because the identity key stays behind Face ID in ConcordKeychain.
+/// Keeps the signed-in session record (server, machine id, session and user ids, sealed refresh
+/// token) so the app resumes after a relaunch. Device-only and readable after first unlock, without
+/// a prompt, so rotations can rewrite it: the JS layer seals the token to the identity key, which
+/// stays behind Face ID in ConcordKeychain, so the record alone opens neither messages nor the session.
 public struct ConcordSessionKeychain {
   let service: String
   let account = "session"

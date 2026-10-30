@@ -173,7 +173,7 @@ export async function deleteIdentity(account: string): Promise<void> {
   await native().deleteIdentity(account);
 }
 
-/** Stores the session record (no prompt, device-only); it opens nothing without the identity. */
+/** Stores the session record (no prompt, device-only); its token is sealed to the identity. */
 export async function saveSession(record: string): Promise<void> {
   await native().saveSession(record);
 }
