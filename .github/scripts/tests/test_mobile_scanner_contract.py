@@ -34,10 +34,20 @@ class MobileScannerContract(unittest.TestCase):
         selection = json.loads(result['selection'])
         self.assertEqual(selection['policy_sha'], original['policy_sha'])
         self.assertEqual(selection['head_sha'], original['head_sha'])
-        self.assertFalse(selection['selected']['sonar'])
+        # Sonar and its app lane (keyed `desktop`) pass through; other products drop.
+        self.assertTrue(selection['selected']['sonar'])
         self.assertFalse(selection['selected']['govulncheck'])
         self.assertTrue(selection['selected']['eslint'])
         self.assertTrue(selection['selected']['osv'])
+        self.assertEqual(selection['coverage_required'], {'desktop': True, 'admin': False})
+
+    def test_unselected_sonar_stays_off(self):
+        original = {'known': True, 'selected': {'sonar': False, 'sonar_desktop': False, 'eslint': False},
+                    'coverage_required': {'desktop': False, 'admin': True}}
+        selection = json.loads(self.select(original)['selection'])
+        self.assertFalse(selection['selected']['sonar'])
+        self.assertFalse(selection['selected']['sonar_desktop'])
+        self.assertTrue(selection['selected']['eslint'])
         self.assertFalse(any(selection['coverage_required'].values()))
 
     def test_unknown_policy_never_becomes_valid_selection(self):
@@ -45,17 +55,19 @@ class MobileScannerContract(unittest.TestCase):
         self.assertEqual(result['known'], 'false')
         self.assertIs(json.loads(result['selection'])['known'], False)
 
-    def test_installing_jobs_depend_on_ioc_and_no_app_build_is_fabricated(self):
-        for name in ('semgrep', 'eslint', 'secret-scanning', 'workflow-lint', 'app-checks'):
+    def test_installing_jobs_depend_on_ioc_and_build_is_the_real_coverage_job(self):
+        for name in ('semgrep', 'eslint', 'secret-scanning', 'workflow-lint', 'app-checks', 'build'):
             self.assertIn('ioc', WORKFLOW['jobs'][name]['needs'], name)
         app = WORKFLOW['jobs']['app-checks']
         self.assertEqual([step['run'] for step in app['steps'] if 'run' in step],
                          ['npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
         self.assertEqual(app['permissions'], {'contents': 'read'})
-        self.assertNotIn('build', WORKFLOW['jobs'])
+        # The reported build result is build.yml's own job result, never a constant.
+        self.assertEqual(WORKFLOW['jobs']['build']['uses'], './.github/workflows/build.yml')
         report = next(s for s in WORKFLOW['jobs']['report']['steps'] if s.get('id') == 'report')
         self.assertIn("'ioc': os.environ['IOC_RESULT']", report['run'])
-        self.assertNotIn("'build':", report['run'])
+        self.assertIn("'build': os.environ['BUILD_RESULT']", report['run'])
+        self.assertEqual(report['env']['BUILD_RESULT'], '${{ needs.build.result }}')
         self.assertNotIn('SONAR_TOKEN', json.dumps(WORKFLOW))
 
     def test_default_branch_scanners_run_after_ioc(self):

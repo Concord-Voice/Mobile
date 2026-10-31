@@ -191,17 +191,17 @@ run_policy_case historical-docs semgrep_community README.md
 run_policy_case docs-ordinary-push semgrep_community docs/ordinary.md
 run_policy_case docs-hotfix-push codeql_actions,codeql_go,codeql_js,eslint,govulncheck,osv,semgrep_custom,semgrep_community,semgrep_canary,sonar docs/hotfix.md
 run_policy_case docs-schedule codeql_actions,codeql_go,codeql_js,eslint,govulncheck,osv,semgrep_custom,semgrep_community,semgrep_canary,sonar docs/scheduled.md
-run_policy_case mobile-ts codeql_js,eslint,semgrep_custom,semgrep_community src/example/example.ts
-run_policy_case mobile-manifest codeql_js,eslint,osv,semgrep_community package.json
+run_policy_case mobile-ts codeql_js,eslint,semgrep_custom,semgrep_community,sonar src/example/example.ts
+run_policy_case mobile-manifest codeql_js,eslint,osv,semgrep_community,sonar package.json
 run_policy_case actions-only codeql_actions,codeql_js,semgrep_community,semgrep_canary .github/workflows/example.yml
 run_policy_case sbom codeql_js,osv,semgrep_community docs/inventory.cdx.json
 run_policy_case scanner-config codeql_js,semgrep_custom,semgrep_community,semgrep_canary .semgrep/rules/example.yml
 run_policy_case license-tool-manifest codeql_js,osv,semgrep_community .github/tools/license-checker/package.json
 run_policy_case license-tool-lock codeql_js,osv,semgrep_community .github/tools/license-checker/package-lock.json
 run_policy_case notice semgrep_community NOTICE.md
-run_delete_case delete-in-scope codeql_js,eslint,semgrep_custom,semgrep_community src/example/deleted.ts
-run_transition_case rename-into-scope codeql_js,eslint,semgrep_custom,semgrep_community docs/relevance.md src/example/renamed.ts
-run_transition_case rename-out-scope codeql_js,eslint,semgrep_custom,semgrep_community src/example/renamed-out.ts docs/renamed.md
+run_delete_case delete-in-scope codeql_js,eslint,semgrep_custom,semgrep_community,sonar src/example/deleted.ts
+run_transition_case rename-into-scope codeql_js,eslint,semgrep_custom,semgrep_community,sonar docs/relevance.md src/example/renamed.ts
+run_transition_case rename-out-scope codeql_js,eslint,semgrep_custom,semgrep_community,sonar src/example/renamed-out.ts docs/renamed.md
 run_inventory_case 301
 run_inventory_case 3000
 run_inventory_case 3001
@@ -435,7 +435,8 @@ const fs = await import('node:fs');
 const emitted = JSON.parse(fs.readFileSync(`${selectionDir}/mobile-ts.selection.json`, 'utf8'));
 assert.equal(emitted.known, true, 'Mobile source selection is known');
 assert.equal(emitted.selected.eslint, true, 'Mobile source selects ESLint');
-assert.equal(emitted.selected.sonar, false, 'Mobile has no Sonar lane');
+assert.equal(emitted.selected.sonar, true, 'Mobile app source selects the Sonar lane');
+assert.equal(emitted.coverage_required.desktop, true, 'Mobile app source requires app coverage (desktop key)');
 console.log(`PASS: ${ANALYSIS_KEYS.length} analysis keys; historical, boundary, error, and legacy contracts`);
 NODE
 
