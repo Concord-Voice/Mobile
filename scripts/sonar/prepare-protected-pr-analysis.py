@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -27,30 +28,24 @@ GIT_ENV = {k: v for k, v in os.environ.items()
            if not k.startswith("GIT_") and k not in ("GITHUB_TOKEN", "GH_TOKEN", "SONAR_TOKEN")}
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 COMPONENTS = {
-    "desktop": ("desktop-coverage", "lcov.info", "client/desktop/coverage/lcov.info", "client/desktop"),
+    # Mobile: the `desktop` key is the app lane (pr-ci.yml `build`), whose root
+    # jest run writes coverage/lcov.info with src/... sources.
+    "desktop": ("desktop-coverage", "lcov.info", "coverage/lcov.info", "src"),
     "control_plane": ("control-plane-coverage", "coverage.out", "services/control-plane/coverage.out", "services/control-plane"),
     "media_plane": ("media-plane-coverage", "lcov.info", "services/media-plane/coverage/lcov.info", "services/media-plane"),
     "admin": ("admin-coverage", "lcov.info", "client/admin/coverage/lcov.info", "client/admin"),
 }
-BRIDGE = ("concord-bridge-coverage", "lcov.info", "dev-tooling/concord-bridge/coverage/lcov.info",
-          "dev-tooling/concord-bridge")
-REPORT_PATHS = {spec[2] for spec in (*COMPONENTS.values(), BRIDGE)}
-SOURCE_DIRS = (
-    "client/desktop/src/", "client/desktop/tests/", "client/admin/src/", "client/admin/e2e/",
-    "services/control-plane/", "services/media-plane/src/", "services/media-plane/tests/",
-    "dev-tooling/concord-bridge/src/", "dev-tooling/concord-bridge/tests/",
-)
+# Mobile has no concord-bridge component; Alpha's bridge coverage stays there.
+REPORT_PATHS = {spec[2] for spec in COMPONENTS.values()}
+SOURCE_DIRS = ("src/", "__tests__/")
 SELECTION_KEYS = {"codeql_actions", "codeql_go", "codeql_js", "eslint", "govulncheck", "osv",
                   "semgrep_custom", "semgrep_community", "semgrep_canary", "sonar",
                   "sonar_force_all", "sonar_desktop", "sonar_control_plane", "sonar_media_plane", "sonar_admin"}
-SUPPORT = {"client/desktop/tsconfig.json", "client/desktop/tsconfig.main.json",
-           "client/desktop/tsconfig.preload.json", "client/desktop/package.json",
-           "client/admin/tsconfig.json", "client/admin/tsconfig.app.json",
-           "client/admin/tsconfig.node.json", "client/admin/tsconfig.e2e.json",
-           "client/admin/package.json", "services/media-plane/tsconfig.json",
-           "services/media-plane/package.json", "dev-tooling/concord-bridge/tsconfig.json",
-           "dev-tooling/concord-bridge/package.json", "services/control-plane/go.mod",
-           "services/control-plane/go.sum"}
+# Mobile: only the app lane lives here. The server and Admin Portal keys stay
+# in the selection contract but are always false (pr-ci.yml mobile-selection).
+SUPPORT = {"package.json", "tsconfig.json"}
+# GitHub reports a live run as any of these; a waiting downstream job can flip it off in_progress.
+LIVE_RUN_STATUSES = ("queued", "in_progress", "requested", "waiting", "pending")
 MAX_API = 2 * 1024 * 1024
 MAX_PROOF_ZIP = 128 * 1024
 MAX_PROOF = 64 * 1024
@@ -177,7 +172,9 @@ class GitHub:
         url = API + path
         request = Request(url, headers={"Accept": "application/vnd.github+json",
                                         "Authorization": f"Bearer {self.token}",
-                                        "X-GitHub-Api-Version": "2026-03-10",
+                                        # 2026-03-10 returns merge_commit_sha as null, which fails the
+                                        # signed merge SHA check on every PR.
+                                        "X-GitHub-Api-Version": "2022-11-28",
                                         "User-Agent": "Concord-Voice-protected-sonar"})
         try:
             with OPEN(request, timeout=20) as response:
@@ -242,8 +239,8 @@ class GitHub:
 
 def verify_proof(proof, verified):
     try:
-        subprocess.run(["go", "run", "./cmd/verify-sonar-caller-proof",
-                        "--proof", str(proof), "--out", str(verified)], cwd=ROOT / "services/control-plane", env=GIT_ENV,
+        subprocess.run(["go", "run", ".",
+                        "--proof", str(proof), "--out", str(verified)], cwd=ROOT / "tools/sonar-caller-proof", env=GIT_ENV,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, check=True)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         raise Reject("signed caller proof invalid") from None
@@ -273,15 +270,25 @@ def validate_evidence(candidate, verified, run, pr, jobs):
     workflow_path = ".github/workflows/required-pr-build.yml"
     protected_paths = (workflow_path, f"{workflow_path}@main", f"{workflow_path}@refs/heads/main",
                        f"{REPO}/{workflow_path}@main", f"{REPO}/{workflow_path}@refs/heads/main")
-    if (not isinstance(run, dict) or run.get("id") != candidate["caller_run_id"]
-            or run.get("run_attempt") != candidate["caller_run_attempt"]
-            or run.get("event") != "pull_request" or run.get("head_sha") != candidate["expected_head_sha"]
-            or run.get("status") != "in_progress" or run.get("conclusion") is not None
-            or run.get("path") not in protected_paths
-            or run.get("repository", {}).get("full_name") != REPO
-            or str(run.get("repository", {}).get("id")) != claims.get("repository_id")
-            or candidate["pr_number"] not in [p.get("number") for p in run.get("pull_requests", []) if isinstance(p, dict)]):
-        raise Reject("caller run identity or state invalid")
+    if not isinstance(run, dict):
+        raise Reject("caller run identity or state invalid: run")
+    repository = run.get("repository") if isinstance(run.get("repository"), dict) else {}
+    pulls = run.get("pull_requests") if isinstance(run.get("pull_requests"), list) else []
+    # Field names only, never values, so a live rejection says which check failed.
+    failed = [name for name, ok in (
+        ("id", run.get("id") == candidate["caller_run_id"]),
+        ("run_attempt", run.get("run_attempt") == candidate["caller_run_attempt"]),
+        ("event", run.get("event") == "pull_request"),
+        ("head_sha", run.get("head_sha") == candidate["expected_head_sha"]),
+        ("status", run.get("status") in LIVE_RUN_STATUSES),
+        ("conclusion", run.get("conclusion") is None),
+        ("path", run.get("path") in protected_paths),
+        ("repository", repository.get("full_name") == REPO),
+        ("repository_id", str(repository.get("id")) == claims.get("repository_id")),
+        ("pull_requests", candidate["pr_number"] in [p.get("number") for p in pulls if isinstance(p, dict)]),
+    ) if not ok]
+    if failed:
+        raise Reject("caller run identity or state invalid: " + ",".join(failed))
     if (not isinstance(pr, dict) or pr.get("number") != candidate["pr_number"]
             or pr.get("state") != "open" or pr.get("head", {}).get("sha") != candidate["expected_head_sha"]
             or pr.get("base", {}).get("sha") != candidate["expected_base_sha"]
@@ -324,7 +331,7 @@ def validate_evidence(candidate, verified, run, pr, jobs):
            or j.get("run_attempt") != candidate["caller_run_attempt"]
            or j.get("head_sha") != candidate["expected_head_sha"] for j in actual):
         raise Reject("caller job identity mismatch")
-    prefix = "Protected scan enforcement / "
+    prefix = JOB_PREFIX
     protected = [j for j in actual if isinstance(j.get("name"), str) and j["name"].startswith(prefix)]
     if not protected or any(j.get("status") != "completed" for j in protected):
         raise Reject("protected caller jobs incomplete")
@@ -343,7 +350,7 @@ def validate_evidence(candidate, verified, run, pr, jobs):
     build = [j for j in protected if j["name"].startswith(prefix + "build / ")]
     if not build or any(j.get("conclusion") not in ("success", "skipped") for j in build):
         raise Reject("build jobs differ from signed success")
-    producers = {"desktop": "Desktop / Merge Coverage", "control_plane": "Control Plane / Merge Coverage",
+    producers = {"desktop": "Mobile / Test + Coverage", "control_plane": "Control Plane / Merge Coverage",
                  "media_plane": "Media Plane / Test + Coverage", "admin": "Admin Portal / Test + Coverage"}
     for component, producer in producers.items():
         if not coverage[component]:
@@ -351,16 +358,7 @@ def validate_evidence(candidate, verified, run, pr, jobs):
         matches = [j for j in build if j["name"] == prefix + "build / " + producer]
         if len(matches) != 1 or matches[0].get("conclusion") != "success":
             raise Reject("coverage producer job not successful")
-    bridge = [j for j in build if j["name"] == prefix + "build / Concord Bridge / Test + Coverage"]
-    if len(bridge) != 1:
-        raise Reject("bridge coverage producer job missing")
-    if bridge[0]["conclusion"] == "skipped":
-        return payload, claims, False
-    steps = bridge[0].get("steps")
-    uploads = [step for step in steps if step.get("name") == "Upload coverage"] if isinstance(steps, list) else []
-    if len(uploads) != 1 or uploads[0].get("conclusion") not in ("success", "skipped"):
-        raise Reject("bridge coverage upload verdict unavailable")
-    return payload, claims, uploads[0]["conclusion"] == "success"
+    return payload, claims
 
 
 def prepare_git(repo, claims, payload, candidate, token):
@@ -454,7 +452,7 @@ def validate_report(content, component):
         lines = content.decode("utf-8").splitlines(keepends=True)
     except UnicodeDecodeError:
         raise Reject("coverage encoding invalid") from None
-    prefix = BRIDGE[3] if component == "concord_bridge" else COMPONENTS[component][3]
+    prefix = COMPONENTS[component][3]
     if component == "control_plane":
         if not lines or not lines[0].startswith("mode: "):
             raise Reject("Go coverage header missing")
@@ -463,7 +461,7 @@ def validate_report(content, component):
             raise Reject("Go coverage empty")
         for path in records:
             safe_path(path)
-            if not (path.startswith(prefix + "/") or path.startswith("github.com/Concord-Voice/Mobile/" + prefix + "/")):
+            if not path.startswith(prefix + "/"):
                 raise Reject("Go coverage source outside component")
         return content
     found = 0
@@ -527,6 +525,28 @@ def trusted_properties(repo, pr, candidate):
     (repo / "sonar-project.properties").write_text(text.rstrip() + "\n" + "\n".join(values) + "\n", encoding="utf-8")
 
 
+JOB_PREFIX = "Protected scan enforcement / "
+JOB_SETTLE_ATTEMPTS, JOB_SETTLE_DELAY = 13, 10
+
+
+def settled_jobs(api, path):
+    # The jobs API trails the caller's report job by seconds, and longer for the jobs a
+    # re-run copies forward, so a child dispatched at once can see unfinished jobs.
+    # ponytail: fixed 2-minute poll; validate_evidence still rejects whatever stays unsettled.
+    for remaining in range(JOB_SETTLE_ATTEMPTS - 1, -1, -1):
+        jobs = api.request(path)
+        listed = jobs.get("jobs") if isinstance(jobs, dict) else None
+        if not isinstance(listed, list):
+            return jobs
+        protected = [j for j in listed if isinstance(j, dict) and isinstance(j.get("name"), str)
+                     and j["name"].startswith(JOB_PREFIX)]
+        if protected and all(j.get("status") == "completed" and j.get("conclusion") for j in protected):
+            return jobs
+        if remaining:
+            time.sleep(JOB_SETTLE_DELAY)
+    return jobs
+
+
 def prepare(candidate, directory, api):
     if directory.exists() or not directory.parent.is_dir():
         raise Reject("analysis directory must be absent with an existing parent")
@@ -546,8 +566,8 @@ def prepare(candidate, directory, api):
         proof.write_bytes(proof_bytes)
         verified = verify_proof(proof, verified_file)
         pr = api.request(f"/pulls/{candidate['pr_number']}")
-        jobs = api.request(f"/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
-        payload, claims, bridge_coverage = validate_evidence(candidate, verified, run, pr, jobs)
+        jobs = settled_jobs(api, f"/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
+        payload, claims = validate_evidence(candidate, verified, run, pr, jobs)
         repo = temp / "analysis"
         prepare_git(repo, claims, payload, candidate, api.token)
         materialize(repo)
@@ -561,14 +581,6 @@ def prepare(candidate, directory, api):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(report)
             destination.chmod(0o644)
-        if bridge_coverage:
-            artifact_name, report_name, report_path, _ = BRIDGE
-            archive = api.artifact(inventory, artifact_name, run_id, started, MAX_COVERAGE_ZIP)
-            report = validate_report(one_zip(archive, report_name, MAX_COVERAGE), "concord_bridge")
-            destination = repo / report_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(report)
-            destination.chmod(0o644)
         trusted_properties(repo, pr, candidate)
         # A PR move during download invalidates even a completely prepared tree.
         current = api.request(f"/pulls/{candidate['pr_number']}")
@@ -578,7 +590,7 @@ def prepare(candidate, directory, api):
                 or current.get("head", {}).get("ref") != pr["head"]["ref"]
                 or current.get("base", {}).get("sha") != candidate["expected_base_sha"]
                 or current.get("merge_commit_sha") != payload["selection"]["merge_sha"]
-                or final_run.get("status") != "in_progress" or final_run.get("run_attempt") != attempt):
+                or final_run.get("status") not in LIVE_RUN_STATUSES or final_run.get("run_attempt") != attempt):
             raise Reject("PR moved during preparation")
         os.replace(repo, directory)
 

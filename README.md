@@ -221,3 +221,9 @@ workflow revision, while scanning PR source. PR ignore files and inline Semgrep
 suppressions cannot narrow that coverage. Protected OSV scans also include
 Git-ignored lockfiles. Scanner-policy changes must land on `main` before the
 required workflow is repinned to their merge commit.
+
+SonarCloud (project `Concord-Voice_Mobile`) analyses `src/` with Jest coverage.
+On pull requests, the protected required build dispatches `sonarcloud.yml` from
+`main` in the `protected-sonar` environment. That run verifies the caller's
+OIDC proof (`tools/sonar-caller-proof`) and scans an inert copy of the PR
+source. `sonar-main.yml` analyses `main` daily. Fork PRs skip the scan.

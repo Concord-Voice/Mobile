@@ -112,11 +112,54 @@ semgrep_canary:
   - '.github/scripts/ci-scan-relevance.mjs'
   - '.github/workflows/pr-ci.yml'
 
-sonar: []
+sonar:
+  - '.github/scripts/verify-pr-scan-results.py'
+  - '.github/workflows/required-pr-build.yml'
+  - 'src/**'
+  - '__tests__/**'
+  - 'App.tsx'
+  - 'index.js'
+  - 'package.json'
+  - 'package-lock.json'
+  - 'jest.config.js'
+  - 'babel.config.js'
+  - 'tsconfig.json'
+  - 'sonar-project.properties'
+  - '.github/workflows/sonarcloud.yml'
+  - '.github/workflows/build.yml'
+  - '.github/ci/scan-relevance.yml'
+  - '.github/scripts/ci-scan-relevance.mjs'
+  - '.github/workflows/pr-ci.yml'
 
-sonar_force_all: []
+sonar_force_all:
+  - '.github/scripts/verify-pr-scan-results.py'
+  - '.github/workflows/required-pr-build.yml'
+  - 'sonar-project.properties'
+  - '.github/workflows/sonarcloud.yml'
+  - '.github/workflows/build.yml'
+  - '.github/ci/scan-relevance.yml'
+  - '.github/scripts/ci-scan-relevance.mjs'
+  - '.github/workflows/pr-ci.yml'
+  - 'scripts/sonar/**'
+  - 'tools/sonar-caller-proof/**'
 
-sonar_desktop: []
+# Mobile reuses the shared `desktop` coverage key for its app lane.
+sonar_desktop:
+  - 'src/**'
+  - '__tests__/**'
+  - 'App.tsx'
+  - 'index.js'
+  - 'package.json'
+  - 'package-lock.json'
+  - 'jest.config.js'
+  - 'babel.config.js'
+  - 'tsconfig.json'
+  - 'sonar-project.properties'
+  - '.github/workflows/sonarcloud.yml'
+  - '.github/workflows/build.yml'
+  - '.github/ci/scan-relevance.yml'
+  - '.github/scripts/ci-scan-relevance.mjs'
+  - '.github/workflows/pr-ci.yml'
 
 sonar_control_plane: []
 

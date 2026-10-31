@@ -73,21 +73,20 @@ class PrepareTest(unittest.TestCase):
         self.trusted = self.root / "trusted"
         subprocess.run(["git", "clone", "-q", str(self.upstream), str(self.trusted)], check=True)
         source = {
-            "client/desktop/src/app.ts": "export const app = 1;\n",
+            "src/app.ts": "export const app = 1;\n",
             "client/admin/src/app.ts": "export const app = 1;\n",
             "services/control-plane/internal/x.go": "package internal\n",
             "services/control-plane/coverage.out": "mode: atomic\nservices/control-plane/evil.go:1.1,2.1 1 1\n",
             "services/media-plane/src/app.ts": "export const app = 1;\n",
-            "dev-tooling/concord-bridge/src/app.ts": "export const bridge = 1;\n",
             "scripts/evil.sh": "exit 1\n",
             "sonar-project.properties": "sonar.projectKey=attacker\n",
-            "client/desktop/tsconfig.json": '{"extends":"/etc/passwd"}\n',
+            "tsconfig.json": '{"extends":"/etc/passwd"}\n',
         }
         for name, contents in source.items():
             target = self.upstream / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(contents)
-        (self.upstream / "client/desktop/src/app.ts").chmod(0o755)
+        (self.upstream / "src/app.ts").chmod(0o755)
         run(self.upstream, "add", ".")
         run(self.upstream, "commit", "-qm", "head")
         self.head = run(self.upstream, "rev-parse", "HEAD")
@@ -117,20 +116,17 @@ class PrepareTest(unittest.TestCase):
                         "base": {"sha": self.base, "ref": "main"}, "merge_commit_sha": self.head}
         names = ("report", "ioc / Supply-chain IOC scan", "semgrep / Semgrep SAST",
                  "eslint / ESLint SARIF", "govulncheck / govulncheck (control-plane)",
-                 "build / Desktop / Merge Coverage", "build / Control Plane / Merge Coverage",
-                 "build / Media Plane / Test + Coverage", "build / Admin Portal / Test + Coverage",
-                 "build / Concord Bridge / Test + Coverage")
+                 "build / Mobile / Test + Coverage", "build / Control Plane / Merge Coverage",
+                 "build / Media Plane / Test + Coverage", "build / Admin Portal / Test + Coverage")
         self.jobs_data = [{"name": "Protected scan enforcement / " + name, "conclusion": "success",
                            "status": "completed", "run_id": 42, "run_attempt": 2, "head_sha": self.head}
                           for name in names]
-        self.jobs_data[-1]["steps"] = [{"name": "Upload coverage", "conclusion": "success"}]
         proof = zipped("proof.json", b'{"payload_b64":"fixture","oidc_jwt":"fixture"}')
         reports = {
             "desktop": b"TN:\nSF:src/app.ts\nDA:1,1\nend_of_record\n",
             "control_plane": b"mode: atomic\nservices/control-plane/internal/x.go:1.1,2.1 1 1\n",
             "media_plane": b"TN:\nSF:src/app.ts\nDA:1,1\nend_of_record\n",
             "admin": b"TN:\nSF:src/app.ts\nDA:1,1\nend_of_record\n",
-            "concord_bridge": b"TN:\nSF:src/app.ts\nDA:1,1\nend_of_record\n",
         }
         self.zips = {1: proof}
         self.metadata = [self.artifact_meta(1, "protected-sonar-caller-proof-42-2", proof)]
@@ -138,9 +134,6 @@ class PrepareTest(unittest.TestCase):
             archive = zipped(spec[1], reports[component])
             self.zips[index] = archive
             self.metadata.append(self.artifact_meta(index, spec[0], archive))
-        bridge = zipped(MODULE.BRIDGE[1], reports["concord_bridge"])
-        self.zips[6] = bridge
-        self.metadata.append(self.artifact_meta(6, MODULE.BRIDGE[0], bridge))
         self.requests = []
         self.api = FakeGitHub(self)
 
@@ -164,20 +157,16 @@ class PrepareTest(unittest.TestCase):
         analysis = self.root / "analysis"
         self.assertEqual(run(analysis, "rev-parse", "HEAD"), self.head)
         self.assertEqual(run(analysis, "rev-parse", "HEAD^"), self.base)
-        self.assertEqual((analysis / "client/desktop/src/app.ts").read_text(), "export const app = 1;\n")
-        self.assertEqual((analysis / "dev-tooling/concord-bridge/src/app.ts").read_text(),
-                         "export const bridge = 1;\n")
-        self.assertIn("SF:dev-tooling/concord-bridge/src/app.ts",
-                      (analysis / "dev-tooling/concord-bridge/coverage/lcov.info").read_text())
+        self.assertEqual((analysis / "src/app.ts").read_text(), "export const app = 1;\n")
         self.assertFalse((analysis / "scripts/evil.sh").exists())
-        self.assertEqual((analysis / "client/desktop/src/app.ts").stat().st_mode & 0o111, 0)
-        self.assertIn("SF:client/desktop/src/app.ts", (analysis / "client/desktop/coverage/lcov.info").read_text())
+        self.assertEqual((analysis / "src/app.ts").stat().st_mode & 0o111, 0)
+        self.assertIn("SF:src/app.ts", (analysis / "coverage/lcov.info").read_text())
         self.assertTrue((analysis / "services/control-plane/coverage.out").is_file())
         props = (analysis / "sonar-project.properties").read_text()
         self.assertIn("sonar.pullrequest.key=7", props)
         self.assertIn("sonar.pullrequest.branch=feature/a\\:b", props)
         self.assertNotIn("attacker", props)
-        self.assertNotIn("/etc/passwd", (analysis / "client/desktop/tsconfig.json").read_text())
+        self.assertNotIn("/etc/passwd", (analysis / "tsconfig.json").read_text())
         self.assertIn("/pulls/7", self.requests)
 
     def test_invalid_proof_blocks_pr_fetch(self):
@@ -205,8 +194,56 @@ class PrepareTest(unittest.TestCase):
                 self.run_data["path"] = value
                 MODULE.validate_evidence(self.candidate, self.verified, self.run_data, self.pr_data, jobs)
         self.run_data["path"] = f"{path}@feature/untrusted"
-        with self.assertRaisesRegex(MODULE.Reject, "caller run identity"):
+        with self.assertRaisesRegex(MODULE.Reject, "caller run identity or state invalid: path$"):
             MODULE.validate_evidence(self.candidate, self.verified, self.run_data, self.pr_data, jobs)
+
+    def test_caller_run_rejection_names_every_failed_field(self):
+        jobs = {"total_count": len(self.jobs_data), "jobs": self.jobs_data}
+        self.run_data.update(status="completed", conclusion="success", pull_requests=[])
+        with self.assertRaisesRegex(MODULE.Reject, "invalid: status,conclusion,pull_requests$"):
+            MODULE.validate_evidence(self.candidate, self.verified, self.run_data, self.pr_data, jobs)
+        with self.assertRaisesRegex(MODULE.Reject, "invalid: run$"):
+            MODULE.validate_evidence(self.candidate, self.verified, [], self.pr_data, jobs)
+
+    def test_api_requests_the_version_that_returns_merge_commit_sha(self):
+        calls = []
+
+        class Response(io.BytesIO):
+            def __init__(self, url):
+                super().__init__(b'{"merge_commit_sha": "' + b"a" * 40 + b'"}')
+                self.url = url
+
+            def __exit__(self, *exc):
+                self.close()
+
+        def open_mock(request, timeout):
+            calls.append(request)
+            return Response(request.full_url)
+
+        with patch.object(MODULE, "OPEN", open_mock):
+            pr = MODULE.GitHub("token").request("/pulls/7")
+        self.assertEqual(pr["merge_commit_sha"], "a" * 40)
+        self.assertEqual(calls[0].get_header("X-github-api-version"), "2022-11-28")
+
+    def test_caller_run_accepts_every_live_status(self):
+        # A downstream job waiting on the canary can report the live run as queued.
+        jobs = {"total_count": len(self.jobs_data), "jobs": self.jobs_data}
+        for status in MODULE.LIVE_RUN_STATUSES:
+            with self.subTest(status=status):
+                self.run_data["status"] = status
+                MODULE.validate_evidence(self.candidate, self.verified, self.run_data, self.pr_data, jobs)
+        self.run_data["status"] = "unknown"
+        with self.assertRaisesRegex(MODULE.Reject, "invalid: status$"):
+            MODULE.validate_evidence(self.candidate, self.verified, self.run_data, self.pr_data, jobs)
+
+    def test_signed_workflow_ref_accepts_only_ruleset_main_form(self):
+        jobs = {"total_count": len(self.jobs_data), "jobs": self.jobs_data}
+        ref = f"{MODULE.REPO}/.github/workflows/required-pr-build.yml"
+        for value in (f"{ref}@main", f"{ref}@refs/pull/7/merge", f"{ref}@feature/untrusted"):
+            with self.subTest(workflow_ref=value):
+                self.verified["claims"]["workflow_ref"] = value
+                with self.assertRaisesRegex(MODULE.Reject, "verified claims inconsistent"):
+                    MODULE.validate_evidence(self.candidate, self.verified, self.run_data, self.pr_data, jobs)
 
     def test_selected_report_must_be_present_and_well_formed(self):
         self.metadata.pop(4)
@@ -216,6 +253,33 @@ class PrepareTest(unittest.TestCase):
         self.zips[5] = zipped("lcov.info", b"SF:../../other/secrets.ts\n")
         with self.assertRaisesRegex(MODULE.Reject, "unsafe path"):
             self.prepare()
+
+    def test_lagging_job_inventory_is_polled_until_settled(self):
+        settled = [dict(job) for job in self.jobs_data]
+        self.jobs_data[3].update(status="in_progress", conclusion=None)
+        polls, pause = [], object()
+
+        def settle(delay):
+            if delay is pause:
+                polls.append(1)
+                if len(polls) == 2:
+                    self.jobs_data[:] = settled
+        with patch.object(MODULE, "JOB_SETTLE_DELAY", pause), patch.object(MODULE.time, "sleep", side_effect=settle):
+            self.prepare()
+        self.assertEqual(len(polls), 2)
+        self.assertEqual(self.requests.count("/actions/runs/42/attempts/2/jobs?per_page=100"), 3)
+
+    def test_job_inventory_that_never_settles_is_rejected_after_bounded_poll(self):
+        self.jobs_data[3].update(status="completed", conclusion=None)
+        pause = object()
+        with patch.object(MODULE, "JOB_SETTLE_DELAY", pause), patch.object(MODULE.time, "sleep") as sleep:
+            with self.assertRaisesRegex(MODULE.Reject, "signed job verdict differs"):
+                self.prepare()
+        self.assertEqual([c.args for c in sleep.call_args_list].count((pause,)), MODULE.JOB_SETTLE_ATTEMPTS - 1)
+        self.jobs_data[3]["status"] = "queued"
+        with patch.object(MODULE.time, "sleep"):
+            with self.assertRaisesRegex(MODULE.Reject, "protected caller jobs incomplete"):
+                self.prepare()
 
     def test_api_verdict_and_duplicate_proof_are_rejected(self):
         self.jobs_data[3]["conclusion"] = "failure"
@@ -236,12 +300,6 @@ class PrepareTest(unittest.TestCase):
         with patch.object(MODULE, "MAX_SOURCE_TOTAL", 1):
             with self.assertRaisesRegex(MODULE.Reject, "source size or count"):
                 self.prepare()
-
-    def test_bridge_coverage_requires_successful_upload_step(self):
-        self.jobs_data[-1]["steps"][0]["conclusion"] = "skipped"
-        self.metadata.pop()
-        self.prepare()
-        self.assertFalse((self.root / "analysis/dev-tooling/concord-bridge/coverage/lcov.info").exists())
 
     def test_pr_coverage_path_is_not_materialized_when_report_was_not_uploaded(self):
         self.payload["coverage"]["control_plane"] = False
@@ -268,7 +326,7 @@ class PrepareTest(unittest.TestCase):
             MODULE.one_zip(zipped("proof.json", "x" * 101), "proof.json", 100)
 
     def test_git_symlink_and_executable_modes(self):
-        target = self.upstream / "client/desktop/src/link.ts"
+        target = self.upstream / "src/link.ts"
         target.symlink_to("app.ts")
         run(self.upstream, "add", ".")
         run(self.upstream, "commit", "-qm", "link")

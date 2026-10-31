@@ -58,6 +58,18 @@ jobs:
       pull-requests: read  # dorny/paths-filter lists changed files
 
   # PR scanners use the immutable-source enforcement contract when requested.
+  # Sonar coverage producer. Only the protected run feeds the Sonar bridge, so
+  # ordinary PR runs leave it to app-checks. Unknown selection runs it.
+  build:
+    name: build
+    needs: [ioc, detect-changes]
+    if: >-
+      ${{ !cancelled() && needs.ioc.result == 'success' && inputs.enforcement-only &&
+      (needs.detect-changes.result != 'success' || needs.detect-changes.outputs.scan-known != 'true' || fromJSON(needs.detect-changes.outputs.scan-selection).selected.sonar) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml
+
   semgrep:
     name: semgrep
     needs: [ioc, detect-changes]
@@ -308,7 +320,8 @@ jobs:
             "$pages" >/dev/null || exit 0
           echo 'confirmed=true' >> "$GITHUB_OUTPUT"
 
-      # Mobile has no Go, Sonar or other-product coverage lanes.
+      # Mobile has no Go or other-product coverage lanes. Sonar keeps its app
+      # lane, which the shared contracts key as `desktop`.
       - name: Select the Mobile scanner surface
         id: mobile-selection
         env:
@@ -319,8 +332,12 @@ jobs:
           selection = json.loads(os.environ['SELECTION'])
           if selection.get('known') is True:
               for key in selection['selected']:
-                  selection['selected'][key] = key in ('eslint', 'osv', 'semgrep_custom', 'semgrep_community', 'semgrep_canary')
-              selection['coverage_required'] = {key: False for key in selection['coverage_required']}
+                  if key in ('sonar', 'sonar_desktop'):
+                      selection['selected'][key] = selection['selected'][key] is True
+                  else:
+                      selection['selected'][key] = key in ('eslint', 'osv', 'semgrep_custom', 'semgrep_community', 'semgrep_canary')
+              selection['coverage_required'] = {key: key == 'desktop' and selection['coverage_required'][key]
+                                                for key in selection['coverage_required']}
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('known=' + str(selection.get('known') is True).lower() + '\n')
               output.write('selection=' + json.dumps(selection, separators=(',', ':')) + '\n')
@@ -328,7 +345,7 @@ jobs:
 
   report:
     name: report
-    needs: [ioc, detect-changes, semgrep, eslint]
+    needs: [ioc, detect-changes, build, semgrep, eslint]
     if: ${{ always() && (inputs.enforcement-only || !(github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null))) }}
     permissions:
       contents: read
@@ -372,7 +389,10 @@ jobs:
           IOC_RESULT: ${{ needs.ioc.result }}
           SEMGREP_RESULT: ${{ needs.semgrep.result }}
           ESLINT_RESULT: ${{ needs.eslint.result }}
-          DESKTOP_COVERAGE: 'false'
+          BUILD_RESULT: ${{ needs.build.result }}
+          # Mobile has no Go; the protected caller contract still requires the key.
+          GOVULNCHECK_RESULT: 'skipped'
+          DESKTOP_COVERAGE: ${{ needs.build.outputs.desktop-coverage == 'true' }}
           CONTROL_PLANE_COVERAGE: 'false'
           MEDIA_PLANE_COVERAGE: 'false'
           ADMIN_COVERAGE: 'false'
@@ -384,8 +404,10 @@ jobs:
 
           jobs = {
               'ioc': os.environ['IOC_RESULT'],
+              'build': os.environ['BUILD_RESULT'],
               'semgrep': os.environ['SEMGREP_RESULT'],
               'eslint': os.environ['ESLINT_RESULT'],
+              'govulncheck': os.environ['GOVULNCHECK_RESULT'],
           }
           coverage = {
               'desktop': os.environ['DESKTOP_COVERAGE'] == 'true',
@@ -460,6 +482,13 @@ jobs:
           /tmp/actionlint -config-file=.actionlint.yaml
       - name: Install pinned Semgrep for adversarial policy tests
         run: python3 -m pip install --user "semgrep==1.121.0"
+      # The caller-proof verifier is Go; pin the toolchain its go.mod names.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/sonar-caller-proof/go.mod
+          cache: false
+      - name: Sonar caller-proof verifier tests
+        run: go -C tools/sonar-caller-proof test ./...
       - name: Scanner and workflow contracts
         run: |
           set -euo pipefail
@@ -468,6 +497,8 @@ jobs:
           python3 -m unittest discover -s .github/scripts/tests -p test_protected_scanner_policy.py
           python3 -m unittest discover -s .github/scripts/tests -p test_ci_scan_verdict.py
           python3 -m unittest discover -s .github/scripts/tests -p test_print_codeql_results.py
+          python3 -m unittest discover -s .github/scripts/tests -p test_protected_sonar_workflows.py
+          python3 -m unittest discover -s scripts/sonar/tests
           bash .github/scripts/tests/parse-dispatched-workflow.test.sh
           bash .github/scripts/tests/workflow-validate-report.test.sh
           bash .github/scripts/tests/ci-scan-relevance.test.sh
