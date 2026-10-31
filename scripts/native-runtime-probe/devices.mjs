@@ -43,6 +43,7 @@ const passedNative = [
   'ChannelKeyRoundTripsBetweenTwoIdentities',
   'CreateIdentityUnlocksWithItsOwnPasswordOnly',
   'KeychainStatusesMapToStableErrors',
+  'AttestClientDataHashBindsChallengeAndVersion',
 ].map(name => `test${name}`);
 const skippedNative = [
   'testDesktopVectorsUnlockDecryptAndReject',

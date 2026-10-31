@@ -127,7 +127,7 @@ On the exact installed iOS runtime recorded in the report, it calls the producti
 `src/ConcordCrypto.ts` adapter: create/unlock identity, wrap/unwrap a channel key,
 encrypt/decrypt, and refuse authenticated tampering, wrong password, wrong key
 kind and a released handle. All native handles are released. The existing
-`ConcordCrypto-Unit-Tests` CocoaPods scheme must also report all 13 self-contained
+`ConcordCrypto-Unit-Tests` CocoaPods scheme must also report all 14 self-contained
 tests passed and the two reciprocal-vector tests explicitly skipped; no desktop
 vector evidence is claimed without those fixtures. This does not test Keychain
 persistence, biometrics, physical devices or the placeholder UI's user flows.

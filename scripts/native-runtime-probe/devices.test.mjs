@@ -76,7 +76,7 @@ test('retains only fixed XCTest failure categories and known test IDs, never raw
   const evidence = nativeTestFailure(compile);
   assert.equal(evidence.status, 'BROKEN');
   assert.equal(evidence.category, 'module-not-compiled-for-testing');
-  assert.equal(evidence.notRun.length, 15);
+  assert.equal(evidence.notRun.length, 16);
   assert.equal(JSON.stringify(evidence).includes(marker), false);
   const failed = nativeTestFailure(
     `Test Case '-[ConcordCrypto_Tests.ConcordCryptoTests testCreateIdentityUnlocksWithItsOwnPasswordOnly]' failed (0.1 seconds).\n${marker}`,
@@ -226,7 +226,7 @@ test('real failing XCTest subprocess records sanitized locations and still fails
         reason: 'unknown-symbol',
       },
     ]);
-    assert.equal(evidence.notRun.length, 15);
+    assert.equal(evidence.notRun.length, 16);
     assert.deepEqual(evidence.passed, []);
     assert.equal(childLog.includes('"status":"FAIL"'), true);
     assert.equal(childLog.includes('"line":144'), true);
@@ -521,6 +521,7 @@ const nativeNames = [
   'ChannelKeyRoundTripsBetweenTwoIdentities',
   'CreateIdentityUnlocksWithItsOwnPasswordOnly',
   'KeychainStatusesMapToStableErrors',
+  'AttestClientDataHashBindsChallengeAndVersion',
 ];
 const skipped = [
   'DesktopVectorsUnlockDecryptAndReject',
@@ -536,6 +537,22 @@ const fixture = [
       `Test Case '-[ConcordCrypto_Tests.ConcordCryptoTests test${name}]' skipped (0.1 seconds).`,
   ),
 ].join('\n');
+
+test('expects exactly the XCTest cases checked in under native/ConcordCrypto/Tests', async () => {
+  const source = await readFile(
+    fileURLToPath(
+      new URL(
+        '../../native/ConcordCrypto/Tests/ConcordCryptoTests.swift',
+        import.meta.url,
+      ),
+    ),
+    'utf8',
+  );
+  const declared = [...source.matchAll(/\bfunc test(\w+)\s*\(/g)].map(
+    ([, name]) => name,
+  );
+  assert.deepEqual(declared.sort(), [...nativeNames, ...skipped].sort());
+});
 // Regression for #4158. Oracle: The isolated native test action enables module
 // testability without changing normal Release builds, and failed emulator metadata
 // exposes only a fixed known-library diagnostic while runtime remains NOT RUN.
@@ -682,9 +699,9 @@ process.exit(64);`,
   );
 }
 
-test('requires all thirteen real native tests and records both intentional vector skips', () => {
+test('requires all fourteen real native tests and records both intentional vector skips', () => {
   const summary = nativeTestSummary(fixture);
-  assert.equal(summary.passed.length, 13);
+  assert.equal(summary.passed.length, 14);
   assert.equal(summary.skipped.length, 2);
   assert.throws(() =>
     nativeTestSummary(fixture.replace("' passed", "' failed")),
