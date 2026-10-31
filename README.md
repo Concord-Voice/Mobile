@@ -80,11 +80,101 @@ keytool -genkeypair -keystore android/app/debug.keystore -storepass android \
   -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 ```
 
-The iOS deployment target is 16.0. iOS 16 is best-effort and untested. The tested
-range is iOS 17.5 and later on simulators. Android minSdk is 26.
+The iOS deployment target is 16.0. iOS 16 is best-effort and untested. Historical
+framework probes covered iOS 17.5 and later simulators; each dependency candidate
+has runtime evidence only for the exact OS recorded in its own artifact. Android
+minSdk is 26; the automated runtime guest is API 36, and other API levels are not
+covered by that run.
 
 Release builds are unsigned on purpose until a release key exists. Only Argon2id
 accounts can unlock; a legacy key-derivation account is refused with a distinct error.
+
+## Native validation
+
+Use Node 22.13 or later in the 22.x line, Node 24.3 or later in the 24.x
+line, or Node 26 or later, as required by React Native 0.88.
+
+After a React Native upgrade, run `bundle exec pod install` on macOS and commit
+the generated `ios/Podfile.lock` before merging. Validate iOS and Android builds
+and the native crypto tests with the resolved native dependencies; the JavaScript
+tests mock the native bridge.
+
+The `Mobile native validation` workflow runs on pull requests that change the app,
+its native projects or dependencies, its own workflow, the IOC gate workflow or
+`scripts/security/**`, and on manual dispatches. It is advisory, not merge-required. After the IOC scan, its hosted macOS job resolves a fresh candidate
+lock with `bundle exec pod install` and uploads `mobile-pod-lock-<run>-<attempt>`.
+The artifact contains `Podfile.lock`, a native-project patch and source/digest
+provenance for review. Download it from that run, review the changes and commit
+the generated lock and any required project changes to the PR.
+
+The job then restores the committed lock, requires `pod install --deployment`
+without tracked toolchain/project changes, and builds the iOS simulator app in
+Release configuration. An outdated committed lock still fails this gate even
+when the candidate artifact uploaded successfully. The hosted Android job builds
+the existing unsigned Release target for arm64.
+
+After those normal builds, the workflow runs a separate test-only `ENTRY_FILE`
+variant (`scripts/native-runtime-probe/index.tsx`) on fresh owned devices. It
+requires a positive native layout event, native RN/React versions, a Release
+Hermes runtime whose OSS release version equals the selected native Pod/Maven
+engine version, matching HBC header version, and one fresh nonce- and
+app-PID-bound result. The compiler's self-reported release (the Linux `hermesc`
+prints 1.0.0), compiler-package metadata and actual bundled native-library digest
+are recorded separately.
+An armed probe, silence or a successful build does not pass the runtime gate.
+
+On the exact installed iOS runtime recorded in the report, it calls the production
+`src/ConcordCrypto.ts` adapter: create/unlock identity, wrap/unwrap a channel key,
+encrypt/decrypt, and refuse authenticated tampering, wrong password, wrong key
+kind and a released handle. All native handles are released. The existing
+`ConcordCrypto-Unit-Tests` CocoaPods scheme must also report all 13 self-contained
+tests passed and the two reciprocal-vector tests explicitly skipped; no desktop
+vector evidence is claimed without those fixtures. This does not test Keychain
+persistence, biometrics, physical devices or the placeholder UI's user flows.
+
+Android uses a checked API 36 Google APIs x86_64 revision 7 image. Compile SDK 37
+and target SDK 36 stay unchanged; the guest is not Android 37 runtime evidence.
+Hardware mode requires read/write access to `/dev/kvm`. The hosted runner exposes
+the device without granting the runner user access, so the workflow adds a udev
+rule on that disposable runner before the probe. The probe itself never changes
+host permissions. Software emulation is a bounded fallback when KVM is absent:
+the installed emulator must identify as version 37.2.13.0/build 16740729, match its
+package properties and positively advertise `off` in that exact binary's
+`-help-accel`. The runner records the actual package/help/executable hashes and
+bounded numeric identity before refusing an unsupported or ambiguous tool. It
+chooses explicit `-accel off`, reporting software mode separately. Advertised
+support is not proof that this API 36 image boots or performs adequately; the unchanged boot/runtime bounds and
+positive runtime cases still decide, with no restart or timeout relaxation.
+The APK install alone is retried, at most twice and only after an adb transport
+drop or a package manager exception on the fresh guest. The emulator is never
+restarted, and any `INSTALL_*` refusal fails at once.
+The disposable guest gets 4 GB of RAM and has install-time package verification
+turned off; nothing else about the guest is changed.
+The Android crypto module is still absent: the real adapter must refuse it with
+`Concord native crypto is unavailable`. No Android crypto success is claimed.
+A copy of the runtime APK is signed with an isolated disposable test key, which
+supplies no production signing or trusted-install evidence.
+
+The host runners bound device boot to 5 minutes, runtime observation to 3 minutes,
+native XCTest to 10 minutes and each runtime build to 20 minutes. Only the
+isolated XCTest action enables module testability for its Release product copy;
+ordinary Release application builds keep their existing settings. They stop/delete
+only the simulator/emulator, AVD and test key they created. Uploaded artifacts are
+limited to version/digest/source metadata, fixed case booleans, sanitized test IDs
+and cleanup receipts; raw runtime/XCTest logs and native values are not uploaded.
+An XCTest failure retains only a fixed diagnostic category, known test IDs and,
+for compiler errors, up to eight owned Swift source locations with numeric line
+and column and a fixed reason code. External filenames, raw compiler messages
+and full paths are excluded. Failed emulator metadata commands retain only the
+fixed command stage and reason, plus an exact known SDK launcher library name or
+`UNKNOWN` for loader failures, with runtime still `NOT RUN`. This diagnostic does
+not install a library or establish a remedy. The same sanitized
+diagnostics and cleanup metadata are printed to the job log for review.
+The iOS consumer starts a bounded live INFO log stream before launch and filters
+the result by app PID and nonce; it does not rely on historical log persistence.
+The default application never imports the probe. Reproduce its runner contracts
+with `node --test scripts/native-runtime-probe/*.test.mjs`; use the workflow on
+hosted macOS/Linux for the actual native executions.
 
 ## Local checks
 
