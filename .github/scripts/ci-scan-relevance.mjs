@@ -107,11 +107,10 @@ export function composeSelection(filters, metadata, options) {
     advisory: Object.fromEntries(ADVISORY_KEYS.map((key, index) =>
       [key, filters[ADVISORY_FILTER_KEYS[index]] === 'true' ||
         (key === 'selfhost' && filters.selfhost === 'true')])),
-    workers: WORKER_KEYS.filter(key => filters[key] === 'true')
-      .map(key => key === 'worker_apple' ? 'apple-sso-bridge' : 'invite-landing'),
-    npm_workspaces: NPM_LICENSE_KEYS.filter(key => filters[key] === 'true')
-      .map(key => ({ license_desktop: 'client/desktop', license_media: 'services/media-plane',
-        license_admin: 'client/admin' })[key]),
+    // The worker and license filter keys stay in the shared key set, but
+    // Mobile has no workers and one npm workspace, the repository root.
+    workers: [],
+    npm_workspaces: NPM_LICENSE_KEYS.some(key => filters[key] === 'true') ? ['.'] : [],
     license_go: filters.license_go === 'true',
     coverage_required,
     codeql_matrix: JSON.stringify({ include: Object.keys(CODEQL)
