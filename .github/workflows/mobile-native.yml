@@ -1,0 +1,247 @@
+# Advisory: no ruleset requires these jobs, so a red run does not block merge.
+# They give native build and runtime evidence for mobile dependency changes.
+name: Mobile native validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'App.tsx'
+      - 'index.js'
+      - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Gemfile'
+      - 'Gemfile.lock'
+      - 'babel.config.js'
+      - 'metro.config.js'
+      - 'src/**'
+      - 'ios/**'
+      - 'android/**'
+      - 'native/**'
+      - 'scripts/native-runtime-probe/**'
+      - '.github/workflows/mobile-native.yml'
+      - '.github/workflows/ioc-scanning.yml'
+      - 'scripts/security/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ADR-0018: dependency installs must wait for the existing IOC verdict.
+  ioc:
+    uses: ./.github/workflows/ioc-scanning.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  ios-native:
+    name: iOS lock resolution and simulator build
+    needs: [ioc]
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    env:
+      BUNDLE_FROZEN: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          package-manager-cache: false
+      - name: Configure an isolated Bundler install path
+        run: printf 'BUNDLE_PATH=%s/mobile-bundle\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Set up the locked Ruby and Bundler versions
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        with:
+          ruby-version: '4.0.9'
+          bundler: '4.0.23'
+          bundler-cache: false
+          working-directory: .
+      - name: Install locked JavaScript and CocoaPods toolchains
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          npm ci
+          bundle install --jobs 2 --retry 3
+          xcodebuild -version
+      - name: Generate a candidate native lock for review
+        working-directory: ios
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Resolve from the actual podspecs, keeping the committed lock for the frozen gate.
+          mv Podfile.lock "$RUNNER_TEMP/mobile-committed-Podfile.lock"
+          bundle exec pod install
+          mkdir -p "$RUNNER_TEMP/mobile-pod-lock"
+          cp Podfile.lock "$RUNNER_TEMP/mobile-pod-lock/Podfile.lock"
+          git diff --binary -- Podfile.lock ConcordVoice.xcodeproj/project.pbxproj \
+            > "$RUNNER_TEMP/mobile-pod-lock/native-project.patch"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          output = Path(os.environ['RUNNER_TEMP'], 'mobile-pod-lock')
+          provenance = {
+              'checkout_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'source_head_commit': os.environ['SOURCE_HEAD_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'react_native': json.loads(Path('../node_modules/react-native/package.json').read_text())['version'],
+              'podfile_lock_sha256': hashlib.sha256((output / 'Podfile.lock').read_bytes()).hexdigest(),
+              'command': 'bundle exec pod install',
+          }
+          (output / 'provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
+          PY
+      # Upload before the strict gate, so a stale committed lock cannot hide the repair artifact.
+      - name: Upload generated Podfile.lock and source provenance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mobile-pod-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mobile-pod-lock/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Enforce the committed native lock and project
+        working-directory: ios
+        run: |
+          cp "$RUNNER_TEMP/mobile-committed-Podfile.lock" Podfile.lock
+          bundle exec pod install --deployment
+          git diff --exit-code -- ../Gemfile ../Gemfile.lock Podfile.lock \
+            ConcordVoice.xcodeproj/project.pbxproj
+      - name: Supply-chain post-install tripwire (npm and Pods)
+        working-directory: .
+        run: scripts/security/scan-supply-chain-iocs.sh --include-node-modules --working-tree-only
+      - name: Build the actual iOS simulator application
+        run: |
+          xcodebuild -workspace ios/ConcordVoice.xcworkspace \
+            -scheme ConcordVoice -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/mobile-ios-derived" -jobs 2 build
+      - name: Exercise real Hermes, native layout and the production iOS crypto adapter
+        timeout-minutes: 40
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          node --test scripts/native-runtime-probe/*.test.mjs
+          mkdir -p "$RUNNER_TEMP/mobile-ios-runtime"
+          node scripts/native-runtime-probe/run.mjs prepare ios "$RUNNER_TEMP/mobile-ios-runtime/manifest.json"
+          node scripts/native-runtime-probe/devices.mjs ios "$RUNNER_TEMP/mobile-ios-runtime"
+      # always(): retain sanitized partial failure evidence; absent runtime proof never passes.
+      - name: Upload sanitized iOS runtime and native-test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mobile-ios-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mobile-ios-runtime/manifest.json
+            ${{ runner.temp }}/mobile-ios-runtime/runtime.json
+            ${{ runner.temp }}/mobile-ios-runtime/native-tests.json
+            ${{ runner.temp }}/mobile-ios-runtime/native-test-diagnostics.json
+            ${{ runner.temp }}/mobile-ios-runtime/device-cleanup.json
+          if-no-files-found: error
+          retention-days: 7
+
+  android-native:
+    name: Android unsigned release build
+    needs: [ioc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    steps:
+      # The release build, NDK and API 36 system image together exceed the hosted
+      # runner's free disk, so drop preinstalled toolchains this job never uses.
+      - name: Free runner disk space
+        working-directory: /
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /opt/ghc /usr/share/swift \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          package-manager-cache: false
+      - uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install locked JavaScript dependencies
+        run: npm ci
+      - name: Supply-chain post-install tripwire
+        working-directory: .
+        run: scripts/security/scan-supply-chain-iocs.sh --include-node-modules --working-tree-only
+      - name: Install the native SDK versions declared by the project
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            'platforms;android-37.0' 'build-tools;37.0.0' \
+            'ndk;27.1.12297006' 'cmake;3.30.5'
+      - name: Build the existing unsigned release target
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+      # `emulator -version` execs qemu-system-x86_64, which links system libraries
+      # the launcher does not (libpulse.so.0 among them). In a clean ubuntu:24.04
+      # container with emulator 37.2.13, these packages are the complete set the
+      # version query needs; packages the runner image already has are no-ops.
+      - name: Install the emulator's host libraries
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            libpulse0 libnss3 libxkbfile1 libxi6 libdrm2 libpng16-16t64 libx11-6
+      - name: Install the isolated API 36 emulator prerequisites
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+      # The hosted runner exposes /dev/kvm without granting the runner user access.
+      # This grants it on the disposable runner only, so the probe selects
+      # hardware mode; software mode stays the fallback when no KVM device exists.
+      - name: Grant the runner access to KVM
+        working-directory: /
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+          ls -l /dev/kvm || echo 'no /dev/kvm on this runner'
+      - name: Exercise real Hermes, native layout and the Android missing-module refusal
+        timeout-minutes: 30
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CONCORD_ALLOW_SOFTWARE_EMULATOR: '1'
+        run: |
+          node --test scripts/native-runtime-probe/*.test.mjs
+          mkdir -p "$RUNNER_TEMP/mobile-android-runtime"
+          node scripts/native-runtime-probe/run.mjs prepare android "$RUNNER_TEMP/mobile-android-runtime/manifest.json"
+          node scripts/native-runtime-probe/devices.mjs android "$RUNNER_TEMP/mobile-android-runtime"
+      # always(): retain sanitized partial failure evidence; absent runtime proof never passes.
+      - name: Upload sanitized Android runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mobile-android-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mobile-android-runtime/manifest.json
+            ${{ runner.temp }}/mobile-android-runtime/runtime.json
+            ${{ runner.temp }}/mobile-android-runtime/device-cleanup.json
+            ${{ runner.temp }}/mobile-android-runtime/emulator-tool.json
+            ${{ runner.temp }}/mobile-android-runtime/emulator-tool-failure.json
+          if-no-files-found: error
+          retention-days: 7

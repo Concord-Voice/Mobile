@@ -1,0 +1,14 @@
+# OSV-Scanner exceptions for package-lock.json at the repo root ONLY.
+# osv-scanner applies an osv-scanner.toml to lockfiles in its own directory and
+# never to child or sibling directories. Each entry is scoped by package, exact
+# version, ecosystem and the dev group, so a version bump or a production path
+# falls outside it. An entry stops applying at effectiveUntil.
+
+[[PackageOverrides]]
+name = "deepmerge"
+version = "4.3.1"
+ecosystem = "npm"
+group = "dev"
+ignore = true
+effectiveUntil = 2027-01-29T00:00:00Z
+reason = "GHSA-gcqx-w48m-w2h4. Mobile paths: @react-native-community/cli and jest-config. No fixed release exists: deepmerge 4.3.1 is the latest and the advisory lists it as last_affected. Dev-only transitive, reached through build tooling that merges static, package-owned objects, never attacker-supplied input. Re-check for a patched deepmerge or a parent that drops it by review_by."
