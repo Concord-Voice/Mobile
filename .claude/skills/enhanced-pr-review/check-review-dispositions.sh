@@ -233,7 +233,7 @@ if [ -n "$THREAD_ROWS" ]; then
         loc="${path}:${line}"
         case "$disp" in
             MISSING)
-                echo >&2 "BLOCKING: no human disposition — ${loc} (${bot}, resolved by ${resolved_by})"
+                echo "BLOCKING: no human disposition — ${loc} (${bot}, resolved by ${resolved_by})" >&2
                 fail=1
                 ;;
             accepted|rejected|deferred|undecided)
@@ -289,14 +289,14 @@ if [ -n "$THREAD_ROWS" ]; then
                                 case "${ISSUE_RC}:${ISSUE_OUT}" in
                                     0:*/issues/*) ;;
                                     0:*/pull/*)
-                                        echo >&2 "BLOCKING: deferred to #${issue}, which is a pull request, not an issue — ${loc}"
+                                        echo "BLOCKING: deferred to #${issue}, which is a pull request, not an issue — ${loc}" >&2
                                         fail=1 ;;
                                     0:*)
-                                        echo >&2 "BLOCKING: deferred to #${issue} resolved to an unexpected URL '"'"'${ISSUE_OUT}'"'"' — ${loc}"
+                                        echo "BLOCKING: deferred to #${issue} resolved to an unexpected URL '"'"'${ISSUE_OUT}'"'"' — ${loc}" >&2
                                         fail=1 ;;
                                     *"Could not resolve"*|*"not found"*|*"Not Found"*|*"NOT_FOUND"*)
-                                        echo >&2 "BLOCKING: deferred to #${issue} but that issue does not exist — ${loc}"
-                                        echo >&2 "          A follow-up that was never filed is an accepted finding."
+                                        echo "BLOCKING: deferred to #${issue} but that issue does not exist — ${loc}" >&2
+                                        echo "          A follow-up that was never filed is an accepted finding." >&2
                                         fail=1 ;;
                                     *)  echo "STOP: could not verify issue #${issue} (${loc}): ${ISSUE_OUT}" >&2
                                         echo "      A transport or auth failure is not a missing issue. UNKNOWN, not clean." >&2
@@ -332,9 +332,7 @@ if [ -n "$THREAD_ROWS" ]; then
                 fail=1
                 ;;
         esac
-    done <<EOF
-$THREAD_ROWS
-EOF
+    done <<< "$THREAD_ROWS"
 fi
 
 # --- Assertion 3 — reconciliation post ---------------------------------------
@@ -524,14 +522,12 @@ else
         # -F: fixed string, never a pattern. --: a value starting with a hyphen
         # can never be read as a grep option. Both verified by review.
         if ! printf '%s' "$RECON_BODY" | grep -qiF -- "$want"; then
-            echo >&2 "BLOCKING: reconciliation post does not account for reviewer '${want}'."
-            echo >&2 "          Every reviewer that posted — including summary-only ones, and"
-            echo >&2 "          each persona of a shared CI login — needs a row naming it."
+            echo "BLOCKING: reconciliation post does not account for reviewer '${want}'." >&2
+            echo "          Every reviewer that posted — including summary-only ones, and" >&2
+            echo "          each persona of a shared CI login — needs a row naming it." >&2
             fail=1
         fi
-    done <<REQUIRED_EOF
-$REQUIRED
-REQUIRED_EOF
+    done <<< "$REQUIRED"
 fi
 
 # --- Verdict -----------------------------------------------------------------

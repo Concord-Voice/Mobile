@@ -80,7 +80,7 @@ _resolve_repo() {
 _build_active_label_regex() {
     local ns alt=""
     for ns in ${LABEL_NAMESPACES}; do
-        alt="${alt:+$alt|}${ns}"
+        if [ -n "$alt" ]; then alt="$alt|$ns"; else alt="$ns"; fi
     done
     # Return empty string when no namespaces configured — callers handle the
     # no-op case rather than constructing a broken regex like `()`.
@@ -107,9 +107,9 @@ _strip_code_blocks() {
             {
                 # Strip up to 3 leading spaces for fence detection (GFM rule)
                 stripped = $0
-                sub(/^[ ]{0,3}/, "", stripped)
+                sub(/^ ? ? ?/, "", stripped)
                 # Check if this line is a candidate fence opener/closer
-                if (match(stripped, /^`{3,}/)) {
+                if (match(stripped, /^```+/)) {
                     run = RLENGTH
                     if (!in_fence) {
                         # Opening a new fence
@@ -207,8 +207,8 @@ get_authenticated_user() {
 move_to_status() {
     local item_id="$1"
     local option_id="$2"
-    local project_id="${PROJECT_ID:?PROJECT_ID required (set via repo-config .project.id)}"
-    local status_field_id="${STATUS_FIELD_ID:?STATUS_FIELD_ID required (set via repo-config .project.fields.status.id)}"
+    local project_id="${PROJECT_ID:?PROJECT_ID required, set via repo-config .project.id}"
+    local status_field_id="${STATUS_FIELD_ID:?STATUS_FIELD_ID required, set via repo-config .project.fields.status.id}"
 
     local query='mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
         updateProjectV2ItemFieldValue(input: {
@@ -418,7 +418,7 @@ parse_pr_refs() {
 #   - PR not found / gh failure → empty stdout, exit 1 + stderr WARN
 ensure_pr_on_project() {
     local pr_number="$1"
-    local project_id="${PROJECT_ID:?PROJECT_ID required (set via repo-config .project.id)}"
+    local project_id="${PROJECT_ID:?PROJECT_ID required, set via repo-config .project.id}"
     local owner repo
     owner="$(_resolve_owner)"
     repo="$(_resolve_repo)"
@@ -538,8 +538,8 @@ get_issue_priority_option_id() {
 set_priority() {
     local item_id="$1"
     local option_id="$2"
-    local project_id="${PROJECT_ID:?PROJECT_ID required (set via repo-config .project.id)}"
-    local priority_field_id="${PRIORITY_FIELD_ID:?PRIORITY_FIELD_ID required (set via repo-config .project.fields.priority.id)}"
+    local project_id="${PROJECT_ID:?PROJECT_ID required, set via repo-config .project.id}"
+    local priority_field_id="${PRIORITY_FIELD_ID:?PRIORITY_FIELD_ID required, set via repo-config .project.fields.priority.id}"
 
     local query='mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
         updateProjectV2ItemFieldValue(input: {
