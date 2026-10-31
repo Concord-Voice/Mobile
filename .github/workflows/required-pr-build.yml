@@ -20,7 +20,7 @@ jobs:
   pr-ci:
     name: Protected scan enforcement
     # Reviewed main commit keeps the reusable graph immutable in ruleset runs.
-    uses: Concord-Voice/Mobile/.github/workflows/pr-ci.yml@75de539ada9dc1f7497aca89bdaa3dc2e17c3404
+    uses: Concord-Voice/Mobile/.github/workflows/pr-ci.yml@a301104e223cd330f59a53b4bf50d3bc32dfa5f7
     with:
       trusted-source: true
       enforcement-only: true
@@ -37,7 +37,7 @@ jobs:
     needs: [pr-ci]
     # always() lets selected OSV run when another pr-ci scan fails; the result still verifies both.
     if: ${{ always() && contains(needs.pr-ci.outputs.report-selection, '"osv":true') }}
-    uses: Concord-Voice/Mobile/.github/workflows/osv-scanner.yml@75de539ada9dc1f7497aca89bdaa3dc2e17c3404
+    uses: Concord-Voice/Mobile/.github/workflows/osv-scanner.yml@a301104e223cd330f59a53b4bf50d3bc32dfa5f7
     with:
       protected-pr: true
       base-sha: ${{ fromJSON(needs.pr-ci.outputs.report-selection).base_sha }}
