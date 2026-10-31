@@ -1,0 +1,13 @@
+{
+  "default_branch": "main",
+  "hooks": {
+    "protected_patterns": [
+      "native/ConcordCrypto/",
+      "src/ConcordCrypto\\.ts$",
+      "src/ConcordAttest\\.ts$",
+      "ios/.*\\.entitlements$",
+      "ios/.*Info\\.plist$",
+      "\\.github/workflows/"
+    ]
+  }
+}

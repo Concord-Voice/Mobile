@@ -4,3 +4,5 @@ scripts/security/check-ioc-refresh-pr.sh @Concord-Voice/security
 scripts/security/ @Concord-Voice/security
 .semgrep/ @Concord-Voice/security
 .gitar/ @Concord-Voice/security
+.claude/ @Concord-Voice/security
+scripts/repo-config.sh @Concord-Voice/security
