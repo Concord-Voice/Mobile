@@ -41,14 +41,13 @@ updates:
       - "area: ci-cd"
 
   # ─── Mobile Client (React Native) ──────────────────────────────────
-  # The mobile client (#4084) landed without an entry here, so the coverage
-  # audit reported client/mobile as UNCOVERED. No `area:` label exists for
-  # mobile yet, so this carries `area: deps` alone.
+  # The app lives at the repo root, so this block covers "/". No `area:`
+  # label exists for mobile yet, so this carries `area: deps` alone.
   #
   # The react-native group exists because the template pins its packages
   # EXACTLY to each other (react = react-test-renderer, react-native =
-  # @react-native/*), so a split bump fails `npm ci`. Same reason as the
-  # vitest pair under /client/desktop, including the security sibling.
+  # @react-native/*), so a split bump fails `npm ci`. The security sibling
+  # below is required for the same reason.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -74,8 +73,8 @@ updates:
           - "@types/react"
           - "@types/react-test-renderer"
       react-native-security:
-        # Required sibling — see `vitest-pair-security` under /client/desktop for
-        # why a group without `applies-to` is INVISIBLE to security updates.
+        # Required sibling: a group without `applies-to` is INVISIBLE to
+        # security updates.
         applies-to: security-updates
         patterns:
           - "react"

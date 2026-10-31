@@ -119,12 +119,8 @@ repos:
     rev: v1.7.12
     hooks:
       - id: actionlint
-        # Shellcheck integration is ENABLED. The 27 pre-existing shellcheck
-        # info/style findings that motivated the earlier `-shellcheck=`
-        # disable have been cleaned up — 8 distinct script-block fixes in
-        # #1088 (build.yml, build-desktop.yml, sync-releases.yml) plus the
-        # bundled provision-secrets.yml fix in this commit. actionlint now
-        # runs its full check set (expression + shellcheck + syntax + …).
+        # Shellcheck integration is ENABLED: actionlint runs its full check
+        # set (expression + shellcheck + syntax).
         args: ['-config-file=.actionlint.yaml']
         # actionlint's default files-glob covers .github/workflows/*.yml.
 
@@ -166,7 +162,7 @@ repos:
         pass_filenames: true
 
       # ── Workflow-file structural guards (#920/#2274 trust-model lock-ins) ──
-      # These hooks codify the desktop trust boundary and invariants surfaced
+      # These hooks codify the workflow trust boundary and invariants surfaced
       # by the 2026-05-09 cascade (#893/#900/#904/#906/#910). Each fires when a
       # workflow file is in the commit; the script scans the entire
       # .github/workflows/ tree so cross-file references stay consistent.
@@ -212,7 +208,9 @@ repos:
         # Ruleset matches the blocking custom-rules scan in
         # .github/workflows/semgrep.yml: .semgrep/ rules only. CI also runs
         # the p/security-audit and p/owasp-top-ten community rulesets; they
-        # are left out here to keep local runs fast.
+        # are left out here to keep local runs fast. The .semgrep/ rules are
+        # JS/TS only, so Swift, Kotlin and Java are covered by CI's community
+        # rulesets, not by this hook.
         language_version: python3.9
         args:
           - --config=.semgrep/
