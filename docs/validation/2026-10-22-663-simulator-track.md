@@ -2,7 +2,7 @@
 
 **Scope:** simulator and emulator evidence only. It closes no dedicated-device gate, and it doesn't change [ADR-0047](../adr/0047-mobile-client-framework-and-native-boundaries.md) from Proposed.
 **Why:** dedicated Android and iPhone devices are still a while away. The project lead asked on 2026-10-21 for the iOS suites to run on iPhone simulators now and for the best way to simulate Android.
-**Inputs:** the frozen evaluated source `8e32967ed` and its preserved build artifacts. Nothing was rebuilt, no repository code changed, and no new branch was needed.
+**Inputs:** the frozen evaluated source (Concord-Voice-Alpha `8e32967ed`) and its preserved build artifacts. The source lock and receipts this record cites stay in that private repository. Nothing was rebuilt, no repository code changed, and no new branch was needed.
 
 ## Host
 
@@ -49,7 +49,6 @@ The earlier route, an x86_64 Linux emulator inside Docker under Rosetta, never b
 - Platform-tools 37.0.1, the archive acquired on 2026-10-14, re-verified.
 - Images: API 26 `default` arm64-v8a r02, API 37 `google_apis` arm64-v8a r08, and API 37 `google_apis_ps16k` arm64-v8a r08.
 - `adb` and the emulator pass `codesign --verify --strict`. This record doesn't name the signing team.
-- `adb` created the standard `~/.android` host-key directory. The project lead kept it in the 2026-10-22 cleanup.
 - The APK (`d3f9b0dd…`) matches the source lock. The preserved output parser passed its 13 host tests after restore from the verified host archive.
 
 **Method.**

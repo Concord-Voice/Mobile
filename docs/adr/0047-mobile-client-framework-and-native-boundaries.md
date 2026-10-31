@@ -22,7 +22,7 @@ Keep React Native/TypeScript as the leading conditional candidate for shared mob
 - Retain the Android API 26 floor. Under the project lead's 2026-10-22 decision, iOS 15 and 16 get best-effort compatibility with no support commitment and no testing. The current deployment target stays iOS 16.0, and simulator-tested iOS starts at 17.5. Deliver core E2EE messaging, voice/video and background calls together.
 - Include UnifiedPush plus FCM without silent Google fallback, and APNs/PushKit on iOS. Retain receiving screen shares, voicemail, widgets/Live Activities and PiP. Any phone-broadcast deferral applies to both platforms.
 
-The evaluation-only SDK/BoringSSL approval does not adopt later crypto, protected-storage or push packages. Each keeps its separate approval, dependency and security/E2EE review gates. This ADR remains private; accepted public architecture is not changed while the decision is provisional.
+The evaluation-only SDK/BoringSSL approval does not adopt later crypto, protected-storage or push packages. Each keeps its separate approval, dependency and security/E2EE review gates. Accepted architecture is not changed while the decision is provisional.
 
 ## Alternatives
 
