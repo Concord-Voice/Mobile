@@ -86,6 +86,21 @@ range is iOS 17.5 and later on simulators. Android minSdk is 26.
 Release builds are unsigned on purpose until a release key exists. Only Argon2id
 accounts can unlock; a legacy key-derivation account is refused with a distinct error.
 
+## Local checks
+
+[pre-commit](https://pre-commit.com/) runs the secret scanners (detect-secrets,
+gitleaks, TruffleHog), actionlint, Semgrep and the supply-chain guards before
+each commit:
+
+```sh
+pipx install pre-commit
+pre-commit install --hook-type pre-commit --hook-type commit-msg
+```
+
+Dependabot proposes weekly updates for npm, Bundler (CocoaPods), Gradle, GitHub
+Actions and the CI tool manifests. Exact pins are documented in
+`.github/dependency-pin-exceptions.json`.
+
 ## Not built yet
 
 - Servers, channels, alerts, voice and the rest of the prototype's screens.

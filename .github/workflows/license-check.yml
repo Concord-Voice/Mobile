@@ -86,4 +86,3 @@ jobs:
                 --onlyAllow "$LICENSE_ALLOWLIST" --summary)
             python3 scripts/update-mobile-notice.py --check
           done
-
