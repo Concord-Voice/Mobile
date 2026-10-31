@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name         = 'ConcordCrypto'
   s.version      = '0.0.1'
   s.summary      = 'Concord desktop-compatible message crypto for the mobile client.'
-  s.homepage     = 'https://github.com/Concord-Voice/Concord-Voice-Alpha'
+  s.homepage     = 'https://github.com/Concord-Voice/Mobile'
   s.license      = { :type => 'Proprietary', :text => 'Concord Voice Source License 1.0' }
   s.author       = 'Concord Voice LLC'
   s.platforms    = { :ios => '16.0' }
