@@ -8,7 +8,7 @@ ruby ">= 3.2"
 # concurrent-ruby at or above the releases that fix their published advisories.
 gem 'cocoapods', '1.16.2'
 gem 'activesupport', '>= 7.2.3.1', '< 8'
-gem 'xcodeproj', '1.27.0'
+gem 'xcodeproj', '1.28.1'
 gem 'concurrent-ruby', '>= 1.3.7'
 
 # Ruby 3.4.0 has removed some libraries from the standard library.
