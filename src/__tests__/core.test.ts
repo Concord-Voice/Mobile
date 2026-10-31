@@ -1,4 +1,9 @@
-import { ApiError, ConcordApi, checkBaseUrl } from '../core/ConcordApi';
+import {
+  ApiError,
+  ConcordApi,
+  checkBaseUrl,
+  clientVersion,
+} from '../core/ConcordApi';
 import { DmSocket, type SocketLike } from '../core/DmSocket';
 import { MOBILE_ORIGIN, createSocket } from '../core/socket';
 
@@ -657,6 +662,28 @@ describe('ConcordApi', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 401, code: 'unauthorized' });
     expect(error.message).toBe('Concord API 401 unauthorized');
+  });
+
+  it('sends the app version and platform on requests and the socket URL', async () => {
+    const { impl, calls } = fakeFetch({
+      'POST /auth/ws-ticket': () => [200, { ticket: 't' }],
+    });
+    const api = new ConcordApi('https://api.example.test', MACHINE, impl);
+    api.client = async () => ({ platform: 'ios', version: '1.0.0' });
+    await api.wsTicket().catch(() => {});
+    expect(calls[0].headers).toMatchObject({
+      'X-Concord-Client-Version': '1.0.0',
+      'X-Concord-Client-Platform': 'ios',
+    });
+    expect(api.wsUrl('t')).toBe(
+      'wss://api.example.test/api/v1/ws?ticket=t&client_version=1.0.0&client_platform=ios',
+    );
+  });
+
+  it('normalises the bundle version to major.minor.patch', () => {
+    expect(clientVersion('1.0(5)')).toBe('1.0.0');
+    expect(clientVersion('2.3.4(17)')).toBe('2.3.4');
+    expect(clientVersion('1')).toBe('1.0.0');
   });
 
   it('treats a malformed body as empty and rejects invalid shapes', async () => {

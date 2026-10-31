@@ -518,6 +518,9 @@ describe('describeError', () => {
     expect(describeError(new ApiError(403, 'ATTESTATION_REVOKED'))).toMatch(
       /Update it to continue/,
     );
+    expect(describeError(new ApiError(403, 'CLIENT_VERSION_TOO_OLD'))).toMatch(
+      /Update it to continue/,
+    );
     expect(describeError(new ApiError(500, undefined))).toMatch(
       /could not complete/,
     );

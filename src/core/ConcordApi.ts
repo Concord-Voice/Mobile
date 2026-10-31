@@ -8,6 +8,16 @@ import { INVALID_KEY, type Attester } from '../ConcordAttest';
 
 export type Fetch = typeof fetch;
 
+/** Which app and version this is, for the server's per-platform minimum-version check. */
+export type ClientInfo = { platform: string; version: string };
+
+/** "1.0(5)" from the bundle becomes "1.0.0": the server wants exactly major.minor.patch. */
+export function clientVersion(bundleVersion: string): string {
+  const parts = bundleVersion.replace(/\(.*\)$/, '').split('.');
+  while (parts.length < 3) parts.push('0');
+  return parts.slice(0, 3).join('.');
+}
+
 /** What survives a relaunch: enough to rotate back into the same server session. */
 export type SavedSession = {
   refreshToken: string;
@@ -105,6 +115,9 @@ export class ConcordApi {
   /** App Attest, used only when the server asks for attestation. Null: never attest. */
   attester: Attester | null = null;
   private attestation: { token: string; sessionId: string } | null = null;
+  /** Sent on every request and the socket URL; null sends nothing (tests, unknown builds). */
+  client: () => Promise<ClientInfo | null> = () => Promise.resolve(null);
+  private clientNow: ClientInfo | null = null;
   private attesting: Promise<void> | null = null;
 
   constructor(
@@ -121,10 +134,15 @@ export class ConcordApi {
     return this.session.userId;
   }
 
+  /** Call after a request (the ticket), so the client info has resolved. */
   wsUrl(ticket: string): string {
-    return `${this.base.replace(/^http/, 'ws')}/ws?ticket=${encodeURIComponent(
-      ticket,
-    )}`;
+    // ponytail: no URLSearchParams, React Native's polyfill lacks set().
+    let query = `ticket=${encodeURIComponent(ticket)}`;
+    if (this.clientNow)
+      query += `&client_version=${encodeURIComponent(
+        this.clientNow.version,
+      )}&client_platform=${encodeURIComponent(this.clientNow.platform)}`;
+    return `${this.base.replace(/^http/, 'ws')}/ws?${query}`;
   }
 
   private async call(
@@ -189,6 +207,11 @@ export class ConcordApi {
       'X-Machine-Id': this.machineId,
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
+    this.clientNow = await this.client().catch(() => null);
+    if (this.clientNow) {
+      headers['X-Concord-Client-Version'] = this.clientNow.version;
+      headers['X-Concord-Client-Platform'] = this.clientNow.platform;
+    }
     if (this.session) {
       // A resumed session has no access token until its first rotation.
       if (this.session.accessToken)

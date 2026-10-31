@@ -13,9 +13,12 @@ import {
   saveSession,
   unlockIdentity,
 } from '../ConcordCrypto';
+import { Platform } from 'react-native';
 import { nativeAttester } from '../ConcordAttest';
 import {
   ApiError,
+  type ClientInfo,
+  clientVersion,
   ConcordApi,
   type LoginKeys,
   type MfaCodeMethod,
@@ -91,7 +94,11 @@ export function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Wrong email, password or code.';
     if (error.status === 429) return 'Too many attempts. Try again later.';
-    if (error.status === 403 && error.code === 'ATTESTATION_REVOKED')
+    if (
+      error.status === 403 &&
+      (error.code === 'ATTESTATION_REVOKED' ||
+        error.code === 'CLIENT_VERSION_TOO_OLD')
+    )
       return 'This version of the app is no longer supported. Update it to continue.';
     if (error.status === 403)
       return 'This server does not accept this app yet.';
@@ -115,10 +122,31 @@ export function describeError(error: unknown): string {
   return 'Could not reach the server. Check your connection.';
 }
 
+/**
+ * This build's platform and version, read from the bundle via the attest module.
+ * A failed lookup is not cached, so the next request retries it.
+ * ponytail: Android has no native module yet, so it sends no version until one lands.
+ */
+let client: Promise<ClientInfo | null> | null = null;
+export function appClient(): Promise<ClientInfo | null> {
+  client ??= (nativeAttester()?.info() ?? Promise.resolve(null)).then(
+    info =>
+      info
+        ? { platform: Platform.OS, version: clientVersion(info.version) }
+        : null,
+    () => {
+      client = null;
+      return null;
+    },
+  );
+  return client;
+}
+
 export function createSessionStore(
   makeApi: (server: string, machineId: string) => ConcordApi = (s, m) => {
     const api = new ConcordApi(s, m);
     api.attester = nativeAttester();
+    api.client = appClient;
     return api;
   },
 ) {
