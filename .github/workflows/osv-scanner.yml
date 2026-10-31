@@ -10,9 +10,8 @@
 # (and any future workspace automatically).
 # Unknown standalone provenance, metadata, policy, filter, or protected rule
 # state runs a full scan with findings blocking.
-# Runner note: the reusable workflows expose no runs-on input — these jobs run
-# GitHub-hosted ubuntu-latest (accepted deviation from Blacksmith parity; see
-# spec §Key-decisions 2). Complementary to Dependabot (audit report: no redundancy).
+# Runner note: the reusable workflows expose no runs-on input, so these jobs run
+# on GitHub-hosted ubuntu-latest. Complementary to Dependabot (no redundancy).
 name: OSV-Scanner
 
 # The standalone PR trigger preserves the native Code Scanning configuration

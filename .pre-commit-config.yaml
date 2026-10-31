@@ -56,7 +56,7 @@ repos:
         args: ['--baseline', '.secrets.baseline']
         # Exclude paths where high-entropy strings are expected test data:
         #   - package-lock.json: npm integrity hashes
-        exclude: 'package-lock\.json'
+        exclude: '(^|/)package-lock\.json$'
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -72,7 +72,7 @@ repos:
         exclude: '-malformed\.yml$'
       - id: check-json
         # package-lock.json: excluded by default (large, not authored JSON).
-        exclude: 'package-lock\.json'
+        exclude: '(^|/)package-lock\.json$'
       - id: detect-private-key
       - id: end-of-file-fixer
         # scripts/fixtures/plugin-cache/*.section.md are byte-exact payloads,
@@ -111,10 +111,6 @@ repos:
     hooks:
       - id: gitleaks
 
-  # ── Authority-contract vectors drift (#3587 PR-A1, DoR §3.1) ───────────
-  # testdata/vectors.json records the SHA-384 of the gen.mjs that wrote it.
-  # A generator edit without regeneration (or a hand-edited vectors file)
-  # fails here; CI checks the same digest in the Go and vitest suites.
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12
     hooks:
@@ -161,14 +157,21 @@ repos:
         files: '\.env(\.example|\.local)?$'
         pass_filenames: true
 
+      - id: test-check-env-file
+        name: Test env-file lint
+        entry: bash scripts/check-env-file.test.sh
+        language: system
+        files: '^scripts/check-env-file(\.test)?\.sh$'
+        pass_filenames: false
+
       # ── Workflow-file structural guards (#920/#2274 trust-model lock-ins) ──
       # These hooks codify the workflow trust boundary and invariants surfaced
       # by the 2026-05-09 cascade (#893/#900/#904/#906/#910). Each fires when a
       # workflow file is in the commit; the script scans the entire
       # .github/workflows/ tree so cross-file references stay consistent.
 
-      # The hotfix label decides whether main-ci dispatches an UNGATED release,
-      # so its resolution is security-relevant, and it silently mis-answered on
+      # The hotfix label changes how the OSV scan gates a PR (osv-scanner.yml),
+      # so its resolution is security-relevant. It silently mis-answered on
       # 2026-08-29 (#3013): the commit->PR association is eventually consistent
       # and was queried 19 s after the merge. The suite's load-bearing case is
       # the race itself — association empty, then resolving on retry.
@@ -176,7 +179,7 @@ repos:
         name: hotfix-label resolution self-test (release fast-path)
         entry: bash .github/scripts/tests/resolve-hotfix-label.test.sh
         language: system
-        files: '^(\.github/scripts/resolve-hotfix-label\.sh|\.github/scripts/tests/resolve-hotfix-label\.test\.sh|\.github/workflows/main-ci\.ya?ml)$'
+        files: '^(\.github/scripts/resolve-hotfix-label\.sh|\.github/scripts/tests/resolve-hotfix-label\.test\.sh|\.github/workflows/osv-scanner\.ya?ml)$'
         pass_filenames: false
 
       - id: lint-workflow-call-contract

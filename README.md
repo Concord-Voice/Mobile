@@ -97,6 +97,13 @@ pipx install pre-commit
 pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
 
+Two hooks need tools that pre-commit does not install:
+
+- **Semgrep** runs under `python3.9`, because its dependencies do not work on
+  newer Pythons. On macOS, Command Line Tools ships it at
+  `/Library/Developer/CommandLineTools/`.
+- **TruffleHog** calls a local `trufflehog` binary (`brew install trufflehog`).
+
 Dependabot proposes weekly updates for npm, Bundler (CocoaPods), Gradle, GitHub
 Actions and the CI tool manifests. Exact pins are documented in
 `.github/dependency-pin-exceptions.json`.
