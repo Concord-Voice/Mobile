@@ -1,8 +1,7 @@
 # Supply-chain IOC scanning — extracted from build.yml per ADR-0018 (#1472).
 #
 # INSTALL-ORDERING INVARIANT (IOC-first): this workflow is the FIRST node in
-# both orchestrators (pr-ci.yml on pull_request, main-ci.yml on push:main per
-# #1477). Every reusable invocation that installs or executes repo code MUST
+# the PR orchestrator (pr-ci.yml on pull_request). Every reusable invocation that installs or executes repo code MUST
 # carry `needs: ioc` at the orchestrator — that single structural edge replaces
 # the five per-job `needs: supply-chain-scan` edges that previously lived
 # inside build.yml (and closes the gap where extracted per-tool scanners ran
@@ -45,7 +44,7 @@ jobs:
   # See reference-documents/ci/supply-chain-defense.md. Spec: #715.
   supply-chain-scan:
     name: Supply-chain IOC scan
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Protected scripts run from the PR checkout. Keep PR-root Python modules
     # out of sys.path while retaining the user-site PyYAML installed below.
@@ -176,13 +175,11 @@ jobs:
 
       - name: Check self-hosted runner allowlist
         id: runner
-        # Exit 2 means "expression runner, cannot statically verify". TWO
-        # workflows now legitimately expand a matrix into runs-on:
-        # build-desktop.yml (`${{ matrix.os }}`) and codeql.yml
-        # (`${{ matrix.runner }}`, per-leg tiers). Keep this list current — a
-        # rationale naming one cause reads as a single known exception when it
-        # is a growing set, and the linter cannot descend into
-        # strategy.matrix.include[] to verify either of them (ADR-0016 AI#3).
+        # Exit 2 means "expression runner, cannot statically verify". One
+        # workflow legitimately expands a matrix into runs-on: codeql.yml
+        # (`${{ matrix.runner }}`, per-leg tiers). Keep this list current; the
+        # linter cannot descend into strategy.matrix.include[] to verify it
+        # (ADR-0016 AI#3).
         # Mirror the pre-commit wrapper: surface the warning but don't fail the job.
         # Exit 1 (non-allowlisted self-hosted) and 10 (parser failure) still block.
         env:
@@ -241,7 +238,7 @@ jobs:
     name: Supply-chain scanner self-test
     needs: [supply-chain-scan]
     if: needs.supply-chain-scan.outputs.security-scripts == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

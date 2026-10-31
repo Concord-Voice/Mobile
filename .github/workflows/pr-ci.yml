@@ -121,8 +121,8 @@ jobs:
     name: detect-changes
     if: ${{ inputs.enforcement-only || !(github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     # ADR-0013 §2 / ADR-0005 §3: ADR-0016 measured sub-minute parity;
-    # 2-vCPU Blacksmith is the half-cost tier for detect/verify work.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Detect/verify work runs on GitHub's standard runner, free for public repos.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -332,7 +332,7 @@ jobs:
     if: ${{ always() && (inputs.enforcement-only || !(github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null))) }}
     permissions:
       contents: read
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       selection: ${{ steps.report.outputs.selection }}
@@ -410,7 +410,7 @@ jobs:
     name: Mobile tests, lint and typecheck
     needs: [ioc]
     if: ${{ !inputs.enforcement-only }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -435,7 +435,7 @@ jobs:
   workflow-lint:
     name: Workflow lint and scanner contracts
     needs: [ioc]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read

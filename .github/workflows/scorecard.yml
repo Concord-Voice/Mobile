@@ -23,8 +23,8 @@ concurrency:
 # Workflow-level permissions = least-privilege `contents: read` ONLY (#1494):
 # a broad `read-all` here made every workflow_call invocation startup-fail
 # (the caller job's grant must be a superset of the called workflow's requested
-# permissions, and read-all exceeds main-ci's scoped grant). A narrow
-# `contents: read` is a subset of main-ci's scorecard-job grant, so it satisfies
+# permissions, and read-all exceeds a caller's scoped grant). A narrow
+# `contents: read` is a subset of any caller's scorecard-job grant, so it satisfies
 # the superset rule while declaring a top-level default for Scorecard's
 # TokenPermissions check. It is inert for the analysis job either way — job-level
 # permissions REPLACE workflow-level (#1462).
@@ -34,7 +34,7 @@ permissions:
 jobs:
   analysis:
     name: Scorecard analysis
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     # Scorecard only supports the default branch; guard non-default refs
     # (e.g., a branch_protection_rule event on a non-default branch rule).
     if: github.event.repository.default_branch == github.ref_name

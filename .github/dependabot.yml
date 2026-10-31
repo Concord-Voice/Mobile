@@ -1,0 +1,162 @@
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+# Weekly runs on 2026-10-27/28 hit startup_failure (a GitHub billing problem,
+# not this file). Any merged edit here makes Dependabot re-check every entry.
+version: 2
+updates:
+  # ─── GitHub Actions ────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+      - "area: ci-cd"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # ─── CI license-checking tool ─────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/.github/tools/license-checker"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+      - "area: ci-cd"
+
+  # ─── Mobile Client (React Native) ──────────────────────────────────
+  # The app lives at the repo root, so this block covers "/". No `area:`
+  # label exists for mobile yet, so this carries `area: deps` alone.
+  #
+  # The react-native group exists because the template pins its packages
+  # EXACTLY to each other (react = react-test-renderer, react-native =
+  # @react-native/*), so a split bump fails `npm ci`. The security sibling
+  # below is required for the same reason.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+    open-pull-requests-limit: 5
+    groups:
+      react-native:
+        patterns:
+          - "react"
+          - "react-test-renderer"
+          - "react-native"
+          - "@react-native/*"
+          - "@react-native-community/*"
+          - "@types/react"
+          - "@types/react-test-renderer"
+      react-native-security:
+        # Required sibling: a group without `applies-to` is INVISIBLE to
+        # security updates.
+        applies-to: security-updates
+        patterns:
+          - "react"
+          - "react-test-renderer"
+          - "react-native"
+          - "@react-native/*"
+          - "@react-native-community/*"
+    versioning-strategy: increase
+
+  # ─── Media Plane (Node.js + mediasoup) ─────────────────────────────
+
+  # ─── ESLint SARIF formatter tool (N: Mobile-only CI tool) ──────────
+  - package-ecosystem: "npm"
+    directory: "/.github/tools/eslint-formatter"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+      - "area: ci-cd"
+
+  # ─── iOS toolchain gems (N: CocoaPods via Bundler) ─────────────────
+  - package-ecosystem: "bundler"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+    open-pull-requests-limit: 5
+
+  # ─── Android build (N: Gradle plugins and native libraries) ────────
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+    open-pull-requests-limit: 5
+
+  # ─── Python (pre-commit / workflow tooling) ────────────────────────
+  # .github/requirements-pyyaml.txt is consumed by pr-ci.yml,
+  # workflow-validate.yml and the pin check in required-pr-build.yml, which
+  # installs it on the runner's system Python, so it
+  # carries the cp312-cp314 x86_64 wheel hashes. It is the repo's only pip manifest and appears
+  # in the CycloneDX SBOM as the sole pkg:pypi component, so it was the one
+  # ecosystem in the SBOM with no dependabot coverage at all.
+  - package-ecosystem: "pip"
+    directory: "/.github"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+      - "area: ci-cd"
+    open-pull-requests-limit: 5
+    groups:
+      python-tooling:
+        patterns:
+          - "*"

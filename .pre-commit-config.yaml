@@ -1,0 +1,339 @@
+# ── Pre-commit hooks ─────────────────────────────────────────────────────────
+# Single source of truth for local code quality checks.
+# Install: pipx install pre-commit && pre-commit install --hook-type pre-commit --hook-type commit-msg
+# Manual run: PRE_COMMIT_COLOR=never pre-commit run --all-files
+# Update:  pre-commit autoupdate
+#
+# These hooks run the same checks SonarQube runs in CI, catching issues locally
+# before they consume GitHub Actions budget. No tests or coverage here — that's
+# SonarQube's job in the Build workflow.
+
+# Hook-level `fail_fast` (the interpreter guard below) needs 2.16.0. An older
+# pre-commit ignores the key, prints the guard's refusal and runs on into the
+# hang the guard exists to prevent, so refuse it here instead.
+minimum_pre_commit_version: '2.16.0'
+
+repos:
+  # ── Interpreter guard — MUST stay the first hook (#3426) ──────────────────
+  # On macOS, bash 5.1.0 through 5.3.15 writes a heredoc that fits its
+  # BUILD-TIME pipe-size estimate into a pipe with one blocking write, before
+  # it execs the reader. A macOS pipe starts at 512 bytes and grows only while
+  # system-wide pipe memory is under its limit (xnu bsd/kern/sys_pipe.c), so
+  # under load any heredoc over 512 bytes, measured after expansion, can block
+  # with nobody left to read it, whatever command reads it. Many hooks below
+  # feed heredocs that size; one pre-commit run hung ~17 min on 2026-09-23.
+  # Fixed upstream in bash 5.3 patch 16; Linux and /bin/bash 3.2 are safe.
+  #
+  # fail_fast makes the refusal stop the run before any later hook starts;
+  # without it pre-commit prints the refusal and then hangs in the next hook.
+  # The guard declares no `stages`, and this file sets no `default_stages`, so
+  # it runs at every stage any hook runs at (manual and pre-push included).
+  # scripts/test-check-bash-heredoc-hang.sh pins all of this.
+  - repo: local
+    hooks:
+      - id: bash-heredoc-hang-guard
+        name: bash heredoc-hang guard (macOS bash 5.1–5.3.15)
+        entry: scripts/check-bash-heredoc-hang.sh
+        language: script
+        always_run: true
+        pass_filenames: false
+        fail_fast: true
+      # python, not script: the self-test reads this file with PyYAML, which an
+      # ambient python3 need not carry (the same reason as the dependabot audit
+      # hooks). Version tracks .github/requirements-pyyaml.txt.
+      - id: test-check-bash-heredoc-hang
+        name: Test the bash heredoc-hang guard and its wiring (#3426)
+        entry: scripts/test-check-bash-heredoc-hang.sh
+        language: python
+        additional_dependencies: ['PyYAML==6.0.3']
+        files: '^(\.pre-commit-config\.yaml|scripts/(check|test-check)-bash-heredoc-hang\.sh)$'
+        pass_filenames: false
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: 01886c8a910c64595c47f186ca1ffc0b77fa5458  # frozen: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        # Exclude paths where high-entropy strings are expected test data:
+        #   - package-lock.json: npm integrity hashes
+        exclude: '(^|/)package-lock\.json$'
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # frozen: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=5000']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-yaml
+        # Lint test fixtures named `*-malformed.yml` are intentionally
+        # not valid YAML — they exercise the script-error path of the
+        # workflow-lint scanners (#920 §5.1 case-05 and future siblings).
+        exclude: '-malformed\.yml$'
+      - id: check-json
+        # package-lock.json: excluded by default (large, not authored JSON).
+        exclude: '(^|/)package-lock\.json$'
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        # scripts/fixtures/plugin-cache/*.section.md are byte-exact payloads,
+        # not prose: their bytes are digest-pinned in marker-sections.sha256 and
+        # spliced verbatim into the plugin cache. Normalizing the trailing
+        # newline changes the digest and drops the blank line before the anchor
+        # heading. (#2665)
+        exclude: '(\.svg$|^scripts/fixtures/plugin-cache/.*\.section\.md$)'
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: mixed-line-ending
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # frozen: v5.0.0
+    hooks:
+      - id: detect-aws-credentials
+        args: ['--allow-missing-credentials']
+
+  # Three-layer secret-scanning model (#1429 / audit C1): this LOCAL layer
+  # (trufflehog history scan + gitleaks + detect-secrets) is the fastest
+  # feedback; the CI layer is the fork-safe PR-diff verified-only scan in
+  # .github/workflows/secret-scanning.yml; the PRIMARY layer is GitHub
+  # Secret Scanning + push protection, org-enforced (code-security config
+  # 251472) — fork PRs bypass pre-commit, which is why the other layers exist.
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: e76dff8a7e57d6df0c60ad8cbf5d5cba505a8fc9  # frozen: v3.99.2
+    hooks:
+      - id: trufflehog
+        name: TruffleHog
+        # No --only-verified: a staged key that is fake, revoked or offline
+        # never verifies, so the hook passed it (canary test, 2026-10-31).
+        # Silence a fixture with an inline `trufflehog:ignore` comment.
+        entry: bash -c 'trufflehog git file://. --since-commit HEAD --fail'
+
+  # gitleaks stays in the local layer; its CI working-tree job was retired in
+  # the #1429 consolidation (superseded by platform push protection).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 107a41827bb6698dbbff756b2300537774a1d84c  # frozen: v8.24.3
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # frozen: v1.7.12
+    hooks:
+      - id: actionlint
+        # Shellcheck integration is ENABLED: actionlint runs its full check
+        # set (expression + shellcheck + syntax).
+        args: ['-config-file=.actionlint.yaml']
+        # actionlint's default files-glob covers .github/workflows/*.yml.
+
+  # ── Supply-chain (Shai-Hulud 2.0 IOC scanner) ────────────────────────────
+  # See docs/ci/supply-chain-defense.md. Spec: #715.
+  - repo: local
+    hooks:
+      - id: supply-chain-ioc-scan
+        name: supply-chain IOC scan (Shai-Hulud 2.0)
+        entry: scripts/security/scan-supply-chain-iocs.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+
+      - id: self-hosted-runner-lint
+        name: self-hosted runner allowlist
+        # Exit 2 means "expression runner, cannot statically verify" — the
+        # linter keeps this as a finding for CI strictness, but at the local
+        # pre-commit layer we treat it as non-blocking (stderr is still shown
+        # so the developer sees the warning). Exit 1 (self-hosted+non-allowlisted)
+        # and 10 (parser failure) still block.
+        entry: bash -c 'scripts/security/check-self-hosted-runners.sh; rc=$?; [ "$rc" = "2" ] && exit 0 || exit $rc'
+        language: python
+        additional_dependencies: ['PyYAML==6.0.3']
+        pass_filenames: false
+        files: '^\.github/workflows/.*\.ya?ml$'
+
+      - id: check-env-file
+        name: env-file shell-parse lint
+        # Blocks commits that add env-file values whose unquoted form would
+        # fail when sourced by bash. Rejects the following in unquoted values:
+        # space, <, >, ;, `, $, |, &, \ — plus unclosed quotes and quoted
+        # values with trailing extra content (e.g. KEY="foo" "bar").
+        # See #725 Track 4 — the deploy.env.local:15 shell-parse regression
+        # is the class this hook prevents.
+        entry: scripts/check-env-file.sh
+        language: script
+        files: '\.env(\.example|\.local)?$'
+        pass_filenames: true
+
+      - id: test-check-env-file
+        name: Test env-file lint
+        entry: bash scripts/check-env-file.test.sh
+        language: system
+        files: '^scripts/check-env-file(\.test)?\.sh$'
+        pass_filenames: false
+
+      # ── Workflow-file structural guards (#920/#2274 trust-model lock-ins) ──
+      # These hooks codify the workflow trust boundary and invariants surfaced
+      # by the 2026-05-09 cascade (#893/#900/#904/#906/#910). Each fires when a
+      # workflow file is in the commit; the script scans the entire
+      # .github/workflows/ tree so cross-file references stay consistent.
+
+      # The hotfix label changes how the OSV scan gates a PR (osv-scanner.yml),
+      # so its resolution is security-relevant. It silently mis-answered on
+      # 2026-08-29 (#3013): the commit->PR association is eventually consistent
+      # and was queried 19 s after the merge. The suite's load-bearing case is
+      # the race itself — association empty, then resolving on retry.
+      - id: test-resolve-hotfix-label
+        name: hotfix-label resolution self-test (release fast-path)
+        entry: bash .github/scripts/tests/resolve-hotfix-label.test.sh
+        language: system
+        files: '^(\.github/scripts/resolve-hotfix-label\.sh|\.github/scripts/tests/resolve-hotfix-label\.test\.sh|\.github/workflows/osv-scanner\.ya?ml)$'
+        pass_filenames: false
+
+      - id: lint-workflow-call-contract
+        name: workflow lint — workflow_call contract (permissions superset + secrets agree)
+        entry: bash .github/scripts/lint-workflow-call-contract.sh .
+        language: python
+        additional_dependencies: ['PyYAML==6.0.3']
+        files: '^(\.github/scripts/lint-workflow-call-contract\.sh|\.github/scripts/tests/lint-workflow-call-contract\.test\.sh|\.github/workflows/.*\.ya?ml)$'
+        pass_filenames: false
+
+      - id: test-lint-workflow-call-contract
+        name: workflow lint self-test — workflow_call contract
+        entry: bash .github/scripts/tests/lint-workflow-call-contract.test.sh
+        language: python
+        additional_dependencies: ['PyYAML==6.0.3']
+        files: '^(\.github/scripts/lint-workflow-call-contract\.sh|\.github/scripts/tests/lint-workflow-call-contract\.test\.sh|\.github/workflows/.*\.ya?ml)$'
+        pass_filenames: false
+
+  - repo: https://github.com/semgrep/semgrep
+    rev: a8d5ed32994273e8c94a5bf27201fef1106d1e74  # frozen: v1.121.0
+    hooks:
+      - id: semgrep
+        name: Semgrep SAST
+        # Pinned to python3.9 because Semgrep's tracing/protobuf deps
+        # are incompatible with Python 3.14 (google.protobuf raises
+        # TypeError: Metaclasses with custom tp_new are not supported).
+        # Developers must have python3.9 installed locally. On macOS this
+        # ships with Command Line Tools at /Library/Developer/CommandLineTools/.
+        # Ruleset matches the blocking custom-rules scan in
+        # .github/workflows/semgrep.yml: .semgrep/ rules only. CI also runs
+        # the p/security-audit and p/owasp-top-ten community rulesets; they
+        # are left out here to keep local runs fast. The .semgrep/ rules are
+        # JS/TS only, so Swift, Kotlin and Java are covered by CI's community
+        # rulesets, not by this hook.
+        language_version: python3.9
+        args:
+          - --config=.semgrep/
+          - --error
+          - --quiet
+        types_or: [javascript, ts, tsx]
+        exclude: '(node_modules|dist|out|coverage|\.test\.|tests/)'
+
+  - repo: local
+    hooks:
+      - id: commit-msg-format
+        name: commit message format
+        entry: scripts/check-commit-msg.sh
+        language: script
+        stages: [commit-msg]
+        always_run: true
+
+  - repo: local
+    hooks:
+      # Guards the NOTICE.md regenerator's own behaviour. Hermetic (PATH-shimmed
+      # npx/go), so it needs no node_modules and no Go toolchain — unlike the
+      # regenerator itself, which is why only the TEST runs pre-commit and the
+      # real --check runs in CI.
+      - id: test-update-notice-md
+        name: Test NOTICE.md drift guard (#2886)
+        entry: bash scripts/test-update-notice-md.sh
+        language: system
+        files: '^scripts/(update-notice-md\.py|test-update-notice-md\.sh)$'
+        pass_filenames: false
+      - id: test-override-range-lint
+        name: Test override-range lint (#2709)
+        entry: bash scripts/security/test-override-range-lint.sh
+        language: system
+        files: '^(scripts/security/(override-range-lint\.mjs|test-override-range-lint\.sh)|\.pre-commit-config\.yaml)$'
+        pass_filenames: false
+      # Fires when a manifest, the dependabot config, or the register itself
+      # moves — the moments a held version can appear without a written reason.
+      - id: pin-exception-lint
+        name: pin-exception register covers every held version
+        entry: node scripts/security/check-pin-exceptions.mjs .
+        language: python
+        # PyYAML through a PRE-COMMIT-MANAGED env, not the contributor's ambient
+        # interpreter. `language: system` invoked ambient `python3`, and pre-commit
+        # being a python application does NOT put PyYAML on that interpreter —
+        # pre-commit's own venv has it, the contributor's python3 need not. A
+        # contributor with pre-commit, node and python but no global PyYAML was
+        # blocked from committing: fail-closed, but on a dependency the hook config
+        # never provisioned (CodeRabbit, PR #3325). Version tracks
+        # .github/requirements-pyyaml.txt — the audit suite asserts they match.
+        additional_dependencies: ['PyYAML==6.0.3']
+        # Every manifest in the checker's WORKSPACES must appear here, or editing it
+        # does not even trigger the control — `pre-commit run pin-exception-lint
+        # --files <worker package.json>` reported "no files to check" while the
+        # worker manifests exact-pinned wrangler with no register entry (#3292).
+        files: '^(\.github/(dependabot\.yml|dependency-pin-exceptions\.json|tools/license-checker/package\.json)|package\.json|\.github/tools/eslint-formatter/package\.json|scripts/security/check-pin-exceptions\.mjs)$'
+        pass_filenames: false
+      - id: test-pin-exception-lint
+        name: Test pin-exception lint (#2769)
+        entry: bash scripts/security/test-check-pin-exceptions.sh
+        language: python
+        # PyYAML through a PRE-COMMIT-MANAGED env, not the contributor's ambient
+        # interpreter. `language: system` invoked ambient `python3`, and pre-commit
+        # being a python application does NOT put PyYAML on that interpreter —
+        # pre-commit's own venv has it, the contributor's python3 need not. A
+        # contributor with pre-commit, node and python but no global PyYAML was
+        # blocked from committing: fail-closed, but on a dependency the hook config
+        # never provisioned (CodeRabbit, PR #3325). Version tracks
+        # .github/requirements-pyyaml.txt — the audit suite asserts they match.
+        additional_dependencies: ['PyYAML==6.0.3']
+        files: '^scripts/security/(check-pin-exceptions\.mjs|test-check-pin-exceptions\.sh)$'
+        pass_filenames: false
+      # Fires when dependabot.yml moves, because that is the edit that can leave an
+      # update root unwatched, and when any update root APPEARS or disappears — a new
+      # manifest, go.mod, Dockerfile or composite action is the other direction of the
+      # same drift. Deliberately NOT gated on every package.json in the tree: a nested
+      # dependency-free helper is not an update root, and the audit's own npm leg is
+      # what decides that.
+      - id: dependabot-coverage-audit
+        name: dependabot watches every update root in the tree
+        entry: bash scripts/security/audit-dependabot-coverage.sh
+        language: python
+        # PyYAML through a PRE-COMMIT-MANAGED env, not the contributor's ambient
+        # interpreter. `language: system` invoked ambient `python3`, and pre-commit
+        # being a python application does NOT put PyYAML on that interpreter —
+        # pre-commit's own venv has it, the contributor's python3 need not. A
+        # contributor with pre-commit, node and python but no global PyYAML was
+        # blocked from committing: fail-closed, but on a dependency the hook config
+        # never provisioned (CodeRabbit, PR #3325). Version tracks
+        # .github/requirements-pyyaml.txt — the audit suite asserts they match.
+        additional_dependencies: ['PyYAML==6.0.3']
+        # `(.*/)?` not `.*/`: the latter REQUIRES a slash, so a root-level
+        # package.json or go.mod never triggered the hook and a new root-level
+        # update root could land uncovered (CodeRabbit, PR #3325).
+        files: '^(\.github/(dependabot\.yml|actions/.*/action\.ya?ml)|(.*/)?(package\.json|go\.mod)|.*Dockerfile.*|.*requirements.*\.txt)$'
+        pass_filenames: false
+      - id: test-dependabot-coverage-audit
+        name: Test dependabot coverage audit (#3325)
+        entry: bash scripts/security/test-audit-dependabot-coverage.sh
+        language: python
+        # PyYAML through a PRE-COMMIT-MANAGED env, not the contributor's ambient
+        # interpreter. `language: system` invoked ambient `python3`, and pre-commit
+        # being a python application does NOT put PyYAML on that interpreter —
+        # pre-commit's own venv has it, the contributor's python3 need not. A
+        # contributor with pre-commit, node and python but no global PyYAML was
+        # blocked from committing: fail-closed, but on a dependency the hook config
+        # never provisioned (CodeRabbit, PR #3325). Version tracks
+        # .github/requirements-pyyaml.txt — the audit suite asserts they match.
+        additional_dependencies: ['PyYAML==6.0.3']
+        files: '^scripts/security/(audit-dependabot-coverage\.sh|test-audit-dependabot-coverage\.sh|check-pin-exceptions\.mjs)$'
+        pass_filenames: false
+
+  # Remote hook revs are commit SHAs, never tags: a moved tag would run new
+  # code on the next `pre-commit install`. Keep the tag as `# frozen: vX`.
+  - repo: local
+    hooks:
+      - id: hook-revs-are-shas
+        name: pre-commit hook revs are pinned to commit SHAs
+        language: pygrep
+        entry: '^\s*rev:\s*(?![0-9a-f]{40}\s+# frozen: \S+\s*$)'
+        files: '^\.pre-commit-config\.yaml$'
