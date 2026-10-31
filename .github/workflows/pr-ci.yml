@@ -244,7 +244,7 @@ jobs:
             # Keep an invalid/missing protected selection visible as unknown;
             # the final API verdict fails closed instead of inferring false.
             echo 'known=false'
-            echo 'selection={"version":1,"known":false,"advisory":{"static_guards":true},"workers":["apple-sso-bridge","invite-landing"],"npm_workspaces":["client/desktop","services/media-plane","client/admin"],"license_go":true}'
+            echo 'selection={"version":1,"known":false,"advisory":{"static_guards":true},"workers":[],"npm_workspaces":["."],"license_go":false}'
             echo 'codeql_matrix={"include":[]}'
           } >> "$GITHUB_OUTPUT"
           if [[ "$METADATA_VALID" != 'true' || -z "$POLICY_SHA" || ! -f policy/.github/scripts/ci-scan-relevance.mjs ]]; then

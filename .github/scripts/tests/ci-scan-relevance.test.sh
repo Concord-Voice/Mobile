@@ -283,6 +283,11 @@ const ordinary = composeSelection(outputs, await metadata(process.argv[4]), opts
 assert.equal(ordinary.known, true);
 assert.equal(ordinary.hotfix, false, 'ordinary PR does not request auxiliary full-scan behavior');
 for (const key of ANALYSIS_KEYS.slice(0, 10)) assert.equal(ordinary.selected[key], false, `ordinary label does not select ${key}`);
+assert.deepEqual([ordinary.workers, ordinary.npm_workspaces], [[], []], 'no license filter selects no workspace');
+const licensed = composeSelection({ ...outputs, license_desktop: 'true', worker_apple: 'true' },
+  await metadata(process.argv[4]), opts);
+assert.deepEqual(licensed.npm_workspaces, ['.'], 'a license filter selects the Mobile root workspace');
+assert.deepEqual(licensed.workers, [], 'Mobile has no workers to select');
 const unavailablePush = composeSelection(outputs, { event_name: 'push', hotfix: false,
   before: 'b'.repeat(40), after: 'c'.repeat(40), history_available: false }, opts);
 assert.equal(unavailablePush.known, false, 'failed push provenance stays unknown for full-consumer fallback');
