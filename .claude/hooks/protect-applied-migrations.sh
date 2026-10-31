@@ -24,15 +24,9 @@ if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT" ]; then
     echo "BLOCKED: Failed to resolve the repository root. Failing closed." >&2
     exit 2
 fi
-# Pin RC_FILE to REPO_ROOT before sourcing repo-config.sh, matching the
-# ${REPO_ROOT:+$REPO_ROOT/}.claude/repo-config.json pattern every sibling hook
-# uses — repo-config.sh's own default only fires from `git rev-parse` against
-# cwd, which can diverge from REPO_ROOT (e.g. a hook run from a subdirectory).
-# shellcheck disable=SC2034 # read by the sourced repo-config.sh
-RC_FILE="${REPO_ROOT:+$REPO_ROOT/}.claude/repo-config.json"
-# shellcheck source=/dev/null
-source "$REPO_ROOT/scripts/repo-config.sh" 2>/dev/null || true
-MIGRATIONS_REL=$(rc_get '.migrations.dir' 'migrations/' 2>/dev/null)
+# Read the config with jq rather than sourcing scripts/repo-config.sh: this hook runs on
+# every Edit, and sourcing would execute whatever that checked-out file contains.
+MIGRATIONS_REL=$(jq -r '.migrations.dir // empty' "$REPO_ROOT/.claude/repo-config.json" 2>/dev/null || true)
 MIGRATIONS_REL="${MIGRATIONS_REL:-migrations/}"
 # No migrations directory in this repo => nothing to protect. Without this,
 # a repo that simply doesn't have one (or hasn't created it yet) would fail

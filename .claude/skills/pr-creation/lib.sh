@@ -17,8 +17,12 @@
 #   PRIORITY_FIELD_ID / OWNER / REPO_NAME / LABELS_FILE / LABEL_NAMESPACES.
 
 # Source the shared repo-config reader (best-effort; absent => helpers degrade).
-# shellcheck disable=SC1090,SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../../scripts/repo-config.sh" 2>/dev/null || true
+# Installed, it lives at <repo>/scripts/repo-config.sh; in this tooling repo it is two levels up.
+_rc_helper="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/repo-config.sh"
+[ -f "$_rc_helper" ] || _rc_helper="$(dirname "${BASH_SOURCE[0]}")/../../scripts/repo-config.sh"
+# shellcheck disable=SC1090,SC1091 # path resolved at runtime
+source "$_rc_helper" 2>/dev/null || true
+unset _rc_helper
 
 # Default the board env vars from config when the caller hasn't exported them.
 # When config is ALSO absent/empty, rc_get returns "" so these stay empty — and
