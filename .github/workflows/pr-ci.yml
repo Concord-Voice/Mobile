@@ -390,6 +390,8 @@ jobs:
           SEMGREP_RESULT: ${{ needs.semgrep.result }}
           ESLINT_RESULT: ${{ needs.eslint.result }}
           BUILD_RESULT: ${{ needs.build.result }}
+          # Mobile has no Go; the protected caller contract still requires the key.
+          GOVULNCHECK_RESULT: 'skipped'
           DESKTOP_COVERAGE: ${{ needs.build.outputs.desktop-coverage == 'true' }}
           CONTROL_PLANE_COVERAGE: 'false'
           MEDIA_PLANE_COVERAGE: 'false'
@@ -405,6 +407,7 @@ jobs:
               'build': os.environ['BUILD_RESULT'],
               'semgrep': os.environ['SEMGREP_RESULT'],
               'eslint': os.environ['ESLINT_RESULT'],
+              'govulncheck': os.environ['GOVULNCHECK_RESULT'],
           }
           coverage = {
               'desktop': os.environ['DESKTOP_COVERAGE'] == 'true',
