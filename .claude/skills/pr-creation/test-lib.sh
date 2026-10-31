@@ -13,7 +13,7 @@ echo "$out" | grep -qx "34" || fail "parse_pr_closes missed 34"
 echo "$out" | grep -qx "56" || fail "parse_pr_closes missed 56"
 
 # parse_pr_refs extracts Refs without closing.
-echo "$(parse_pr_refs 'Refs #99')" | grep -qx "99" || fail "parse_pr_refs missed 99"
+parse_pr_refs 'Refs #99' | grep -qx "99" || fail "parse_pr_refs missed 99"
 
 # No hardcoded project-ID default leaks: with PROJECT_ID unset, the project-id resolver must be empty, not PVT_….
 unset PROJECT_ID STATUS_FIELD_ID PRIORITY_FIELD_ID OWNER REPO_NAME
@@ -42,7 +42,9 @@ echo "$out3" | grep -qx "888" && fail "parse_pr_closes leaked a 3-backtick fence
   rm -rf "$tmpd" )
 
 # The bundled taxonomy (namespace headings, no "## Active labels") still yields an allowlist.
-( out="$(LABELS_FILE="$HERE/../../../../docs/rules/labels.md" LABEL_NAMESPACES="type area" bash -c '
+# Source layout (plugins/*/skills/pr-creation) or installed layout (.claude/skills/pr-creation).
+bundled="$HERE/../../../../docs/rules/labels.md"; [ -f "$bundled" ] || bundled="$HERE/../../rules/labels.md"
+( out="$(LABELS_FILE="$bundled" LABEL_NAMESPACES="type area" bash -c '
     source "'"$HERE"'/lib.sh"
     printf "type: bug\ntype: nope\n" | validate_against_active_labels 2>/dev/null')" || fail "bundled labels.md should validate"
   [ "$out" = "type: bug" ] || fail "bundled labels.md allowlist wrong: got '$out'" )

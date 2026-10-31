@@ -116,10 +116,10 @@ REPO=$(echo $REPO_FULL | cut -d/ -f2)
 
 **Step 2: Does a feature branch exist?**
 ```bash
-BRANCH=$(git branch --list "feature/$0*" --format='%(refname:short)' | head -1)
+BRANCH=$(git branch --list "feature/$0-*" --format='%(refname:short)' | head -1)
 # Also check remote if no local branch (fresh clone / pruned locals)
 if [ -z "$BRANCH" ]; then
-  REMOTE=$(git branch -r --list "origin/feature/$0*" --format='%(refname:short)' | head -1)
+  REMOTE=$(git branch -r --list "origin/feature/$0-*" --format='%(refname:short)' | head -1)
   # Strip origin/ prefix for use in gh commands (gh pr list --head expects bare branch name)
   BRANCH="${REMOTE#origin/}"
 fi
@@ -390,14 +390,14 @@ The state file is best-effort persistence; if it's missing or corrupt, fall thro
 
 ```bash
 # Check if a matching local branch already exists
-BRANCH=$(git branch --list "feature/$0*" --format='%(refname:short)' | head -1)
+BRANCH=$(git branch --list "feature/$0-*" --format='%(refname:short)' | head -1)
 
 if [ -n "$BRANCH" ]; then
   # Re-entry: switch to existing local branch
   git checkout "$BRANCH"
 else
   # Check for a matching remote branch (e.g., fresh clone or pruned locals)
-  REMOTE_BRANCH=$(git branch -r --list "origin/feature/$0*" --format='%(refname:short)' | head -1)
+  REMOTE_BRANCH=$(git branch -r --list "origin/feature/$0-*" --format='%(refname:short)' | head -1)
 
   if [ -n "$REMOTE_BRANCH" ]; then
     # Re-entry: create local tracking branch from existing remote

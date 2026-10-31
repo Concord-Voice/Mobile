@@ -1,9 +1,9 @@
 #!/bin/bash
 # destructive-commands.sh — PreToolUse hook for Bash
-# Warns on destructive commands that supplement the .claude/settings.json
-# deny list (which blocks force-push, hard reset, rm -rf, etc. — those
-# patterns are NOT enforced here; this hook covers additional patterns
-# the deny list doesn't catch).
+# Blocks destructive commands. It checks force-push, hard reset, git clean,
+# recursive rm and working-tree checkout/restore itself, so the guard does not
+# depend on a repo's .claude/settings.json deny list. It is a best-effort regex
+# guard, not a parser: keep the deny list too.
 #
 # Scoped bypass: the `commit-commands:clean_gone` skill needs to issue
 # `git branch -D` to clean up [gone] branches. A per-invocation env-var prefix
@@ -59,10 +59,21 @@ if [[ "$COMMAND" =~ $BYPASS_PREFIX_RE ]]; then
     # shell metacharacters are not allowed.
 fi
 
-# Additional destructive patterns NOT in the .claude/settings.json deny list.
-# (rm -rf, git push --force, git reset --hard, etc. are deny-list-enforced
-# and never reach this hook — when this regex matches, the user really is
-# typing one of THESE specific patterns.)
+# Work-discarding and history-rewriting git/rm operations, best effort: a regex
+# over the command text, not a parser. Git patterns only match in command
+# position (start, or after ; & | or a subshell paren), so a commit message
+# that mentions one is not blocked. --force-with-lease stays allowed.
+CMD_POS='(^|[;&|(])[[:space:]]*'
+DESTRUCTIVE_RE="${CMD_POS}git\s+push\b[^;&|]*(\s(--force|--force-if-includes)(\s|$)|\s-[a-zA-Z]*f[a-zA-Z]*(\s|$)|\s\+[^[:space:]]+)"
+DESTRUCTIVE_RE+="|${CMD_POS}git\s+reset\b[^;&|]*\s--hard"
+DESTRUCTIVE_RE+="|${CMD_POS}git\s+clean\b[^;&|]*\s(-[a-zA-Z]*f|--force)"
+DESTRUCTIVE_RE+="|${CMD_POS}git\s+(checkout|restore)\b[^;&|]*\s\.{1,2}/?(\s|$)"
+DESTRUCTIVE_RE+="|(^|[;&|([:space:]])rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)"
+if echo "$COMMAND" | grep -qE "$DESTRUCTIVE_RE"; then
+    echo "BLOCKED: Potentially destructive command detected: $COMMAND" >&2
+    exit 2
+fi
+
 if echo "$COMMAND" | grep -qE '(DROP\s+(TABLE|DATABASE|INDEX)|TRUNCATE\s|DELETE\s+FROM|git\s+branch\s+-D|git\s+stash\s+drop|git\s+reflog\s+expire|pkill|killall)'; then
     echo "BLOCKED: Potentially destructive command detected: $COMMAND" >&2
     # If the command matches the bare `git branch -D` pattern, hint at the

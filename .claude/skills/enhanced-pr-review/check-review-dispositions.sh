@@ -9,8 +9,8 @@
 # of prose.
 #
 #   Assertion 1 — thread coverage: every review thread that is unresolved OR
-#     bot-authored carries a `<!-- cv-disposition: ... -->` marker written by a
-#     NON-bot author.
+#     reviewer-authored (a Bot, or a login in the roster `.bots[]`) carries a
+#     `<!-- cv-disposition: ... -->` marker written by a non-reviewer author.
 #
 #     Calibrated on the resolver-agnostic signal deliberately. The obvious
 #     alternative — a thread resolved by a [bot] actor is blocking unless an
@@ -164,20 +164,106 @@ if [ -n "$TRUNCATED" ]; then
     exit 2
 fi
 
+# --- Reviewer roster -----------------------------------------------------------
+# Display names come from the SAME place the triage table gets them: the per-repo
+# roster `.bots[]`. Hardcoding a second alias list here would create a divergent
+# copy of data that already exists, and the two would drift the first time
+# someone registered a bot in only one of them.
+#
+# READ FROM THE MERGE BASE, NOT THE WORKING TREE. This gate runs from the
+# checkout of the PR head, so a working-tree roster is supplied by the very
+# branch the gate is judging: a one-line `.bots[]` diff could declare an alias
+# that satisfies coverage for every reviewer, and the PR would clear its own
+# review. The roster that governs a review must come from the branch being
+# merged INTO. `CV_REPO_CONFIG` overrides for tests only.
+ROSTER_JSON='[]'
+ROSTER_SOURCE='(none — login-only matching)'
+if [ -n "${CV_REPO_CONFIG:-}" ]; then
+    if [ -f "$CV_REPO_CONFIG" ]; then
+        ROSTER_RAW=$(cat "$CV_REPO_CONFIG" 2>&1) || ROSTER_RAW=''
+        ROSTER_SOURCE="$CV_REPO_CONFIG (override)"
+    else
+        ROSTER_RAW=''
+        ROSTER_SOURCE="$CV_REPO_CONFIG (override, absent)"
+    fi
+elif git rev-parse --git-dir >/dev/null 2>&1; then
+    # Prefer the PR's ACTUAL base. A PR targeting a release branch must be
+    # judged against that branch's roster; falling back to the repo default
+    # silently reads the wrong one, and on a default branch with no roster the
+    # output is indistinguishable from a legitimately roster-less repo.
+    # /dev-lifecycle knows this from `gh pr view --json baseRefName`.
+    BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
+    [ -n "$BASE_REF" ] && BASE_REF="origin/${BASE_REF#origin/}"
+    if [ -z "$BASE_REF" ]; then
+        BASE_REF=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) \
+            || BASE_REF="origin/${CV_DEFAULT_BRANCH:-main}"
+    fi
+    if ROSTER_RAW=$(git show "${BASE_REF}:.claude/repo-config.json" 2>/dev/null); then
+        ROSTER_SOURCE="${BASE_REF}:.claude/repo-config.json"
+    else
+        ROSTER_RAW=''
+        ROSTER_SOURCE="${BASE_REF} (no roster on the base branch)"
+    fi
+else
+    ROSTER_RAW=''
+fi
+
+if [ -n "$ROSTER_RAW" ]; then
+    # A malformed roster is a config error, not a reason to quietly fall back to
+    # login-only: silent degradation blocks correctly-written posts while telling
+    # the operator the accepted spelling is the raw login, with no hint why.
+    if ! ROSTER_JSON=$(printf '%s' "$ROSTER_RAW" | jq -c 'if (.bots|type) == "array" then .bots else [] end' 2>&1); then
+        echo "STOP: could not parse the reviewer roster at ${ROSTER_SOURCE}: ${ROSTER_JSON}" >&2
+        echo "      Reviewer coverage cannot be evaluated. UNKNOWN, not clean." >&2
+        exit 2
+    fi
+    [ -z "$ROSTER_JSON" ] && ROSTER_JSON='[]'
+
+    # Validate before trusting. An unvalidated `.name` is a universal key: a
+    # single-space name matches any prose body, and a newline inside one splits
+    # it into several aliases of which the shortest fragment wins. `.match` is
+    # equally load-bearing because it selects WHICH name becomes an accepted
+    # alias — one over-broad entry donates its alias to the whole fleet.
+    ROSTER_BAD=$(printf '%s' "$ROSTER_JSON" | jq -r '
+        .[] | . as $e
+        | ((($e.name // "") | tostring) as $n
+           | (($e.match // "") | tostring) as $m
+           | if ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
+             then "name=\"\($n)\" (must be >=3 non-space chars, no newlines)"
+             elif ($m != "") and (($m | gsub("\\s";"") | length) < 2)
+             then "match=\"\($m)\" (must be >=2 non-space chars)"
+             else empty end)' 2>/dev/null)
+    if [ -n "$ROSTER_BAD" ]; then
+        echo "STOP: reviewer roster at ${ROSTER_SOURCE} has unusable entries:" >&2
+        printf '%s\n' "$ROSTER_BAD" | sed 's/^/      /' >&2
+        echo "      An over-broad alias satisfies coverage for reviewers it does not name." >&2
+        exit 2
+    fi
+fi
+
 # --- Assertion 1 — thread coverage -------------------------------------------
 # A thread is IN SCOPE if it is unresolved or bot-authored. A human-authored
 # thread a human already resolved is self-evidently decided; requiring a marker
 # there would be ceremony, not coverage.
-THREAD_ROWS=$(echo "$RAW" | jq -r '
+# A rostered machine USER account is a reviewer too (see `rostered` below), so its
+# resolved threads stay in scope and its own comments never count as a disposition.
+THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
+  def rostered($login):
+      ($login // "" | ascii_downcase) as $l
+    | ($roster | map(. as $e | select(
+          ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) == $l)
+          or ((($e.match // "") != "") and ($l | contains($e.match | ascii_downcase)))))
+       | length) > 0;
+  def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.isResolved == false or .comments.nodes[0].author.__typename == "Bot")
+  | select(.isResolved == false or (.comments.nodes[0] | reviewer))
   | . as $t
   # The marker must come from a NON-bot author. A bot echoing a marker back into
   # the thread (quoting a reply, or an autofix agent mimicking the format) must
   # never satisfy the gate on the human decision-makers behalf. `last` wins so a
   # corrected disposition supersedes an earlier one in the same thread.
   | ([$t.comments.nodes[]
-      | select(.author.__typename != "Bot")
+      | select(reviewer | not)
       # Identity class alone is not authorization. Without this, ANY GitHub
       # account that can comment could clear every finding on a PR. COLLABORATOR
       # is deliberately NOT accepted: GitHub returns it for read and triage
@@ -349,83 +435,6 @@ fi
 # GraphQL `author.login` carries NO `[bot]` suffix (verify against your own
 # repo before assuming otherwise) even though `resolvedBy.login` does — so the old sed was a
 # no-op and the prefix was the whole check. The strip below is defensive only.
-# --- Reviewer roster -----------------------------------------------------------
-# Display names come from the SAME place the triage table gets them: the per-repo
-# roster `.bots[]`. Hardcoding a second alias list here would create a divergent
-# copy of data that already exists, and the two would drift the first time
-# someone registered a bot in only one of them.
-#
-# READ FROM THE MERGE BASE, NOT THE WORKING TREE. This gate runs from the
-# checkout of the PR head, so a working-tree roster is supplied by the very
-# branch the gate is judging: a one-line `.bots[]` diff could declare an alias
-# that satisfies coverage for every reviewer, and the PR would clear its own
-# review. The roster that governs a review must come from the branch being
-# merged INTO. `CV_REPO_CONFIG` overrides for tests only.
-ROSTER_JSON='[]'
-ROSTER_SOURCE='(none — login-only matching)'
-if [ -n "${CV_REPO_CONFIG:-}" ]; then
-    if [ -f "$CV_REPO_CONFIG" ]; then
-        ROSTER_RAW=$(cat "$CV_REPO_CONFIG" 2>&1) || ROSTER_RAW=''
-        ROSTER_SOURCE="$CV_REPO_CONFIG (override)"
-    else
-        ROSTER_RAW=''
-        ROSTER_SOURCE="$CV_REPO_CONFIG (override, absent)"
-    fi
-elif git rev-parse --git-dir >/dev/null 2>&1; then
-    # Prefer the PR's ACTUAL base. A PR targeting a release branch must be
-    # judged against that branch's roster; falling back to the repo default
-    # silently reads the wrong one, and on a default branch with no roster the
-    # output is indistinguishable from a legitimately roster-less repo.
-    # /dev-lifecycle knows this from `gh pr view --json baseRefName`.
-    BASE_REF="${CV_BASE_REF:-${GITHUB_BASE_REF:-}}"
-    [ -n "$BASE_REF" ] && BASE_REF="origin/${BASE_REF#origin/}"
-    if [ -z "$BASE_REF" ]; then
-        BASE_REF=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) \
-            || BASE_REF="origin/${CV_DEFAULT_BRANCH:-main}"
-    fi
-    if ROSTER_RAW=$(git show "${BASE_REF}:.claude/repo-config.json" 2>/dev/null); then
-        ROSTER_SOURCE="${BASE_REF}:.claude/repo-config.json"
-    else
-        ROSTER_RAW=''
-        ROSTER_SOURCE="${BASE_REF} (no roster on the base branch)"
-    fi
-else
-    ROSTER_RAW=''
-fi
-
-if [ -n "$ROSTER_RAW" ]; then
-    # A malformed roster is a config error, not a reason to quietly fall back to
-    # login-only: silent degradation blocks correctly-written posts while telling
-    # the operator the accepted spelling is the raw login, with no hint why.
-    if ! ROSTER_JSON=$(printf '%s' "$ROSTER_RAW" | jq -c 'if (.bots|type) == "array" then .bots else [] end' 2>&1); then
-        echo "STOP: could not parse the reviewer roster at ${ROSTER_SOURCE}: ${ROSTER_JSON}" >&2
-        echo "      Reviewer coverage cannot be evaluated. UNKNOWN, not clean." >&2
-        exit 2
-    fi
-    [ -z "$ROSTER_JSON" ] && ROSTER_JSON='[]'
-
-    # Validate before trusting. An unvalidated `.name` is a universal key: a
-    # single-space name matches any prose body, and a newline inside one splits
-    # it into several aliases of which the shortest fragment wins. `.match` is
-    # equally load-bearing because it selects WHICH name becomes an accepted
-    # alias — one over-broad entry donates its alias to the whole fleet.
-    ROSTER_BAD=$(printf '%s' "$ROSTER_JSON" | jq -r '
-        .[] | . as $e
-        | ((($e.name // "") | tostring) as $n
-           | (($e.match // "") | tostring) as $m
-           | if ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
-             then "name=\"\($n)\" (must be >=3 non-space chars, no newlines)"
-             elif ($m != "") and (($m | gsub("\\s";"") | length) < 2)
-             then "match=\"\($m)\" (must be >=2 non-space chars)"
-             else empty end)' 2>/dev/null)
-    if [ -n "$ROSTER_BAD" ]; then
-        echo "STOP: reviewer roster at ${ROSTER_SOURCE} has unusable entries:" >&2
-        printf '%s\n' "$ROSTER_BAD" | sed 's/^/      /' >&2
-        echo "      An over-broad alias satisfies coverage for reviewers it does not name." >&2
-        exit 2
-    fi
-fi
-
 # --- Reviewer personas ---------------------------------------------------------
 # What must be named in the reconciliation post is a PERSONA, not a login. One
 # login can carry several: a shared CI login posts as both a SAST reporter and a

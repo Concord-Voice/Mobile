@@ -258,6 +258,16 @@ run "BLOCK: a rostered machine USER account still owes a coverage row" 1 \
 run "ok: naming the rostered machine account satisfies coverage" 0 \
     "$(doc "" "$(machineuser 'SECURITY: hardcoded key'),$(human '<!-- cv-review-reconciliation -->\n| CI Machine |')")"
 
+# A resolved thread opened by the rostered machine account stays in scope.
+run "BLOCK: resolved machine-account thread with no disposition" 1 \
+    "$(doc "$(thread true dev "$(machineuser 'nil deref')")" "$(human '<!-- cv-review-reconciliation -->\n| CI Machine |')")"
+
+run "ok: resolved machine-account thread with a disposition" 0 \
+    "$(doc "$(thread true dev "$(machineuser 'nil deref'),$(human '<!-- cv-disposition: accepted evidence: e5c34d0 -->')")" "$(human '<!-- cv-review-reconciliation -->\n| CI Machine |')")"
+
+run "BLOCK: the machine account cannot record its own disposition" 1 \
+    "$(doc "$(thread true dev "$(machineuser 'nil deref'),$(machineuser '<!-- cv-disposition: accepted evidence: e5c34d0 -->')")" "$(human '<!-- cv-review-reconciliation -->\n| CI Machine |')")"
+
 # Two markers in ONE body: `first` used to drop the second persona silently.
 run "BLOCK: two markers in one comment require BOTH personas" 1 \
     "$(doc "" "$(botsay github-actions '<!-- semgrep-results --> and <!-- classify-release --> in one body'),$(human '<!-- cv-review-reconciliation -->\n| Semgrep SAST |')")"

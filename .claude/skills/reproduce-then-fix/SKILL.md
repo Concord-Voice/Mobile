@@ -36,6 +36,21 @@ A bounded, test-first debugging workflow for issue `$0` — a numeric GitHub iss
 
 ## Phase 1: REPRODUCE — write the failing test FIRST
 
+### Step 1.0 — Get onto the issue branch (before any edit or commit)
+
+`/dev-lifecycle` routes bugs here before its own branch step, so this skill selects the branch itself. Never commit onto the default branch.
+
+```bash
+BRANCH=$(git branch --list "feature/$0-*" --format='%(refname:short)' | head -1)
+[ -z "$BRANCH" ] && BRANCH=$(git branch -r --list "origin/feature/$0-*" --format='%(refname:short)' | head -1)
+if [ -n "$BRANCH" ]; then
+  git checkout "${BRANCH#origin/}" 2>/dev/null || git checkout --track "$BRANCH"
+else
+  # Topic is 2-4 significant words from the issue title, lowercased, hyphenated.
+  git checkout -b feature/$0-<topic>
+fi
+```
+
 ### Step 1.1 — Gather the symptom
 
 Validate that `$0` is a numeric issue number first. If `$0` is not numeric (e.g., free-text description), refuse to proceed and instruct the developer to file an issue via `/issue-creation`, then re-invoke `/reproduce-then-fix <new-issue-number>`. The downstream commit messages and PR body templates reference `#$0` and `Closes #$0`, which require a numeric value.

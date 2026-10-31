@@ -60,7 +60,7 @@ gh api "/advisories?ecosystem=$ADVISORY_ECO&published=>$SINCE" \
        | map(select(.package.name == $pkg))
        | select(length > 0)
        | $adv + {
-         affected_ranges: (.vulnerabilities | map(select(.package.name == $pkg)) | map(.vulnerable_version_range))
+         affected_ranges: ($adv.vulnerabilities | map(select(.package.name == $pkg)) | map(.vulnerable_version_range))
        }
     ]
     | .[]
@@ -135,7 +135,7 @@ case $ECOSYSTEM in
   npm)
     # Shared baseline of widely-used security-sensitive npm packages, then
     # overlay the repo's signal3_repo_map (repo entries win on key collision).
-    REPO_URL=$(jq -r --arg p "$PKG" --argjson extra "$SIGNAL3_EXTRA" '
+    REPO_URL=$(jq -nr --arg p "$PKG" --argjson extra "$SIGNAL3_EXTRA" '
       ({
         "ajv": "https://github.com/ajv-validator/ajv",
         "ajv-formats": "https://github.com/ajv-validator/ajv-formats",
@@ -164,7 +164,7 @@ case $ECOSYSTEM in
     ;;
   *)
     # pip / rust / rubygems / composer etc.: check signal3_repo_map only.
-    REPO_URL=$(jq -r --arg p "$PKG" --argjson extra "$SIGNAL3_EXTRA" '$extra[$p] // empty')
+    REPO_URL=$(jq -nr --arg p "$PKG" --argjson extra "$SIGNAL3_EXTRA" '$extra[$p] // empty')
     [ -z "$REPO_URL" ] && { echo "Signal 3 skipped: $PKG not in signal3_repo_map" >&2; return; }
     ;;
 esac
