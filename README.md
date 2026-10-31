@@ -1,8 +1,46 @@
-# Concord Voice mobile
+# Concord Voice Mobile
+
+<a href="https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile"><img align="right" src="https://sonarcloud.io/api/project_badges/quality_gate?project=Concord-Voice_Mobile" alt="Quality gate" /></a>
+
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Mobile&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Mobile&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Mobile&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Mobile&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Concord-Voice_Mobile&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+
+[![AI Code Assurance](https://sonarcloud.io/api/project_badges/ai_code_assurance?project=Concord-Voice_Mobile)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-success?logo=dependabot)](./.github/dependabot.yml)
+[![license](https://img.shields.io/badge/license-CVSL%201.0-blue)](./LICENSE)
+[![security](https://img.shields.io/badge/security-policy-green)](https://github.com/Concord-Voice/.github/blob/main/SECURITY.md)
+[![status](https://img.shields.io/badge/status-pre--alpha-orange)](#not-built-yet)
+[![platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20Android-blue)](#run)
+[![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-dark.svg)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
+
+The Concord Voice mobile app for iOS and Android.
+
+**Website:** [www.concordvoice.com](https://www.concordvoice.com) | **Wiki:** [Mobile wiki](https://github.com/Concord-Voice/Mobile/wiki) | **Security:** security@concordvoice.com
+
+---
+
+## Introduction
+
+Concord Voice is a privacy-first place to talk with your friends, your community, or your team. It gives you voice calls, video, screen sharing, and chat. Your device encrypts each message before it leaves, so our servers hold only scrambled data that we cannot read. You can use our hosted service, or you can run the same software on your own hardware.
+
+This repository holds the mobile app. It is in early development, so it is not in the App Store or Google Play yet.
+iOS comes first, and Android follows.
+
+The app keeps the same promise as the desktop app: your phone encrypts your messages, and the server never sees them in plain text.
+The encryption code runs natively on the phone, and the keys never leave the device's secure storage.
+
+For guides and background, see the [Mobile wiki](https://github.com/Concord-Voice/Mobile/wiki).
+
+---
+
+## Technical overview
 
 The React Native client for iOS (#206) and Android (#205). The app lives at the root of this repository.
 
-## Layout
+### Layout
 
 - `App.tsx`: the app shell: sign-in, MFA, and Home (Messages and You tabs; Servers and
   Alerts are placeholders). Screens follow the internal design prototype's dark scheme.
@@ -60,7 +98,7 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
 
 The crypto and core code come from the #663 framework probe.
 
-## Run
+### Run
 
 ```sh
 npm ci
@@ -89,7 +127,7 @@ covered by that run.
 Release builds are unsigned on purpose until a release key exists. Only Argon2id
 accounts can unlock; a legacy key-derivation account is refused with a distinct error.
 
-## Native validation
+### Native validation
 
 Use Node 22.13 or later in the 22.x line, Node 24.3 or later in the 24.x
 line, or Node 26 or later, as required by React Native 0.88.
@@ -181,7 +219,7 @@ The default application never imports the probe. Reproduce its runner contracts
 with `node --test scripts/native-runtime-probe/*.test.mjs`; use the workflow on
 hosted macOS/Linux for the actual native executions.
 
-## Local checks
+### Local checks
 
 [pre-commit](https://pre-commit.com/) runs the secret scanners (detect-secrets,
 gitleaks, TruffleHog), actionlint, Semgrep and the supply-chain guards before
@@ -203,7 +241,7 @@ Dependabot proposes weekly updates for npm, Bundler (CocoaPods), Gradle, GitHub
 Actions and the CI tool manifests. Exact pins are documented in
 `.github/dependency-pin-exceptions.json`.
 
-## Not built yet
+### Not built yet
 
 - Servers, channels, alerts, voice and the rest of the prototype's screens.
 - WebAuthn (passkey) MFA.
@@ -227,3 +265,32 @@ On pull requests, the protected required build dispatches `sonarcloud.yml` from
 `main` in the `protected-sonar` environment. That run verifies the caller's
 OIDC proof (`tools/sonar-caller-proof`) and scans an inert copy of the PR
 source. `sonar-main.yml` analyses `main` daily. Fork PRs skip the scan.
+
+---
+
+## Security
+
+Report a vulnerability by email to security@concordvoice.com. Do not open a public issue for it. The [security policy](https://github.com/Concord-Voice/.github/blob/main/SECURITY.md) describes the disclosure process.
+
+---
+
+## Contributing
+
+We welcome help. Read the [contributing guide](https://github.com/Concord-Voice/.github/blob/main/CONTRIBUTING.md) and the [code of conduct](https://github.com/Concord-Voice/.github/blob/main/CODE_OF_CONDUCT.md) before you open a pull request. Report bugs and request features in our [feedback repository](https://github.com/Concord-Voice/Concord-Voice/issues).
+
+---
+
+## License
+
+This repository uses the Concord Voice Source License 1.0 (CVSL 1.0). Anyone can read the source. Personal and non-profit use is free. Commercial self-hosted use by a for-profit or government entity needs a commercial license. On 2030-02-15 the license converts to AGPL-3.0-or-later.
+
+See [LICENSE](./LICENSE) for the full terms.
+
+---
+
+## Contact
+
+- **Website:** [www.concordvoice.com](https://www.concordvoice.com)
+- **Security:** security@concordvoice.com
+- **Privacy:** privacy@concordvoice.com
+- **General:** contact-us@concordvoice.com
