@@ -100,20 +100,20 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | @react-native-community/cli-tools | 20.2.0 | MIT | https://github.com/react-native-community/cli |
 | @react-native-community/cli-types | 20.2.0 | MIT | https://github.com/react-native-community/cli |
 | @react-native-community/cli | 20.2.0 | MIT | https://github.com/react-native-community/cli |
-| @react-native/asset-utils | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/babel-plugin-codegen | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/babel-preset | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/codegen | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/community-cli-plugin | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/debugger-frontend | 0.87.1 | BSD-3-Clause | https://github.com/react/react-native |
-| @react-native/debugger-shell | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/dev-middleware | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/gradle-plugin | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/js-polyfills | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/metro-babel-transformer | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/metro-config | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/normalize-colors | 0.87.1 | MIT | https://github.com/react/react-native |
-| @react-native/virtualized-lists | 0.87.1 | MIT | https://github.com/react/react-native |
+| @react-native/asset-utils | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/babel-plugin-codegen | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/babel-preset | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/codegen | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/community-cli-plugin | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/debugger-frontend | 0.88.0 | BSD-3-Clause | https://github.com/react/react-native |
+| @react-native/debugger-shell | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/dev-middleware | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/gradle-plugin | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/js-polyfills | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/metro-babel-transformer | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/metro-config | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/normalize-colors | 0.88.0 | MIT | https://github.com/react/react-native |
+| @react-native/virtualized-lists | 0.88.0 | MIT | https://github.com/react/react-native |
 | @sideway/address | 4.1.5 | BSD-3-Clause | https://github.com/sideway/address |
 | @sideway/formula | 3.0.1 | BSD-3-Clause | https://github.com/sideway/formula |
 | @sideway/pinpoint | 2.0.0 | BSD-3-Clause | https://github.com/sideway/pinpoint |
@@ -146,7 +146,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | babel-plugin-polyfill-corejs2 | 0.4.17 | MIT | https://github.com/babel/babel-polyfills |
 | babel-plugin-polyfill-corejs3 | 0.13.0 | MIT | https://github.com/babel/babel-polyfills |
 | babel-plugin-polyfill-regenerator | 0.6.8 | MIT | https://github.com/babel/babel-polyfills |
-| babel-plugin-syntax-hermes-parser | 0.36.1 | MIT | https://github.com/facebook/hermes |
 | babel-plugin-transform-flow-enums | 0.0.2 | MIT | https://github.com/facebook/flow |
 | base64-js | 1.5.1 | MIT | https://github.com/beatgammit/base64-js |
 | baseline-browser-mapping | 2.11.32 | Apache-2.0 | https://github.com/web-platform-dx/baseline-browser-mapping |
@@ -165,8 +164,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | camelcase | 6.3.0 | MIT | https://github.com/sindresorhus/camelcase |
 | caniuse-lite | 1.0.30001819 | CC-BY-4.0 | https://github.com/browserslist/caniuse-lite |
 | chalk | 4.1.2 | MIT | https://github.com/chalk/chalk |
-| chrome-launcher | 0.15.2 | Apache-2.0 | https://github.com/GoogleChrome/chrome-launcher |
-| chromium-edge-launcher | 0.3.0 | Apache-2.0 | https://github.com/cezaraugusto/chromium-edge-launcher |
 | ci-info | 3.9.0 | MIT | https://github.com/watson/ci-info |
 | cli-cursor | 3.1.0 | MIT | https://github.com/sindresorhus/cli-cursor |
 | cli-spinners | 2.9.2 | MIT | https://github.com/sindresorhus/cli-spinners |
@@ -197,6 +194,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | decamelize | 1.2.0 | MIT | https://github.com/sindresorhus/decamelize |
 | deepmerge | 4.3.1 | MIT | https://github.com/TehShrike/deepmerge |
 | defaults | 1.0.4 | MIT | https://github.com/sindresorhus/node-defaults |
+| define-lazy-prop | 2.0.0 | MIT | https://github.com/sindresorhus/define-lazy-prop |
 | depd | 2.0.0 | MIT | https://github.com/dougwilson/nodejs-depd |
 | destroy | 1.2.0 | MIT | https://github.com/stream-utils/destroy |
 | dunder-proto | 1.0.1 | MIT | https://github.com/es-shims/dunder-proto |
@@ -215,7 +213,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | es-object-atoms | 1.1.2 | MIT | https://github.com/ljharb/es-object-atoms |
 | escalade | 3.2.0 | MIT | https://github.com/lukeed/escalade |
 | escape-html | 1.0.3 | MIT | https://github.com/component/escape-html |
-| escape-string-regexp | 4.0.0 | MIT | https://github.com/sindresorhus/escape-string-regexp |
 | etag | 1.8.1 | MIT | https://github.com/jshttp/etag |
 | execa | 5.1.1 | MIT | https://github.com/sindresorhus/execa |
 | exponential-backoff | 3.1.3 | Apache-2.0 | https://github.com/coveooss/exponential-backoff |
@@ -231,7 +228,9 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | find-up | 4.1.0 | MIT | https://github.com/sindresorhus/find-up |
 | find-up | 5.0.0 | MIT | https://github.com/sindresorhus/find-up |
 | flow-enums-runtime | 0.0.6 | MIT | https://github.com/facebook/flow |
+| flow-estree | 0.327.0 | MIT | https://github.com/facebook/flow |
 | flow-estree | 0.331.0 | MIT | https://github.com/facebook/flow |
+| flow-parser | 0.327.0 | MIT | https://github.com/facebook/flow |
 | flow-parser | 0.331.0 | MIT | https://github.com/facebook/flow |
 | fresh | 0.5.2 | MIT | https://github.com/jshttp/fresh |
 | fs-extra | 8.1.0 | MIT | https://github.com/jprichardson/node-fs-extra |
@@ -247,9 +246,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | has-flag | 4.0.0 | MIT | https://github.com/sindresorhus/has-flag |
 | has-symbols | 1.1.0 | MIT | https://github.com/inspect-js/has-symbols |
 | hasown | 2.0.4 | MIT | https://github.com/inspect-js/hasOwn |
-| hermes-compiler | 250829098.0.17 | MIT | https://github.com/facebook/hermes |
-| hermes-estree | 0.36.1 | MIT | https://github.com/facebook/hermes |
-| hermes-parser | 0.36.1 | MIT | https://github.com/facebook/hermes |
+| hermes-compiler | 260318099.0.4 | MIT | https://github.com/facebook/hermes |
 | http-errors | 2.0.1 | MIT | https://github.com/jshttp/http-errors |
 | https-proxy-agent | 7.0.6 | MIT | https://github.com/TooTallNate/proxy-agents |
 | human-signals | 2.1.0 | Apache-2.0 | https://github.com/ehmicky/human-signals |
@@ -288,7 +285,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | kleur | 3.0.3 | MIT | https://github.com/lukeed/kleur |
 | launch-editor | 2.14.2 | MIT | https://github.com/vitejs/launch-editor |
 | leven | 3.1.0 | MIT | https://github.com/sindresorhus/leven |
-| lighthouse-logger | 1.4.2 | Apache-2.0 |  |
 | lines-and-columns | 1.2.4 | MIT | https://github.com/eventualbuddha/lines-and-columns |
 | locate-path | 5.0.0 | MIT | https://github.com/sindresorhus/locate-path |
 | locate-path | 6.0.0 | MIT | https://github.com/sindresorhus/locate-path |
@@ -298,7 +294,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | logkitty | 0.7.1 | MIT | https://github.com/zamotany/logkitty |
 | loose-envify | 1.4.0 | MIT | https://github.com/zertosh/loose-envify |
 | lru-cache | 5.1.1 | ISC | https://github.com/isaacs/node-lru-cache |
-| marky | 1.3.0 | Apache-2.0 | https://github.com/nolanlawson/marky |
 | math-intrinsics | 1.1.0 | MIT | https://github.com/es-shims/math-intrinsics |
 | media-typer | 1.1.1 | MIT | https://github.com/jshttp/media-typer |
 | memoize-one | 5.2.1 | MIT | https://github.com/alexreardon/memoize-one |
@@ -326,7 +321,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | mime | 1.6.0 | MIT | https://github.com/broofa/node-mime |
 | mime | 2.6.0 | MIT | https://github.com/broofa/mime |
 | mimic-fn | 2.1.0 | MIT | https://github.com/sindresorhus/mimic-fn |
-| mkdirp | 1.0.4 | MIT | https://github.com/isaacs/node-mkdirp |
 | ms | 2.0.0 | MIT | https://github.com/zeit/ms |
 | ms | 2.1.3 | MIT | https://github.com/vercel/ms |
 | negotiator | 0.6.3 | MIT | https://github.com/jshttp/negotiator |
@@ -345,7 +339,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | on-headers | 1.1.0 | MIT | https://github.com/jshttp/on-headers |
 | onetime | 5.1.2 | MIT | https://github.com/sindresorhus/onetime |
 | open | 6.4.0 | MIT | https://github.com/sindresorhus/open |
-| open | 7.4.2 | MIT | https://github.com/sindresorhus/open |
+| open | 8.4.2 | MIT | https://github.com/sindresorhus/open |
 | ora | 5.4.1 | MIT | https://github.com/sindresorhus/ora |
 | p-limit | 2.3.0 | MIT | https://github.com/sindresorhus/p-limit |
 | p-limit | 3.1.0 | MIT | https://github.com/sindresorhus/p-limit |
@@ -371,9 +365,9 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | raw-body | 3.0.2 | MIT | https://github.com/stream-utils/raw-body |
 | react-devtools-core | 6.1.5 | MIT | https://github.com/facebook/react |
 | react-is | 18.3.1 | MIT | https://github.com/facebook/react |
-| react-native | 0.87.1 | MIT | https://github.com/react/react-native |
+| react-native | 0.88.0 | MIT | https://github.com/react/react-native |
 | react-refresh | 0.14.2 | MIT | https://github.com/facebook/react |
-| react | 19.2.3 | MIT | https://github.com/facebook/react |
+| react | 19.3.1 | MIT | https://github.com/react/react |
 | readable-stream | 3.6.2 | MIT | https://github.com/nodejs/readable-stream |
 | regenerate-unicode-properties | 10.3.0 | MIT | https://github.com/mathiasbynens/regenerate-unicode-properties |
 | regenerate | 1.5.0 | MIT | https://github.com/mathiasbynens/regenerate |
@@ -390,7 +384,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | run-parallel | 1.2.0 | MIT | https://github.com/feross/run-parallel |
 | safe-buffer | 5.2.1 | MIT | https://github.com/feross/safe-buffer |
 | safer-buffer | 2.1.2 | MIT | https://github.com/ChALkeR/safer-buffer |
-| scheduler | 0.27.0 | MIT | https://github.com/facebook/react |
+| scheduler | 0.28.0 | MIT | https://github.com/react/react |
 | semver | 6.3.1 | ISC | https://github.com/npm/node-semver |
 | semver | 7.8.5 | ISC | https://github.com/npm/node-semver |
 | send | 0.19.2 | MIT | https://github.com/pillarjs/send |
