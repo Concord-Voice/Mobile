@@ -172,6 +172,11 @@ not install a library or establish a remedy. The same sanitized
 diagnostics and cleanup metadata are printed to the job log for review.
 The iOS consumer starts a bounded live INFO log stream before launch and filters
 the result by app PID and nonce; it does not rely on historical log persistence.
+The probe pins the versions it proves: React Native and the Hermes engine in
+`scripts/native-runtime-probe/run.mjs`, and the emulator build in `devices.mjs`.
+A PR that bumps React Native must update those pins in the same change, or the
+probe refuses with `installed-version-mismatch` or
+`native-engine-selection-mismatch` before producing any evidence.
 The default application never imports the probe. Reproduce its runner contracts
 with `node --test scripts/native-runtime-probe/*.test.mjs`; use the workflow on
 hosted macOS/Linux for the actual native executions.
