@@ -3,7 +3,7 @@
 # rejects unquoted env values containing shell metacharacters and
 # mis-quoted patterns. Coverage:
 #
-# Rejected metachars: <, >, ;, space, backtick, $, |, &, \
+# Rejected metachars: <, >, ;, space, tab, backtick, $, |, &, \
 # Rejected patterns:
 #   - Unclosed quote (e.g. KEY="missing close)
 #   - Quoted value with trailing extra content (e.g. KEY="foo" "bar")
@@ -56,6 +56,7 @@ echo "check-env-file.sh test cases:"
 run_case "reject-angle-bracket"    'SMTP_FROM=Concord Voice <noreply@x.test>' 1
 run_case "reject-semicolon"        'EVIL=value; rm -rf /'                     1
 run_case "reject-unquoted-space"   'LABEL=hello world'                        1
+run_case "reject-unquoted-tab"     $'KEY=ok\tprintf\tENV_LINT_BYPASS'          1
 run_case "reject-backtick"         'EVIL=`id`'                                1
 run_case "reject-unclosed-quote"   'BROKEN="missing close'                    1
 # #725 post-review additions — metachars previously missed:

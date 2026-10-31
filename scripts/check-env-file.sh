@@ -6,7 +6,7 @@
 # expansion, pipelines, logical operators, or escape sequences instead
 # of literal text.
 #
-# Rejected metachars (unquoted): <, >, ;, space, backtick, $, |, &, \
+# Rejected metachars (unquoted): <, >, ;, space, tab, backtick, $, |, &, \
 # Rejected patterns:
 #   - A key that is not entirely [A-Z_][A-Z0-9_]*
 #   - $ or backtick inside a double-quoted value (bash still expands them)
@@ -212,6 +212,7 @@ for file in "$@"; do
     # Unquoted value — reject unsafe shell metacharacters. Each is a
     # real-world failure mode:
     #   space    — bash splits the value into tokens
+    #   tab      — also an IFS separator, so the same token split
     #   < >      — I/O redirection (the original SMTP_FROM line-15 bug)
     #   ;        — command separator
     #   `        — legacy command substitution
@@ -220,8 +221,8 @@ for file in "$@"; do
     #   &        — background execution or AND/OR chaining via &&/||
     #   \        — escape sequence that changes the next character
     case "$value" in
-      *' '*|*'<'*|*'>'*|*';'*|*'`'*|*'$'*|*'|'*|*'&'*|*'\'*)
-        echo "$file:$line_num: unquoted value contains shell metacharacter (one of: space, <, >, ;, \`, \$, |, &, \\): $line" >&2
+      *' '*|*$'\t'*|*'<'*|*'>'*|*';'*|*'`'*|*'$'*|*'|'*|*'&'*|*'\'*)
+        echo "$file:$line_num: unquoted value contains shell metacharacter (one of: space, tab, <, >, ;, \`, \$, |, &, \\): $line" >&2
         echo "  fix: wrap the value in single quotes — KEY='...' (double quotes still expand \$ and backticks)" >&2
         file_errors=$((file_errors + 1))
         ;;
