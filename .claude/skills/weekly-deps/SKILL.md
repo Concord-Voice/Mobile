@@ -545,8 +545,9 @@ Tier C deserves the most care. For each Tier C PR:
 4. **Run local tests if the bump touches buildable/runnable code.** Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:
 
    ```bash
-   # Per-directory override (preferred). $DIR is the PR's manifest directory.
-   LOCAL_CMDS="$(rc_get ".weekly_deps.local_test_cmds[\"$DIR\"] | join(\"\n\")" '')"
+   # Per-directory override (preferred). $DIR is the PR's manifest directory and comes
+   # from the PR, so pass it as data (--arg), never into the jq program text.
+   LOCAL_CMDS="$(jq -r --arg d "$DIR" '.weekly_deps.local_test_cmds[$d] // [] | join("\n")' "$RC_FILE" 2>/dev/null)"
    ```
 
    | Ecosystem | Default local-test commands (run from the manifest dir) |

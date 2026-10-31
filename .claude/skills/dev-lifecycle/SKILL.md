@@ -594,7 +594,7 @@ For each bot in the expected set, check two signals (drive both from its `.bots[
 
 ```bash
 # CI check status for this bot (only if the entry has a .ci_check)
-gh pr checks <PR> --json name,state,bucket --jq '.[] | select(.name == $c) | {state, bucket}' --arg c "<entry.ci_check>"
+gh pr checks <PR> --json name,state,bucket | jq --arg c "<entry.ci_check>" '.[] | select(.name == $c) | {state, bucket}'
 
 # Conversation comment from this bot: match a dedicated login by substring, OR a shared
 # login (e.g. github-actions[bot]) disambiguated by the entry's body marker.

@@ -365,7 +365,11 @@ validate_against_active_labels() {
     fi
 
     local allowlist
-    allowlist=$(sed -n '/^## Active labels/,/^## Deprecated labels/p' "$labels_file" \
+    # The Active section when the taxonomy has one; otherwise the whole file up to any
+    # Deprecated section (the bundled labels.md lists labels under namespace headings).
+    local active_range='/^## Active labels/,/^## Deprecated labels/p'
+    grep -q '^## Active labels' "$labels_file" || active_range='1,/^## Deprecated labels/p'
+    allowlist=$(sed -n "$active_range" "$labels_file" \
         | grep -oE "\`(${ns_regex}): [a-z0-9.-]+\`" \
         | sed 's/^`//; s/`$//' \
         | sort -u) || true

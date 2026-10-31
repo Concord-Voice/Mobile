@@ -23,9 +23,15 @@ find_prettier_dir() { # nearest ancestor (file dir → REPO_ROOT) with prettier 
 
 case "$FILE_PATH" in
   *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.css|*.scss|*.json|*.md|*.yaml|*.yml|*.html)
-    if command -v npx >/dev/null 2>&1; then
-      d="$(find_prettier_dir)"; [ -n "$d" ] && npx --prefix "$d" prettier --write "$FILE_PATH" 2>/dev/null
-    fi ;;
+    # Only the project's installed, lockfile-pinned prettier: npx would fetch the latest
+    # release from the registry when none is installed.
+    # Walk up from the config dir to REPO_ROOT so a hoisted workspace install is found.
+    d="$(find_prettier_dir)"
+    while [ -n "$d" ]; do
+      [ -x "$d/node_modules/.bin/prettier" ] && { "$d/node_modules/.bin/prettier" --write "$FILE_PATH" 2>/dev/null; break; }
+      [ -n "$REPO_ROOT" ] && [ "$d" != "$REPO_ROOT" ] && [ "$d" != "/" ] || break
+      d="$(dirname "$d")"
+    done ;;
 esac
 if [[ "$FILE_PATH" =~ \.go$ ]]; then
   command -v goimports >/dev/null 2>&1 && goimports -w "$FILE_PATH" 2>/dev/null

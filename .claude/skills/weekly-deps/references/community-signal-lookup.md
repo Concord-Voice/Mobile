@@ -53,7 +53,7 @@ case "$ECOSYSTEM" in
 esac
 
 gh api "/advisories?ecosystem=$ADVISORY_ECO&published=>$SINCE" \
-  --jq --arg pkg "$PKG" '
+  | jq --arg pkg "$PKG" '
     [.[]
      | . as $adv
      | (.vulnerabilities // [])

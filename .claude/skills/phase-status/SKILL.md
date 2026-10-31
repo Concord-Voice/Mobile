@@ -62,7 +62,25 @@ gh issue list \
 call, whichever is faster this session)
 
 ### Step 3: Group by priority
-Parse the label list on each issue for the labels in `$PRIORITY_LABELS` (Step 0;
+When a board is configured (`rc_has '.project'`), priority is the board's Priority
+field, not a label (see `.claude/rules/labels.md`). Read it per issue and bucket by
+the option names, in the order `.project.fields.priority.options` declares:
+
+```bash
+PN="$(rc_get '.project.number')"; PO="$(rc_get '.project.owner' '@me')"
+# --limit caps the total fetched, so ask for the whole board.
+TOTAL="$(gh project view "$PN" --owner "$PO" --format json --jq '.items.totalCount')"
+gh project item-list "$PN" --owner "$PO" --format json --limit "$TOTAL" \
+  | jq -r --arg repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+      '.items[] | select(.content.repository == $repo and .content.number != null)
+       | "\(.content.number)\t\(.priority // "")"'
+```
+
+A board can hold several repositories' issues, so the filter keeps only this repo's
+items before joining on issue number.
+
+Issues with no Priority value go into `Unprioritised`. Without a board, fall back
+to labels: parse the label list on each issue for the labels in `$PRIORITY_LABELS` (Step 0;
 default `P1`, `P2`, `P3`, `P4`, `P5`), and bucket in that array's order — it is
 declared highest-priority-first. A repo that declares `P1`-`P99`, or a different
 naming scheme entirely, groups by whatever it declared; do NOT assume five
@@ -153,8 +171,9 @@ Next action: [concrete recommendation based on the above]
 ```
 
 The `By Priority` rows above show the DEFAULT `P1`-`P5` scheme. Emit one row per
-entry in `$PRIORITY_LABELS` (Step 0), in that array's order, plus the `(none)`
-row — never a fixed five.
+bucket from Step 3, in that order: the board's `.project.fields.priority.options`
+when a board is configured, otherwise `$PRIORITY_LABELS` (Step 0). Add the `(none)`
+row for `Unprioritised` — never a fixed five.
 
 ## Recommendations
 

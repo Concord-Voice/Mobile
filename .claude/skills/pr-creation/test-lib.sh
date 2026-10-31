@@ -41,6 +41,12 @@ echo "$out3" | grep -qx "888" && fail "parse_pr_closes leaked a 3-backtick fence
     printf "type: bug\n" | validate_against_active_labels >/dev/null 2>&1' || fail "empty namespaces should no-op, not error"
   rm -rf "$tmpd" )
 
+# The bundled taxonomy (namespace headings, no "## Active labels") still yields an allowlist.
+( out="$(LABELS_FILE="$HERE/../../../../docs/rules/labels.md" LABEL_NAMESPACES="type area" bash -c '
+    source "'"$HERE"'/lib.sh"
+    printf "type: bug\ntype: nope\n" | validate_against_active_labels 2>/dev/null')" || fail "bundled labels.md should validate"
+  [ "$out" = "type: bug" ] || fail "bundled labels.md allowlist wrong: got '$out'" )
+
 # Fail-loud: a mutating helper with no project config aborts non-zero.
 ( unset PROJECT_ID STATUS_FIELD_ID
   RC_FILE=/nonexistent bash -c 'source "'"$HERE"'/lib.sh"; move_to_status 1 X 2>/dev/null' && fail "move_to_status should fail loud with no PROJECT_ID" || true )

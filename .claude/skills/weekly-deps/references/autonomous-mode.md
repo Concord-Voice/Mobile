@@ -123,7 +123,7 @@ EOF
 # Idempotency: a week-tagged comment may already exist (re-fire, retry, or a previous
 # partial failure). Look up the current week's marker BEFORE deciding POST vs PATCH.
 EXISTING_ID=$(gh api "/repos/$OWNER/$REPO/issues/$ISSUE_NUM/comments?per_page=100" \
-  --jq --arg m "<!-- routine-week: $WEEK_TAG -->" \
+  | jq -r --arg m "<!-- routine-week: $WEEK_TAG -->" \
   '[.[] | select(.body | contains($m))] | first | .id // empty')
 
 if [ -n "$EXISTING_ID" ]; then

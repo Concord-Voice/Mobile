@@ -56,7 +56,13 @@ gh issue view $0 --json body --jq '.body' | grep -oE '#[0-9]+' | sort -u
 
 ## Step 4: Identify subissues
 
-Subissues are issues referenced in checkbox lists in the body (e.g., `- [ ] #123` or `- [x] #456`). Extract them from the body:
+Children are attached as native sub-issues (REST `/sub_issues`, per `.claude/rules/release-tracking-epics.md`). Fetch those first:
+
+```bash
+gh api "repos/{owner}/{repo}/issues/$0/sub_issues?per_page=100" --jq '.[] | "\(.number)\t\(.state)\t\(.title)"'
+```
+
+Only when that returns nothing, fall back to legacy checkbox references in the body (e.g., `- [ ] #123` or `- [x] #456`):
 
 ```bash
 gh issue view $0 --json body --jq '.body' | grep -oE '\- \[[ x]\] #[0-9]+' | grep -oE '[0-9]+' | sort -u
