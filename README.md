@@ -115,6 +115,23 @@ npm run ios                                         # or: npm run android
 
 `bundle install` needs Ruby 3.2 or newer, so install one with Homebrew or rbenv first; macOS's system Ruby 2.6 is too old.
 
+`npm ci` also applies a bounded Android build compatibility patch: React Native
+0.88.0's included Gradle build selects Kotlin 2.2.0, which cannot read Gradle
+9.8.2's embedded Kotlin 2.4 metadata. The postinstall script requires the exact
+RN/plugin versions and catalog bytes, changes only the Kotlin selection to
+2.4.21, and refuses unexpected dependency changes. The app uses the same Kotlin
+version. Gradle stays at 9.8.2 with its official distribution checksum: reverting
+to the template's 9.4.1 would restore vulnerabilities
+[GHSA-j5m7-59rp-24f5](https://github.com/gradle/gradle/security/advisories/GHSA-j5m7-59rp-24f5),
+[GHSA-xwqc-3h47-hg64](https://github.com/gradle/gradle/security/advisories/GHSA-xwqc-3h47-hg64)
+and [GHSA-mvvg-497x-hmj8](https://github.com/gradle/gradle/security/advisories/GHSA-mvvg-497x-hmj8).
+Reassess this patch on each RN upgrade; remove it when the upstream included
+build reads the secure wrapper's metadata and the settings-plugin compilation
+and full Android build pass without it. The metadata compatibility regression
+test alone does not establish native build or runtime compatibility.
+
+The secret-scan baseline records the two public Gradle-plugin catalog SHA-256 pins as audited false positives. Both are reproduced from the pristine catalog fixture and its Kotlin-only replacement; detector rules and filters remain unchanged.
+
 The repository refuses keystore files, so Android debug builds need a local one:
 
 ```sh
