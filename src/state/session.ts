@@ -16,6 +16,10 @@ import {
 import { Platform } from 'react-native';
 import { nativeAttester } from '../ConcordAttest';
 import {
+  WsRateLimitedError,
+  WsReconnectCooldownError,
+} from '../core/wsEventBudget';
+import {
   ApiError,
   type ClientInfo,
   clientVersion,
@@ -91,6 +95,10 @@ function persist(at: Origin, saved: SavedSession | null): void {
 
 /** What a person sees: never a raw server body, which may echo their input. */
 export function describeError(error: unknown): string {
+  if (error instanceof WsReconnectCooldownError)
+    return 'The server is busy. Wait a moment, then go back and reopen this conversation.';
+  if (error instanceof WsRateLimitedError)
+    return 'The server is busy. Try again later.';
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Wrong email, password or code.';
     if (error.status === 429) return 'Too many attempts. Try again later.';
@@ -177,8 +185,10 @@ export function createSessionStore(
     /** knownUserId: the account a resumed session belongs to, before any stage says so. */
     const connect = (at: Origin, knownUserId?: string): ConcordApi => {
       const api = makeApi(at.server, at.machineId);
+      get().api?.wsReconnect.retire();
       api.onExpired = () => {
         if (get().api !== api) return;
+        api.wsReconnect.retire();
         // The api has already dropped its session, so its userId is gone: read ours.
         const { stage } = get();
         const userId = stage.kind === 'signed_in' ? stage.userId : knownUserId;
@@ -379,6 +389,7 @@ export function createSessionStore(
 
       signOut: async () => {
         const { api, stage } = get();
+        api?.wsReconnect.retire();
         const at = origin;
         pendingPassword = null;
         set({

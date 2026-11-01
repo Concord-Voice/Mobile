@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -40,20 +40,38 @@ export function Chat({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const liveConversation = useRef<typeof conversation>(null);
 
   useEffect(() => {
     if (!conversation) return;
-    conversation.onChange = refresh;
+    liveConversation.current = conversation;
+    let live = true;
+    setLoading(true);
+    setSending(false);
+    setError(null);
+    conversation.onChange = () => {
+      if (live) refresh();
+    };
     conversation
       .start()
-      .catch(e => setError(describeError(e)))
-      .finally(() => setLoading(false));
-    return () => conversation.close();
+      .catch(e => {
+        if (live) setError(describeError(e));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+      liveConversation.current = null;
+      conversation.onChange = null;
+      conversation.close();
+    };
   }, [conversation]);
 
   const send = async () => {
     const text = draft.trim();
-    if (!conversation || !text) return;
+    if (!conversation || liveConversation.current !== conversation || !text)
+      return;
     setSending(true);
     setError(null);
     // Cleared now, so edits made while sending are kept; restored if the send fails.
@@ -61,10 +79,12 @@ export function Chat({
     try {
       await conversation.send(text);
     } catch (e) {
-      setDraft(current => current || text);
-      setError(describeError(e));
+      if (liveConversation.current === conversation) {
+        setDraft(current => current || text);
+        setError(describeError(e));
+      }
     } finally {
-      setSending(false);
+      if (liveConversation.current === conversation) setSending(false);
     }
   };
 

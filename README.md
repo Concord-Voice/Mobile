@@ -80,7 +80,12 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   as on desktop. A message that will not decrypt, or whose key cannot be loaded, is
   shown as such, never dropped, and sends no read receipt. Live messages that arrive
   while history loads merge into it in order. A dropped socket is shown; reopening the
-  conversation reconnects. Not yet: older pages, starting a new DM, starting a key
+  conversation reconnects. A server overload close (1013) pauses manual reopening
+  across conversations for the server's validated 100–30000 ms delay (1000 ms if its
+  reason is invalid). The pause survives token refresh within that sign-in; expiry
+  never opens a socket automatically. Valid budget advisories fail pending operations
+  with a local busy message; malformed advisories are ignored, and operations are
+  never replayed automatically. Not yet: older pages, starting a new DM, starting a key
   rotation, edits, reactions, attachments and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,

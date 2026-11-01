@@ -1,4 +1,8 @@
 import { ApiError, type ConcordApi } from '../core/ConcordApi';
+import {
+  WsRateLimitedError,
+  WsReconnectCooldownError,
+} from '../core/wsEventBudget';
 import { createSessionStore, describeError } from '../state/session';
 
 jest.mock('../ConcordCrypto', () => ({
@@ -44,8 +48,17 @@ const KEYS = {
 };
 
 function fakeApi(overrides: Partial<Record<string, jest.Mock>> = {}) {
+  const wsReconnect = {
+    active: true,
+    assertCanOpen: jest.fn(),
+    recordOverload: jest.fn(),
+    retire: jest.fn(function (this: { active: boolean }) {
+      this.active = false;
+    }),
+  };
   const api = {
     userId: 'user-1',
+    wsReconnect,
     onExpired: null as (() => void) | null,
     onRotated: null as (() => void) | null,
     tokens: { refreshToken: 'rt-1', sessionId: 'sess-1', userId: 'user-1' },
@@ -229,6 +242,68 @@ describe('session store', () => {
     api.tokens = { ...api.tokens, refreshToken: 'rt-2' };
     api.onRotated?.();
     expect(lastSaved().refreshToken).toBe('rt-2');
+    expect(useStore.getState().api).toBe(api);
+    expect(api.wsReconnect.active).toBe(true);
+    expect(api.wsReconnect.retire).not.toHaveBeenCalled();
+  });
+
+  it('retires the old reconnect owner before publishing a replacement API', async () => {
+    const first = fakeApi();
+    const second = fakeApi();
+    const makeApi = jest
+      .fn<ConcordApi, [string, string]>()
+      .mockReturnValueOnce(first as unknown as ConcordApi)
+      .mockReturnValueOnce(second as unknown as ConcordApi);
+    const useStore = createSessionStore(makeApi);
+    useStore.setState({ stage: { kind: 'signed_out' } });
+    await useStore.getState().signIn('https://first.test', 'a', 'pw');
+    expect(useStore.getState().api).toBe(first);
+    const published: boolean[] = [];
+    const unsubscribe = useStore.subscribe(state => {
+      if (state.api === (second as unknown as ConcordApi))
+        published.push(first.wsReconnect.active);
+    });
+    await useStore.getState().signIn('https://second.test', 'b', 'pw');
+    unsubscribe();
+    expect(first.wsReconnect.retire).toHaveBeenCalledTimes(1);
+    expect(published.length).toBeGreaterThan(0);
+    expect(published.every(active => active === false)).toBe(true);
+    expect(second.wsReconnect.active).toBe(true);
+    expect(second.wsReconnect.retire).not.toHaveBeenCalled();
+  });
+
+  it('retires the owned reconnect gate before expiry publishes signed-out state', async () => {
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    const published: boolean[] = [];
+    const unsubscribe = useStore.subscribe(state => {
+      if (state.stage.kind === 'signed_out' && state.api === null)
+        published.push(api.wsReconnect.active);
+    });
+    api.onExpired?.();
+    unsubscribe();
+    expect(api.wsReconnect.retire).toHaveBeenCalledTimes(1);
+    expect(published).toEqual([false]);
+  });
+
+  it('retires the reconnect owner synchronously when sign-out begins', async () => {
+    const api = fakeApi();
+    const { useStore } = store(api);
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    let finishLogout!: () => void;
+    api.logout.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishLogout = resolve;
+        }),
+    );
+    const pending = useStore.getState().signOut();
+    expect(api.wsReconnect.retire).toHaveBeenCalledTimes(1);
+    expect(api.wsReconnect.active).toBe(false);
+    expect(useStore.getState().api).toBeNull();
+    finishLogout();
+    await pending;
   });
 
   it('saves nothing when the device has no biometrics', async () => {
@@ -511,6 +586,12 @@ describe('session store unlock failures and races', () => {
 
 describe('describeError', () => {
   it('maps failures to plain messages', () => {
+    expect(describeError(new WsReconnectCooldownError(1000))).toBe(
+      'The server is busy. Wait a moment, then go back and reopen this conversation.',
+    );
+    expect(describeError(new WsRateLimitedError('content', 30000))).toBe(
+      'The server is busy. Try again later.',
+    );
     expect(describeError(new ApiError(429, undefined))).toMatch(/Too many/);
     expect(describeError(new ApiError(403, 'ATTESTATION_MISSING'))).toMatch(
       /does not accept this app/,
