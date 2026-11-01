@@ -30,9 +30,9 @@ const validDelay = (value: unknown): value is number =>
 
 export function parseWsRetryAfterMs(reason: unknown): number {
   if (typeof reason !== 'string') return 1000;
-  const match = /^retry_after_ms=([1-9][0-9]{2,4})$/.exec(reason);
+  const match = /^retry_after_ms=([1-9]\d{2,4})$/.exec(reason);
   // `$` also matches before a final newline: require the whole native reason.
-  if (!match || match[0].length !== reason.length) return 1000;
+  if (match?.[0].length !== reason.length) return 1000;
   const value = Number(match[1]);
   return validDelay(value) ? value : 1000;
 }
@@ -74,7 +74,7 @@ export function parseBudgetError(data: unknown): WsErrorData | null {
     'retry_after_ms' in input
   ) {
     if (
-      !EVENT_CLASSES.some(value => value === input.event_class) ||
+      !(EVENT_CLASSES as readonly unknown[]).includes(input.event_class) ||
       !validDelay(input.retry_after_ms)
     )
       return null;
