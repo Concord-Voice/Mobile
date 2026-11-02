@@ -1,5 +1,6 @@
-import type { ConcordApi } from '../core/ConcordApi';
-import type { DmMessage, DmSocket } from '../core/DmSocket';
+import { ConcordApi } from '../core/ConcordApi';
+import { DmSocket, type DmMessage, type DmSocketOpenOptions, type SocketLike } from '../core/DmSocket';
+import { WsReconnectCooldownError } from '../core/wsEventBudget';
 import { Conversation } from '../state/conversation';
 import type { KeyHandle } from '../ConcordCrypto';
 
@@ -32,8 +33,33 @@ const row = (id: string, content: string, keyVersion = 1, userId = PEER) => ({
   createdAt: 't',
 });
 
+// Caller seam fake: pure gate grammar/lifetime vectors live in wsEventBudget.test.
+function reconnectGate() {
+  let now = 0;
+  let retryNotBefore = 0;
+  const gate = {
+    active: true,
+    assertCanOpen: jest.fn(() => {
+      if (!gate.active) throw new Error('retired owner');
+      if (now < retryNotBefore) throw new Error('reconnect cooldown');
+    }),
+    recordOverload: jest.fn((delay: number) => {
+      if (gate.active) retryNotBefore = Math.max(retryNotBefore, now + delay);
+    }),
+    retire: jest.fn(() => {
+      gate.active = false;
+    }),
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+  return gate;
+}
+
 function setup(history = [row('m1', '1:hi'), row('m2', '2:rotated', 2)]) {
+  const gate = reconnectGate();
   const api = {
+    wsReconnect: gate,
     dmHistory: jest.fn(async () => history),
     dmKey: jest.fn(async (_id: string, version?: number) => ({
       wrappedKey: `w${version ?? 2}`,
@@ -50,7 +76,9 @@ function setup(history = [row('m1', '1:hi'), row('m2', '2:rotated', 2)]) {
     send: jest.fn(async () => 'sent-1'),
     close: jest.fn(),
   };
-  const openSocket = jest.fn(async () => socket as unknown as DmSocket);
+  const openSocket = jest.fn(
+    async (_url: string, _options?: unknown) => socket as unknown as DmSocket,
+  );
   const conv = new Conversation(
     api as unknown as ConcordApi,
     'ID' as KeyHandle,
@@ -60,7 +88,7 @@ function setup(history = [row('m1', '1:hi'), row('m2', '2:rotated', 2)]) {
   );
   const changes = jest.fn();
   conv.onChange = changes;
-  return { api, socket, openSocket, conv, changes };
+  return { api, gate, socket, openSocket, conv, changes };
 }
 
 const flush = () => new Promise(setImmediate);
@@ -75,7 +103,14 @@ test('decrypts history under each message epoch and follows live', async () => {
   expect(api.dmKey).toHaveBeenCalledWith('c1', 2);
   expect(crypto.unwrapChannelKey).toHaveBeenCalledWith('w1', 'ID');
   expect(api.markDmRead).toHaveBeenCalledWith('c1');
-  expect(openSocket).toHaveBeenCalledWith('wss://x/ws?ticket=tkt');
+  expect(openSocket).toHaveBeenCalledWith(
+    'wss://x/ws?ticket=tkt',
+    expect.objectContaining({
+      isCurrent: expect.any(Function),
+      onOverload: expect.any(Function),
+      signal: expect.any(Object),
+    }),
+  );
   expect(socket.subscribe).toHaveBeenCalledWith('c1');
 
   socket.onMessage?.({
@@ -549,4 +584,333 @@ test('flushes a pending read receipt after a queued send', async () => {
   await sending;
   expect(conv.lines.map(l => l.id)).toEqual(['in', 'sent-1']);
   expect(api.markDmRead).toHaveBeenCalledTimes(1);
+});
+
+test('shares a 1013 manual-reopen floor across DMs without scheduling an open', async () => {
+  const { api, gate, conv, openSocket, socket } = setup([]);
+  await conv.start();
+  const firstOptions = openSocket.mock.calls[0][1] as {
+    isCurrent: () => boolean;
+    onOverload: (ms: number) => void;
+    signal: AbortSignal;
+  };
+  expect(firstOptions.isCurrent()).toBe(true);
+  firstOptions.onOverload(3000);
+  expect(gate.recordOverload).toHaveBeenCalledWith(3000);
+  conv.close();
+  expect(firstOptions.isCurrent()).toBe(false);
+  expect(firstOptions.signal.aborted).toBe(true);
+  // Closing one screen must not retire the shared API owner.
+  expect(gate.active).toBe(true);
+
+  const otherDm = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c2',
+    ME,
+    openSocket,
+  );
+  await expect(otherDm.start()).rejects.toThrow('reconnect cooldown');
+  expect(api.wsTicket).toHaveBeenCalledTimes(1);
+  expect(openSocket).toHaveBeenCalledTimes(1);
+  expect(socket.subscribe).not.toHaveBeenCalledWith('c2');
+
+  gate.advance(2999);
+  // Time passing must not auto-reopen.
+  expect(api.wsTicket).toHaveBeenCalledTimes(1);
+  const stillEarly = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c2',
+    ME,
+    openSocket,
+  );
+  await expect(stillEarly.start()).rejects.toThrow('reconnect cooldown');
+  expect(api.wsTicket).toHaveBeenCalledTimes(1);
+  gate.advance(1);
+  // Equality permits only a later manual action.
+  expect(api.wsTicket).toHaveBeenCalledTimes(1);
+  const manualReopen = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c2',
+    ME,
+    openSocket,
+  );
+  await manualReopen.start();
+  expect(api.wsTicket).toHaveBeenCalledTimes(2);
+  expect(openSocket).toHaveBeenCalledTimes(2);
+  expect(socket.subscribe).toHaveBeenCalledWith('c2');
+  manualReopen.close();
+
+  const fresh = setup([]);
+  await fresh.conv.start();
+  expect(fresh.api.wsTicket).toHaveBeenCalledTimes(1);
+  expect(fresh.gate.active).toBe(true);
+  fresh.conv.close();
+});
+
+test('an actual native 1013 close in DmSocket blocks a different DM on the same API', async () => {
+  const { api, gate } = setup([]);
+  const native = {
+    send: jest.fn(),
+    close: jest.fn(),
+    onopen: null as (() => void) | null,
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    onerror: null as (() => void) | null,
+    onclose: null as
+      | ((event: { code?: unknown; reason?: unknown }) => void)
+      | null,
+  };
+  const openSocket = jest.fn(
+    (url: string, options?: unknown) =>
+      Reflect.apply(DmSocket.open, DmSocket, [
+        url,
+        () => native as unknown as SocketLike,
+        15000,
+        options,
+      ]) as Promise<DmSocket>,
+  );
+  const first = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c1',
+    ME,
+    openSocket,
+  );
+  const starting = first.start();
+  await flush();
+  expect(native.onopen).not.toBeNull();
+  (native.onopen as unknown as () => void)();
+  await flush();
+  expect(native.onmessage).not.toBeNull();
+  (native.onmessage as unknown as (event: { data: unknown }) => void)({
+    data: JSON.stringify({
+      type: 'dm_subscribed',
+      data: { conversation_id: 'c1' },
+    }),
+  });
+  await starting;
+  expect(native.send).toHaveBeenCalledWith(
+    JSON.stringify({ type: 'subscribe_dm', data: { conversation_id: 'c1' } }),
+  );
+  expect(native.onclose).not.toBeNull();
+  (
+    native.onclose as unknown as (event: {
+      code?: unknown;
+      reason?: unknown;
+    }) => void
+  )({
+    code: 1013,
+    reason: 'retry_after_ms=3000',
+  });
+  expect(first.dropped).toBe(true);
+  expect(gate.recordOverload).toHaveBeenCalledWith(3000);
+  first.close();
+
+  // A wrong extra factory invocation fails immediately in the pre-fix source.
+  openSocket.mockImplementation(() =>
+    Promise.reject(new Error('unexpected socket open')),
+  );
+  const second = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c2',
+    ME,
+    openSocket,
+  );
+  await expect(second.start()).rejects.toThrow('reconnect cooldown');
+  expect(api.wsTicket).toHaveBeenCalledTimes(1);
+  expect(openSocket).toHaveBeenCalledTimes(1);
+});
+
+test('native 1013 uses the real API-owned gate across DMs until an exact manual reopen', async () => {
+  class NativeDmSocket implements SocketLike {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((event?: { code?: unknown; reason?: unknown }) => void) | null = null;
+    sent: string[] = [];
+    send(data: string): void { this.sent.push(data); }
+    close(): void {}
+    open(): void { this.onopen?.(); }
+    frame(type: string, data: Record<string, unknown>): void {
+      this.onmessage?.({ data: JSON.stringify({ type, data }) });
+    }
+    end(code: number, reason: string): void { this.onclose?.({ code, reason }); }
+  }
+
+  jest.useFakeTimers();
+  try {
+    const fetchImpl = jest.fn(async (url: string, _init: RequestInit) => {
+      let body: Record<string, unknown>;
+      if (url.endsWith('/auth/ws-ticket')) body = { ticket: 'ticket' };
+      else if (url.endsWith('/messages')) body = { messages: [] };
+      else if (url.endsWith('/read')) body = {};
+      else throw new Error('unexpected HTTP route');
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    const ticketCalls = () => fetchImpl.mock.calls.filter(([url]) =>
+      url.endsWith('/auth/ws-ticket'),
+    ).length;
+    const api = new ConcordApi(
+      'https://x.test', 'machine-id', fetchImpl as unknown as typeof fetch,
+    );
+    const owner = api.wsReconnect;
+    const nativeSockets: NativeDmSocket[] = [];
+    const createNative = jest.fn(() => {
+      const native = new NativeDmSocket();
+      nativeSockets.push(native);
+      return native;
+    });
+    const openSocket = jest.fn((url: string, options: DmSocketOpenOptions) =>
+      DmSocket.open(url, createNative, 15000, options),
+    );
+    const microtasks = async () => {
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    };
+    const first = new Conversation(api, 'ID' as KeyHandle, 'first-dm', ME, openSocket);
+    const firstStart = first.start();
+    await microtasks();
+    expect(nativeSockets).toHaveLength(1);
+    nativeSockets[0].open();
+    await microtasks();
+    nativeSockets[0].frame('dm_subscribed', { conversation_id: 'first-dm' });
+    await firstStart;
+    expect(api.wsReconnect).toBe(owner);
+    expect(ticketCalls()).toBe(1);
+    expect(nativeSockets[0].sent).toEqual([
+      JSON.stringify({ type: 'subscribe_dm', data: { conversation_id: 'first-dm' } }),
+    ]);
+
+    nativeSockets[0].end(1013, 'retry_after_ms=3000');
+    expect(first.dropped).toBe(true);
+    first.close();
+    const freshApi = new ConcordApi(
+      'https://other.test', 'new-machine-id', fetchImpl as unknown as typeof fetch,
+    );
+    expect(freshApi.wsReconnect).not.toBe(owner);
+    expect(() => freshApi.wsReconnect.assertCanOpen()).not.toThrow();
+    const otherDm = new Conversation(api, 'ID' as KeyHandle, 'second-dm', ME, openSocket);
+    await expect(otherDm.start()).rejects.toBeInstanceOf(WsReconnectCooldownError);
+    expect(ticketCalls()).toBe(1);
+    expect(createNative).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(2999);
+    await microtasks();
+    expect(ticketCalls()).toBe(1);
+    expect(createNative).toHaveBeenCalledTimes(1);
+    const stillEarly = new Conversation(api, 'ID' as KeyHandle, 'second-dm', ME, openSocket);
+    await expect(stillEarly.start()).rejects.toMatchObject({ retryAfterMs: 1 });
+    expect(ticketCalls()).toBe(1);
+    jest.advanceTimersByTime(1);
+    await microtasks();
+    expect(ticketCalls()).toBe(1);
+    expect(createNative).toHaveBeenCalledTimes(1);
+
+    const reopened = new Conversation(api, 'ID' as KeyHandle, 'second-dm', ME, openSocket);
+    const manualStart = reopened.start();
+    await microtasks();
+    expect(nativeSockets).toHaveLength(2);
+    nativeSockets[1].open();
+    await microtasks();
+    nativeSockets[1].frame('dm_subscribed', { conversation_id: 'second-dm' });
+    await manualStart;
+    expect(ticketCalls()).toBe(2);
+    expect(openSocket).toHaveBeenCalledTimes(2);
+    expect(nativeSockets[1].sent).toEqual([
+      JSON.stringify({ type: 'subscribe_dm', data: { conversation_id: 'second-dm' } }),
+    ]);
+    expect(api.wsReconnect).toBe(owner);
+    reopened.close();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.each(['closed', 'retired', 'cooldown'] as const)(
+  'discards a pending ticket before socket construction when owner is %s',
+  async reason => {
+    const { api, gate, conv, openSocket, socket } = setup([]);
+    let finishTicket!: (ticket: string) => void;
+    api.wsTicket.mockImplementationOnce(
+      () =>
+        new Promise<string>(resolve => {
+          finishTicket = resolve;
+        }),
+    );
+    const starting = conv.start();
+    await flush();
+    expect(api.wsTicket).toHaveBeenCalledTimes(1);
+    if (reason === 'closed') conv.close();
+    else if (reason === 'retired') gate.retire();
+    else gate.recordOverload(5000);
+    finishTicket('late-ticket');
+    await Promise.allSettled([starting]);
+    expect(openSocket).not.toHaveBeenCalled();
+    expect(socket.subscribe).not.toHaveBeenCalled();
+    expect(api.dmHistory).not.toHaveBeenCalled();
+    expect(api.dmKey).not.toHaveBeenCalled();
+    expect(crypto.unwrapChannelKey).not.toHaveBeenCalled();
+    if (reason === 'closed') expect(gate.active).toBe(true);
+  },
+);
+
+test('aborts a pending socket open and closes a late returned socket before subscribe', async () => {
+  const { api, gate, socket } = setup([]);
+  let finishOpen!: (socket: DmSocket) => void;
+  const openSocket = jest.fn(
+    (_url: string, _options?: unknown) =>
+      new Promise<DmSocket>(resolve => {
+        finishOpen = resolve;
+      }),
+  );
+  const conv = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c1',
+    ME,
+    openSocket,
+  );
+  const starting = conv.start();
+  await flush();
+  expect(openSocket).toHaveBeenCalledTimes(1);
+  const options = openSocket.mock.calls[0][1] as {
+    isCurrent: () => boolean;
+    onOverload: (ms: number) => void;
+    signal: AbortSignal;
+  };
+  conv.close();
+  expect(options.signal.aborted).toBe(true);
+  expect(options.isCurrent()).toBe(false);
+  options.onOverload(3000);
+  expect(gate.recordOverload).not.toHaveBeenCalled();
+  finishOpen(socket as unknown as DmSocket);
+  await Promise.allSettled([starting]);
+  expect(socket.close).toHaveBeenCalledTimes(1);
+  expect(socket.subscribe).not.toHaveBeenCalled();
+  expect(api.dmHistory).not.toHaveBeenCalled();
+});
+
+test('a retired owner ignores a saved overload callback and cannot start another DM', async () => {
+  const { api, gate, conv, openSocket } = setup([]);
+  await conv.start();
+  const options = openSocket.mock.calls[0][1] as {
+    isCurrent: () => boolean;
+    onOverload: (ms: number) => void;
+  };
+  gate.retire();
+  expect(options.isCurrent()).toBe(false);
+  options.onOverload(3000);
+  expect(gate.recordOverload).not.toHaveBeenCalled();
+  const next = new Conversation(
+    api as unknown as ConcordApi,
+    'ID' as KeyHandle,
+    'c2',
+    ME,
+    openSocket,
+  );
+  await expect(next.start()).rejects.toThrow('retired owner');
+  expect(api.wsTicket).toHaveBeenCalledTimes(1);
+  expect(openSocket).toHaveBeenCalledTimes(1);
 });

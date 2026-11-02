@@ -120,6 +120,12 @@ test('lists DM conversations once signed in', async () => {
 
 test('opens a conversation from the list and comes back', async () => {
   const api = {
+    wsReconnect: {
+      active: true,
+      assertCanOpen: jest.fn(),
+      recordOverload: jest.fn(),
+      retire: jest.fn(),
+    },
     conversations: jest.fn(async () => [
       { id: 'd1', title: 'Peer', unreadCount: 0, lastActivity: 'now' },
     ]),
@@ -267,4 +273,196 @@ test('sends a message and shows decrypted lines', async () => {
   await ReactTestRenderer.act(() => mounted?.unmount());
   mounted = null;
   expect(fake.close).toHaveBeenCalled();
+});
+
+test.each(['late error', 'late success'] as const)(
+  'ignores %s from an old Chat start after replacing the conversation',
+  async outcome => {
+    let settleOld!: (error?: Error) => void;
+    let finishNew!: () => void;
+    const old = {
+      lines: [],
+      dropped: false,
+      onChange: null,
+      start: jest.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            settleOld = error => (error ? reject(error) : resolve());
+          }),
+      ),
+      send: jest.fn(async () => {}),
+      close: jest.fn(),
+    };
+    const replacement = {
+      lines: [],
+      dropped: false,
+      onChange: null,
+      start: jest.fn(
+        () =>
+          new Promise<void>(resolve => {
+            finishNew = resolve;
+          }),
+      ),
+      send: jest.fn(async () => {}),
+      close: jest.fn(),
+    };
+    useSession.setState({
+      stage: { kind: 'signed_in', userId: 'u' },
+      api: {} as ConcordApi,
+      identity: 'HANDLE' as never,
+    });
+    const firstDm = {
+      id: 'd1',
+      title: 'First',
+      unreadCount: 0,
+      lastActivity: 'now',
+    };
+    const nextDm = {
+      id: 'd2',
+      title: 'Second',
+      unreadCount: 0,
+      lastActivity: 'now',
+    };
+    const open = (
+      ...args: ConstructorParameters<
+        typeof import('../src/state/conversation').Conversation
+      >
+    ) => (args[2] === 'd1' ? old : replacement);
+    await ReactTestRenderer.act(async () => {
+      mounted = ReactTestRenderer.create(
+        <Chat dm={firstDm} onBack={() => {}} open={open} />,
+      );
+    });
+    const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+    expect(text(tree)).toContain('Decrypting messages');
+    await ReactTestRenderer.act(async () => {
+      mounted?.update(<Chat dm={nextDm} onBack={() => {}} open={open} />);
+    });
+    expect(old.close).toHaveBeenCalledTimes(1);
+    expect(replacement.start).toHaveBeenCalledTimes(1);
+
+    await ReactTestRenderer.act(async () => {
+      settleOld(
+        outcome === 'late error' ? new Error('old server secret') : undefined,
+      );
+      await Promise.resolve();
+    });
+    expect(text(tree)).toContain('Second');
+    expect(text(tree)).toContain('Decrypting messages');
+    expect(text(tree)).not.toContain('Could not reach the server');
+    expect(text(tree)).not.toContain('old server secret');
+    expect(text(tree)).not.toContain('No messages yet');
+
+    await ReactTestRenderer.act(async () => {
+      finishNew();
+      await Promise.resolve();
+    });
+    expect(text(tree)).toContain('No messages yet');
+  },
+);
+
+test('an old Chat send failure cannot restore its draft, error or sending state over a replacement', async () => {
+  let rejectOld!: (error: Error) => void;
+  let finishNew!: () => void;
+  const old = {
+    lines: [],
+    dropped: false,
+    onChange: null,
+    start: jest.fn(async () => {}),
+    send: jest.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectOld = reject;
+        }),
+    ),
+    close: jest.fn(),
+  };
+  const replacement = {
+    lines: [],
+    dropped: false,
+    onChange: null,
+    start: jest.fn(async () => {}),
+    send: jest.fn(
+      () =>
+        new Promise<void>(resolve => {
+          finishNew = resolve;
+        }),
+    ),
+    close: jest.fn(),
+  };
+  useSession.setState({
+    stage: { kind: 'signed_in', userId: 'u' },
+    api: {} as ConcordApi,
+    identity: 'HANDLE' as never,
+  });
+  const firstDm = {
+    id: 'd1',
+    title: 'First',
+    unreadCount: 0,
+    lastActivity: 'now',
+  };
+  const nextDm = {
+    id: 'd2',
+    title: 'Second',
+    unreadCount: 0,
+    lastActivity: 'now',
+  };
+  const open = (
+    ...args: ConstructorParameters<
+      typeof import('../src/state/conversation').Conversation
+    >
+  ) => (args[2] === 'd1' ? old : replacement);
+  await ReactTestRenderer.act(async () => {
+    mounted = ReactTestRenderer.create(
+      <Chat dm={firstDm} onBack={() => {}} open={open} />,
+    );
+  });
+  const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+  const input = () => tree.root.findByProps({ accessibilityLabel: 'Message' });
+  const sendButton = () =>
+    tree.root.findAll(
+      n => n.props.accessibilityLabel === 'Send' && !!n.props.onPress,
+    )[0];
+  await ReactTestRenderer.act(async () =>
+    input().props.onChangeText('old draft'),
+  );
+  let oldPending!: Promise<void>;
+  await ReactTestRenderer.act(async () => {
+    oldPending = sendButton().props.onPress();
+  });
+  expect(old.send).toHaveBeenCalledWith('old draft');
+
+  await ReactTestRenderer.act(async () => {
+    mounted?.update(<Chat dm={nextDm} onBack={() => {}} open={open} />);
+  });
+  expect(old.close).toHaveBeenCalledTimes(1);
+  await ReactTestRenderer.act(async () =>
+    input().props.onChangeText('new draft'),
+  );
+  // Invoke the controlled handler to stage a successor send while its predecessor
+  // is still pending; this isolates stale completion from button disable policy.
+  let newPending!: Promise<void>;
+  await ReactTestRenderer.act(async () => {
+    newPending = sendButton().props.onPress();
+  });
+  expect(replacement.send).toHaveBeenCalledWith('new draft');
+
+  await ReactTestRenderer.act(async () => {
+    rejectOld(new Error('old server text must stay private'));
+    await oldPending;
+  });
+  expect(input().props.value).toBe('');
+  expect(text(tree)).not.toContain('Could not reach the server');
+  expect(text(tree)).not.toContain('old server text');
+  await ReactTestRenderer.act(async () =>
+    input().props.onChangeText('later edit'),
+  );
+  expect(sendButton().props.disabled).toBe(true);
+
+  await ReactTestRenderer.act(async () => {
+    finishNew();
+    await newPending;
+  });
+  expect(input().props.value).toBe('later edit');
+  expect(sendButton().props.disabled).toBe(false);
 });

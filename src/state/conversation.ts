@@ -6,7 +6,11 @@ import {
   unwrapChannelKey,
 } from '../ConcordCrypto';
 import type { ConcordApi, DmEncrypted } from '../core/ConcordApi';
-import { DmSocket, type DmMessage } from '../core/DmSocket';
+import {
+  DmSocket,
+  type DmMessage,
+  type DmSocketOpenOptions,
+} from '../core/DmSocket';
 import { createSocket } from '../core/socket';
 
 /** One decrypted line of a conversation. */
@@ -74,6 +78,7 @@ export class Conversation {
   private lookedUpAt = 0;
   private socket: DmSocket | null = null;
   private closed = false;
+  private readonly opening = new AbortController();
   /** Live messages decrypt one at a time, so a slow key lookup cannot reorder them. */
   private live: Promise<void> = Promise.resolve();
 
@@ -82,12 +87,26 @@ export class Conversation {
     private readonly identity: KeyHandle,
     readonly id: string,
     private readonly me: string,
-    private readonly openSocket: (url: string) => Promise<DmSocket> = url =>
-      DmSocket.open(url, createSocket),
+    private readonly openSocket: (
+      url: string,
+      options: DmSocketOpenOptions,
+    ) => Promise<DmSocket> = (url, options) =>
+      DmSocket.open(url, createSocket, 15000, options),
   ) {}
+
+  private isCurrent(): boolean {
+    return !this.closed && this.api.wsReconnect.active;
+  }
+
+  private assertCanOpen(): void {
+    if (this.closed) throw new Error('Conversation closed');
+    this.api.wsReconnect.assertCanOpen();
+  }
 
   /** The current epoch, asked of the server once (shared) until a send failure resets it. */
   private currentEpoch(): Promise<number> {
+    if (!this.isCurrent())
+      return Promise.reject(new Error('Conversation closed'));
     if (this.current !== null) return Promise.resolve(this.current);
     // ponytail: one extra key request; keyFor then fetches the wrap by version.
     this.lookedUpAt = Date.now();
@@ -102,7 +121,8 @@ export class Conversation {
 
   /** The key for an epoch (0: the current one), fetched and unwrapped once. */
   private keyFor(version: number): Promise<KeyHandle> {
-    if (this.closed) return Promise.reject(new Error('Conversation closed'));
+    if (!this.isCurrent())
+      return Promise.reject(new Error('Conversation closed'));
     // A historical key proves nothing about the current epoch: ask (or follow a proven rotation).
     if (version === 0)
       return this.currentEpoch().then(
@@ -118,12 +138,12 @@ export class Conversation {
       return Promise.reject(new KeyUnavailable());
     key = this.api.dmKey(this.id, version).then(
       async k => {
-        if (this.closed) throw new Error('Conversation closed');
+        if (!this.isCurrent()) throw new Error('Conversation closed');
         // The server is authoritative: a key served for another epoch must not be used under this label.
         if (k.keyVersion !== version) throw new KeyUnavailable();
         const handle = await unwrapChannelKey(k.wrappedKey, this.identity);
         // Closed while unwrapping: close() could not see this handle, so release it here.
-        if (this.closed) {
+        if (!this.isCurrent()) {
           await releaseKey(handle).catch(() => {});
           throw new Error('Conversation closed');
         }
@@ -184,7 +204,7 @@ export class Conversation {
   private settle(item: Promise<void>): void {
     if (
       !this.owesReceipt ||
-      this.closed ||
+      !this.isCurrent() ||
       this.live !== item ||
       this.lines.at(-1)?.unreadable
     )
@@ -204,7 +224,7 @@ export class Conversation {
   }
 
   private add(line: ChatLine): void {
-    if (this.closed || this.lines.some(l => l.id === line.id)) return;
+    if (!this.isCurrent() || this.lines.some(l => l.id === line.id)) return;
     this.lines = [...this.lines, line];
     this.onChange?.();
   }
@@ -214,18 +234,27 @@ export class Conversation {
    * so nothing sent in between is missed. History and live lines merge by id.
    */
   async start(): Promise<void> {
-    const socket = await this.openSocket(
-      this.api.wsUrl(await this.api.wsTicket()),
-    );
-    if (this.closed) return socket.close();
+    this.assertCanOpen();
+    const ticket = await this.api.wsTicket();
+    this.assertCanOpen();
+    const url = this.api.wsUrl(ticket);
+    this.assertCanOpen();
+    const socket = await this.openSocket(url, {
+      isCurrent: () => this.isCurrent(),
+      onOverload: retryAfterMs => {
+        if (this.isCurrent()) this.api.wsReconnect.recordOverload(retryAfterMs);
+      },
+      signal: this.opening.signal,
+    });
+    if (!this.isCurrent()) return socket.close();
     this.socket = socket;
     socket.onDropped = () => {
-      if (this.closed) return;
+      if (!this.isCurrent()) return;
       this.dropped = true;
       this.onChange?.();
     };
     socket.onMessage = (m: DmMessage) => {
-      if (m.conversationId !== this.id) return;
+      if (!this.isCurrent() || m.conversationId !== this.id) return;
       const next: Promise<void> = this.live
         .then(() =>
           // A label far past any epoch seen is not worth a fetch (and a key handle).
@@ -234,6 +263,7 @@ export class Conversation {
             : this.decrypt(m),
         )
         .then(line => {
+          if (!this.isCurrent()) return;
           this.add(line);
           if (!line.unreadable) {
             // A peer proven on a newer epoch means the key rotated: send under it too.
@@ -247,11 +277,12 @@ export class Conversation {
     };
     // ponytail: no reconnect; a dropped socket fails the next send and reopening the conversation reconnects.
     await socket.subscribe(this.id);
+    if (!this.isCurrent() || this.dropped) return;
 
     const history = await this.api.dmHistory(this.id);
-    if (this.closed) return;
+    if (!this.isCurrent()) return;
     const lines = await Promise.all(history.map(m => this.decrypt(m)));
-    if (this.closed) return;
+    if (!this.isCurrent()) return;
     // Live messages may have arrived meanwhile. Those that arrived before the last one the
     // page also holds are older than the page's end and go before it; the rest after it.
     const seen = new Set(lines.map(l => l.id));
@@ -263,7 +294,7 @@ export class Conversation {
     this.onChange?.();
     // Live messages still decrypting are newer than the page: decide after them.
     await this.live;
-    if (this.closed) return;
+    if (!this.isCurrent()) return;
     // A read receipt only once the newest line could actually be shown.
     if (!this.lines.at(-1)?.unreadable)
       this.api.markDmRead(this.id).catch(() => {});
@@ -295,6 +326,7 @@ export class Conversation {
 
   close(): void {
     this.closed = true;
+    this.opening.abort();
     this.socket?.close();
     this.socket = null;
     const keys = [...this.keys.values()];

@@ -6,6 +6,11 @@ import {
 } from '../core/ConcordApi';
 import { DmSocket, type SocketLike } from '../core/DmSocket';
 import { MOBILE_ORIGIN, createSocket } from '../core/socket';
+import {
+  WsRateLimitedError,
+  WsReconnectCooldownError,
+  WsReconnectGate,
+} from '../core/wsEventBudget';
 
 const ME = 'user-mobile';
 const PEER = 'user-peer';
@@ -59,7 +64,8 @@ class FakeSocket implements SocketLike {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code?: unknown; reason?: unknown }) => void) | null =
+    null;
   closed = false;
   constructor(
     private readonly respond: (
@@ -573,6 +579,95 @@ describe('ConcordApi', () => {
     expect(logout?.headers.Authorization).toBe('Bearer a1');
   });
 
+  it('preserves the actual reconnect owner and floor through a token/session rotation', async () => {
+    const { api } = signedIn({
+      'POST /auth/refresh': () => [
+        200,
+        { access_token: 'a2', refresh_token: 'r2', session_id: 's2' },
+      ],
+    });
+    await api.login('e', 'p');
+    const owner = api.wsReconnect;
+    owner.recordOverload(30000);
+    expect(() => owner.assertCanOpen()).toThrow(WsReconnectCooldownError);
+    await api.refresh();
+    expect(api.saved()?.sessionId).toBe('s2');
+    expect(api.wsReconnect).toBe(owner);
+    expect(owner.active).toBe(true);
+    expect(() => owner.assertCanOpen()).toThrow(WsReconnectCooldownError);
+  });
+
+  it.each([false, true])(
+    'retires an actual refused refresh before optional expiry notification (%s)',
+    async observeExpiry => {
+      const { api } = signedIn({
+        'POST /auth/refresh': () => [401, { code: 'invalid_refresh' }],
+      });
+      await api.login('e', 'p');
+      const owner = api.wsReconnect;
+      const activeAtExpiry: boolean[] = [];
+      if (observeExpiry)
+        api.onExpired = () => {
+          activeAtExpiry.push(owner.active);
+        };
+      expect(owner.active).toBe(true);
+      await expect(api.refresh()).rejects.toMatchObject({ status: 401 });
+      expect(api.saved()).toBeNull();
+      expect(api.wsReconnect).toBe(owner);
+      expect(owner.active).toBe(false);
+      expect(() => owner.assertCanOpen()).toThrow();
+      expect(activeAtExpiry).toEqual(observeExpiry ? [false] : []);
+    },
+  );
+
+  it('retires direct logout synchronously before pending server cleanup, including failure', async () => {
+    let release: () => void = () => undefined;
+    const pending = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { impl } = signedIn({
+      'POST /auth/logout': () => [500, {}],
+    });
+    const delayed = jest.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith('/auth/logout')) await pending;
+      return impl(url, init);
+    });
+    const api = new ConcordApi(
+      'https://api.example.test',
+      MACHINE,
+      delayed as unknown as typeof fetch,
+    );
+    await api.login('e', 'p');
+    const owner = api.wsReconnect;
+    expect(owner.active).toBe(true);
+    const loggingOut = api.logout();
+    const failure = loggingOut.catch(error => error);
+    try {
+      expect(owner.active).toBe(false);
+      expect(() => owner.assertCanOpen()).toThrow();
+    } finally {
+      release();
+    }
+    expect(await failure).toMatchObject({ status: 500 });
+    expect(api.wsReconnect).toBe(owner);
+    expect(owner.active).toBe(false);
+  });
+
+  it('retires direct logout even without an authenticated session', async () => {
+    const { impl, calls } = fakeFetch({});
+    const api = new ConcordApi('https://api.example.test', MACHINE, impl);
+    const owner = api.wsReconnect;
+    const loggingOut = api.logout();
+    expect(owner.active).toBe(false);
+    expect(() => owner.assertCanOpen()).toThrow();
+    await loggingOut;
+    expect(calls).toEqual([]);
+    expect(
+      new ConcordApi('https://api.example.test', MACHINE, impl).wsReconnect
+        .active,
+    ).toBe(true);
+  });
+
   it('allows plain http only for localhost', () => {
     expect(checkBaseUrl('http://localhost:8080')).toBe('http://localhost:8080');
     expect(checkBaseUrl('https://api.example.test')).toBe(
@@ -919,4 +1014,388 @@ describe('createSocket', () => {
       ],
     ]);
   });
+});
+
+/** Manual native delivery: no auto-open/reply timers can hide lifecycle effects. */
+class BudgetSocket implements SocketLike {
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onclose: ((event?: { code?: unknown; reason?: unknown }) => void) | null =
+    null;
+  sent: unknown[] = [];
+  closeCount = 0;
+  send(raw: string) {
+    if (this.closeCount) throw new Error('Socket is not open');
+    this.sent.push(JSON.parse(raw));
+  }
+  close() {
+    this.closeCount += 1;
+  }
+  frame(value: unknown) {
+    this.onmessage?.({ data: JSON.stringify(value) });
+  }
+  ack(nonce = 'budget-nonce') {
+    this.frame({ type: 'dm_message_ack', data: { nonce, id: 'budget-ack' } });
+  }
+}
+
+function openBudgetSocket(options?: {
+  isCurrent?: () => boolean;
+  onOverload?: (retryAfterMs: number) => void;
+  signal?: AbortSignal;
+}) {
+  const socket = new BudgetSocket();
+  const opening = DmSocket.open(
+    'wss://api.example.test/ws',
+    () => socket,
+    1000,
+    options,
+  );
+  return { socket, opening };
+}
+
+const budgetPeerFrame = {
+  type: 'dm_message',
+  data: {
+    id: 'budget-peer',
+    conversation_id: CONV,
+    user_id: PEER,
+    content: 'cipher',
+    key_version: 1,
+  },
+};
+
+describe('DmSocket budget compatibility and native ownership', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it.each([
+    ['retry_after_ms=100', 100],
+    ['retry_after_ms=30000', 30000],
+    ['retry_after_ms=100\n', 1000],
+    [undefined, 1000],
+  ])(
+    'records a connecting 1013 once before rejecting (%s)',
+    async (reason, delay) => {
+      let now = 0;
+      const gate = new WsReconnectGate(() => now);
+      const onOverload = jest.fn((ms: number) => gate.recordOverload(ms));
+      const { socket, opening } = openBudgetSocket({
+        isCurrent: () => gate.active,
+        onOverload,
+      });
+      const failure = opening.catch(error => error);
+      const nativeClose = socket.onclose;
+      expect(nativeClose).not.toBeNull();
+      nativeClose?.({ code: 1013, reason });
+      expect(await failure).toBeInstanceOf(Error);
+      expect(onOverload).toHaveBeenCalledTimes(1);
+      expect(onOverload).toHaveBeenCalledWith(delay);
+      expect(socket.closeCount).toBe(1);
+      expect(jest.getTimerCount()).toBe(0);
+      now = delay as number;
+      // A captured duplicate cannot extend the floor by the same delay again.
+      nativeClose?.({ code: 1013, reason });
+      expect(onOverload).toHaveBeenCalledTimes(1);
+      expect(() => gate.assertCanOpen()).not.toThrow();
+    },
+  );
+
+  it.each([1000, '1013', undefined])(
+    'does not coerce ordinary connecting close code %s',
+    async code => {
+      const onOverload = jest.fn();
+      const { socket, opening } = openBudgetSocket({ onOverload });
+      const failure = opening.catch(error => error);
+      expect(socket.onclose).not.toBeNull();
+      socket.onclose?.({ code, reason: 'retry_after_ms=30000' });
+      expect(await failure).toBeInstanceOf(Error);
+      expect(onOverload).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('records an immediate live close before late drop ownership attaches', async () => {
+    const effects: string[] = [];
+    const { socket, opening } = openBudgetSocket({
+      onOverload: ms => effects.push(`floor:${ms}`),
+    });
+    socket.onopen?.();
+    const nativeClose = socket.onclose;
+    nativeClose?.({ code: 1013, reason: 'retry_after_ms=100' });
+    const dm = await opening;
+    dm.onDropped = () => effects.push('drop');
+    expect(effects).toEqual(['floor:100', 'drop']);
+    nativeClose?.({ code: 1013, reason: 'retry_after_ms=30000' });
+    expect(effects).toEqual(['floor:100', 'drop']);
+    await expect(dm.subscribe(CONV)).rejects.toBeInstanceOf(Error);
+    await expect(dm.send(CONV, 'cipher', 1, 'n')).rejects.toBeInstanceOf(Error);
+    expect(socket.sent).toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('installs the floor before failing all waiters and notifying a live drop, with no replay', async () => {
+    const effects: string[] = [];
+    const { socket, opening } = openBudgetSocket({
+      onOverload: () => effects.push('floor'),
+    });
+    socket.onopen?.();
+    const dm = await opening;
+    const message = dm
+      .send(CONV, 'original-cipher', 2, 'original-nonce')
+      .catch(() => effects.push('send-failed'));
+    const subscription = dm
+      .subscribe(CONV)
+      .catch(() => effects.push('subscribe-failed'));
+    dm.onDropped = () => effects.push('drop');
+    socket.onclose?.({ code: 1013, reason: 'retry_after_ms=1000' });
+    expect(effects).toEqual(['floor', 'drop']);
+    await Promise.all([message, subscription]);
+    expect(effects.slice(0, 2)).toEqual(['floor', 'drop']);
+    expect(effects.slice(2)).toHaveLength(2);
+    expect(effects.slice(2)).toEqual(
+      expect.arrayContaining(['send-failed', 'subscribe-failed']),
+    );
+    jest.advanceTimersByTime(30000);
+    expect(socket.sent).toEqual([
+      {
+        type: 'dm_message',
+        data: {
+          conversation_id: CONV,
+          content: 'original-cipher',
+          key_version: 2,
+          nonce: 'original-nonce',
+        },
+      },
+      { type: 'subscribe_dm', data: { conversation_id: CONV } },
+    ]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it.each(['error', 'timeout', 'abort'] as const)(
+    'retires a %s-first opening and ignores every captured callback',
+    async kind => {
+      const controller = new AbortController();
+      const onOverload = jest.fn();
+      const { socket, opening } = openBudgetSocket({
+        onOverload,
+        signal: controller.signal,
+      });
+      const callbacks = {
+        open: socket.onopen,
+        error: socket.onerror,
+        close: socket.onclose,
+        message: socket.onmessage,
+      };
+      const failure = opening.catch(error => error);
+      if (kind === 'error') socket.onerror?.();
+      if (kind === 'timeout') jest.advanceTimersByTime(1000);
+      if (kind === 'abort') controller.abort();
+      expect(await failure).toBeInstanceOf(Error);
+      expect(socket.closeCount).toBe(1);
+      callbacks.open?.();
+      callbacks.error?.();
+      callbacks.close?.({ code: 1013, reason: 'retry_after_ms=30000' });
+      callbacks.message?.({ data: JSON.stringify(budgetPeerFrame) });
+      jest.advanceTimersByTime(30000);
+      expect(socket.closeCount).toBe(1);
+      expect(onOverload).not.toHaveBeenCalled();
+      expect(socket.sent).toEqual([]);
+      expect(socket.onopen).toBeNull();
+      expect(socket.onerror).toBeNull();
+      expect(socket.onclose).toBeNull();
+      expect(socket.onmessage).toBeNull();
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('makes explicit close silent and clears waiters/listeners despite captured callbacks', async () => {
+    const onOverload = jest.fn();
+    const { socket, opening } = openBudgetSocket({ onOverload });
+    socket.onopen?.();
+    const dm = await opening;
+    const callbacks = {
+      open: socket.onopen,
+      error: socket.onerror,
+      close: socket.onclose,
+      message: socket.onmessage,
+    };
+    const message = jest.fn();
+    const dropped = jest.fn();
+    dm.onMessage = message;
+    dm.onDropped = dropped;
+    const waiter = dm.nextMessage(CONV, PEER).catch(error => error);
+    dm.close();
+    dm.close();
+    expect(await waiter).toBeInstanceOf(Error);
+    callbacks.open?.();
+    callbacks.error?.();
+    callbacks.close?.({ code: 1013, reason: 'retry_after_ms=1000' });
+    callbacks.message?.({ data: JSON.stringify(budgetPeerFrame) });
+    expect(onOverload).not.toHaveBeenCalled();
+    expect(dropped).not.toHaveBeenCalled();
+    expect(message).not.toHaveBeenCalled();
+    expect(socket.closeCount).toBe(1);
+    expect(socket.onmessage).toBeNull();
+    expect(socket.onclose).toBeNull();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('suppresses callbacks from a live socket after its owner retires', async () => {
+    const previous = new WsReconnectGate(() => 0);
+    const current = new WsReconnectGate(() => 0);
+    const onOverload = jest.fn((ms: number) => previous.recordOverload(ms));
+    const { socket, opening } = openBudgetSocket({
+      isCurrent: () => previous.active,
+      onOverload,
+    });
+    socket.onopen?.();
+    const dm = await opening;
+    const message = jest.fn();
+    const dropped = jest.fn();
+    dm.onMessage = message;
+    dm.onDropped = dropped;
+    const nativeClose = socket.onclose;
+    const nativeMessage = socket.onmessage;
+    previous.retire();
+    nativeMessage?.({ data: JSON.stringify(budgetPeerFrame) });
+    nativeClose?.({ code: 1013, reason: 'retry_after_ms=30000' });
+    expect(message).not.toHaveBeenCalled();
+    expect(dropped).not.toHaveBeenCalled();
+    expect(onOverload).not.toHaveBeenCalled();
+    expect(() => current.assertCanOpen()).not.toThrow();
+    await expect(dm.subscribe(CONV)).rejects.toBeInstanceOf(Error);
+    expect(socket.sent).toEqual([]);
+    dm.close();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('drops malformed envelopes before waiter failure and accepts the subsequent actual ack', async () => {
+    const onOverload = jest.fn();
+    const { socket, opening } = openBudgetSocket({ onOverload });
+    socket.onopen?.();
+    const dm = await opening;
+    const dropped = jest.fn();
+    dm.onDropped = dropped;
+    const pending = dm.send(CONV, 'cipher', 1, 'budget-nonce');
+    const settled = jest.fn();
+    const observed = pending.then(
+      value => {
+        settled('ack');
+        return value;
+      },
+      error => {
+        settled('error');
+        throw error;
+      },
+    );
+    // Keep a deliberately broken implementation's early rejection handled too.
+    observed.catch(() => undefined);
+    for (const frame of [
+      { type: 'error', data: [] },
+      { type: 'error', data: null },
+      { type: 'error', data: { code: 'ws_rate_limited' } },
+      { type: 'error', data: { code: 'legacy', event_class: 'content' } },
+      {
+        type: 'error',
+        data: {
+          code: 'ws_rate_limited',
+          event_class: 'content',
+          retry_after_ms: '100',
+        },
+      },
+      {
+        type: 'error',
+        data: {
+          code: 'ws_rate_limited',
+          event_class: 'unknown',
+          retry_after_ms: 100,
+        },
+      },
+    ])
+      socket.frame(frame);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    expect(onOverload).not.toHaveBeenCalled();
+    expect(dropped).not.toHaveBeenCalled();
+    expect(socket.sent).toHaveLength(1);
+    socket.ack();
+    await expect(observed).resolves.toBe('budget-ack');
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(settled).toHaveBeenCalledWith('ack');
+    expect(jest.getTimerCount()).toBe(0);
+    dm.close();
+  });
+
+  it('fails all waiters with a bounded advisory without closing, setting a floor, or replaying', async () => {
+    const gate = new WsReconnectGate(() => 0);
+    const onOverload = jest.fn((ms: number) => gate.recordOverload(ms));
+    const { socket, opening } = openBudgetSocket({ onOverload });
+    socket.onopen?.();
+    const dm = await opening;
+    const dropped = jest.fn();
+    dm.onDropped = dropped;
+    const sending = dm
+      .send(CONV, 'unique-cipher', 3, 'unique-nonce')
+      .catch(error => error);
+    const subscribing = dm.subscribe(CONV).catch(error => error);
+    socket.frame({
+      type: 'error',
+      data: {
+        code: 'ws_rate_limited',
+        event_class: 'content',
+        retry_after_ms: 30000,
+        message: 'private server text',
+        extra: 'must be discarded',
+      },
+    });
+    for (const error of await Promise.all([sending, subscribing])) {
+      expect(error).toBeInstanceOf(WsRateLimitedError);
+      expect(error).toMatchObject({
+        eventClass: 'content',
+        retryAfterMs: 30000,
+      });
+      expect(String(error)).not.toContain('private server text');
+      expect(error).not.toHaveProperty('extra');
+    }
+    expect(jest.getTimerCount()).toBe(0);
+    expect(socket.closeCount).toBe(0);
+    expect(dropped).not.toHaveBeenCalled();
+    expect(onOverload).not.toHaveBeenCalled();
+    expect(() => gate.assertCanOpen()).not.toThrow();
+    jest.advanceTimersByTime(30000);
+    expect(socket.sent).toHaveLength(2);
+    // A new explicit action is allowed; the advisory creates no operation cooldown.
+    const manual = dm.send(CONV, 'new-cipher', 3, 'manual-nonce');
+    socket.ack('manual-nonce');
+    await expect(manual).resolves.toBe('budget-ack');
+    expect(socket.sent).toHaveLength(3);
+    dm.close();
+  });
+
+  it.each([
+    { message: 'private legacy prose' },
+    { code: 'other', event_class: 'typing', retry_after_ms: 100 },
+    { event_class: 'typing', retry_after_ms: 100 },
+  ])(
+    'does not promote a legacy/complete-pair error to a budget advisory (%#)',
+    async data => {
+      const { socket, opening } = openBudgetSocket();
+      socket.onopen?.();
+      const dm = await opening;
+      const pending = dm.nextMessage(CONV, PEER).catch(error => error);
+      socket.frame({ type: 'error', data });
+      const error = await pending;
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(WsRateLimitedError);
+      expect(error.message).toBe('Server error frame');
+      expect(socket.sent).toEqual([]);
+      expect(jest.getTimerCount()).toBe(0);
+      dm.close();
+    },
+  );
 });

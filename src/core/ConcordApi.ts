@@ -5,6 +5,7 @@
  */
 
 import { INVALID_KEY, type Attester } from '../ConcordAttest';
+import { WsReconnectGate } from './wsEventBudget';
 
 export type Fetch = typeof fetch;
 
@@ -106,6 +107,8 @@ function text(value: unknown): string {
 }
 
 export class ConcordApi {
+  /** Shared by manual DM reopens for this sign-in, including token rotations. */
+  readonly wsReconnect = new WsReconnectGate();
   private session: Session | null = null;
   private readonly base: string;
   /** Called when the server refuses a rotation and the session ends on its own. */
@@ -315,6 +318,7 @@ export class ConcordApi {
               error.status === 401 &&
               this.session === current
             ) {
+              this.wsReconnect.retire();
               this.session = null;
               this.onExpired?.();
             }
@@ -330,6 +334,7 @@ export class ConcordApi {
 
   /** Revokes this session server-side; the local session is cleared even if that fails. */
   async logout(): Promise<void> {
+    this.wsReconnect.retire();
     const session = this.session;
     if (!session) return;
     try {

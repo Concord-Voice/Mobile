@@ -24,6 +24,22 @@ updates:
         patterns:
           - "*"
 
+  # ─── Protected Sonar caller proof ─────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/tools/sonar-caller-proof"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+      - "area: ci-cd"
+
   # ─── CI license-checking tool ─────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/.github/tools/license-checker"
