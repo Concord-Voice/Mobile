@@ -14,6 +14,7 @@
 [![security](https://img.shields.io/badge/security-policy-green)](https://github.com/Concord-Voice/.github/blob/main/SECURITY.md)
 [![status](https://img.shields.io/badge/status-pre--alpha-orange)](#not-built-yet)
 [![platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20Android-blue)](#run)
+
 [![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-dark.svg)](https://sonarcloud.io/summary/new_code?id=Concord-Voice_Mobile)
 
 The Concord Voice mobile app for iOS and Android.
