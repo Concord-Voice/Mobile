@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   mkdtemp,
   mkdir,
+  open,
   readFile,
   writeFile,
   stat,
@@ -79,14 +80,32 @@ function expectedBytes(pristine) {
   return Buffer.from(text.replace(oldLine, newLine));
 }
 
+// Read bytes and identity through one descriptor. Each call opens the path
+// afresh, so the after snapshot also detects a renamed/replaced catalog.
+async function catalogSnapshot(path) {
+  const handle = await open(path, 'r');
+  try {
+    const bytes = await handle.readFile();
+    const metadata = await handle.stat();
+    return {
+      bytes,
+      dev: metadata.dev,
+      ino: metadata.ino,
+      mtimeMs: metadata.mtimeMs,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function rejectUnchanged(fixture, patch, code) {
-  const before = await readFile(fixture.catalog);
-  const beforeStat = await stat(fixture.catalog);
+  const before = await catalogSnapshot(fixture.catalog);
   await assert.rejects(patch(fixture.root), { message: code });
-  assert.deepEqual(await readFile(fixture.catalog), before);
-  const afterStat = await stat(fixture.catalog);
-  assert.equal(afterStat.ino, beforeStat.ino);
-  assert.equal(afterStat.mtimeMs, beforeStat.mtimeMs);
+  const after = await catalogSnapshot(fixture.catalog);
+  assert.deepEqual(after.bytes, before.bytes);
+  assert.equal(after.dev, before.dev);
+  assert.equal(after.ino, before.ino);
+  assert.equal(after.mtimeMs, before.mtimeMs);
 }
 
 test('patch preserves every catalog byte except the one approved Kotlin version', async t => {
@@ -123,11 +142,13 @@ test('known patched bytes are idempotent without rewriting or replacing the file
     new Date('2000-01-01T00:00:00Z'),
     new Date('2000-01-01T00:00:00Z'),
   );
-  const before = await stat(fixture.catalog);
+  const before = await catalogSnapshot(fixture.catalog);
+  assert.deepEqual(before.bytes, patched);
   assert.equal(await patch(fixture.root), 'already-patched');
   assert.equal(await patch(fixture.root), 'already-patched');
-  const after = await stat(fixture.catalog);
-  assert.deepEqual(await readFile(fixture.catalog), patched);
+  const after = await catalogSnapshot(fixture.catalog);
+  assert.deepEqual(after.bytes, patched);
+  assert.equal(after.dev, before.dev);
   assert.equal(after.ino, before.ino);
   assert.equal(after.mtimeMs, before.mtimeMs);
 });

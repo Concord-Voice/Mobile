@@ -367,6 +367,7 @@ async function ios(output) {
   try {
     stage('ios-boot');
     await runCommand('xcrun', ['simctl', 'boot', device]);
+    stage('ios-bootstatus');
     await runCommand('xcrun', ['simctl', 'bootstatus', device, '-b'], {
       timeout: 300000,
     });
