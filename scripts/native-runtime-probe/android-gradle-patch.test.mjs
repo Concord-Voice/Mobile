@@ -248,6 +248,32 @@ test('import is side-effect free without any installed packages', async t => {
   });
 });
 
+test('eval import tolerates an unrelated nonexistent entry path without installed packages', async t => {
+  const fixture = await project(t);
+  await rm(join(fixture.root, 'node_modules'), { recursive: true });
+  const unrelatedEntry = join(fixture.root, 'nonexistent-consumer-entry.mjs');
+  const moduleURL = pathToFileURL(fixture.script).href;
+  const consumer = `
+    const helper = await import(${JSON.stringify(moduleURL)});
+    if (typeof helper.patchReactNativeGradlePlugin !== 'function') {
+      throw new Error('helper-export-missing');
+    }
+    process.stdout.write('helper-export-ready');
+  `;
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await exec(process.execPath, [
+      '--input-type=module', '--eval', consumer, unrelatedEntry,
+    ], { cwd: fixture.root });
+  }, 'import must tolerate unrelated nonexistent argv[1]');
+  assert.equal(result.stdout, 'helper-export-ready');
+  assert.equal(result.stderr, '');
+  await assert.rejects(stat(join(fixture.root, 'node_modules')), {
+    code: 'ENOENT',
+  });
+  await assert.rejects(stat(unrelatedEntry), { code: 'ENOENT' });
+});
+
 test('direct CLI uses its own repository root from an unrelated cwd and rejects path arguments', async t => {
   const fixture = await project(t);
   const unrelated = await project(t);
