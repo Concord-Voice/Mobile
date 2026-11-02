@@ -6,6 +6,7 @@ import {
   readFile,
   writeFile,
   stat,
+  symlink,
   utimes,
   rm,
 } from 'node:fs/promises';
@@ -258,6 +259,33 @@ test('direct CLI uses its own repository root from an unrelated cwd and rejects 
   assert.deepEqual(await readFile(unrelated.catalog), unrelated.pristine);
   await assert.rejects(
     exec(process.execPath, [fixture.script, unrelated.root], {
+      cwd: unrelated.root,
+    }),
+    error => {
+      assert.notEqual(error.code, 0);
+      assert.match(error.stderr, /unexpected-arguments/);
+      return true;
+    },
+  );
+  assert.deepEqual(await readFile(unrelated.catalog), unrelated.pristine);
+});
+
+// Reproduce macOS /var -> /private/var path identity on Linux too: Node resolves
+// the module file, while argv still names the same script through its parent alias.
+test('direct CLI through a symlinked parent patches its owner and rejects path arguments', async t => {
+  const fixture = await project(t);
+  const unrelated = await project(t);
+  const alias = join(unrelated.root, 'script-owner-alias');
+  await symlink(fixture.root, alias, 'dir');
+  const aliasedScript = join(alias, 'scripts/patch-react-native-gradle-plugin.mjs');
+  await exec(process.execPath, [aliasedScript], { cwd: unrelated.root });
+  assert.deepEqual(
+    await readFile(fixture.catalog),
+    expectedBytes(fixture.pristine),
+  );
+  assert.deepEqual(await readFile(unrelated.catalog), unrelated.pristine);
+  await assert.rejects(
+    exec(process.execPath, [aliasedScript, unrelated.root], {
       cwd: unrelated.root,
     }),
     error => {
