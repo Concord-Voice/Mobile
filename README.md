@@ -24,13 +24,13 @@ The Concord Voice mobile app for iOS and Android.
 
 ## Introduction
 
-Concord Voice is a privacy-first place to talk with your friends, your community, or your team. It gives you voice calls, video, screen sharing, and chat. Your device encrypts each message before it leaves, so our servers hold only scrambled data that we cannot read. You can use our hosted service, or you can run the same software on your own hardware.
+Concord Voice is a privacy-first place to talk with your friends, your community, or your team. It gives you voice calls, video, screen sharing, and chat. Your device encrypts each message before it leaves, so our servers store your messages only as scrambled data that we cannot read. You can use our hosted service, or you can run the same software on your own hardware.
 
 This repository holds the mobile app. It is in early development, so it is not in the App Store or Google Play yet.
 iOS comes first, and Android follows.
 
 The app keeps the same promise as the desktop app: your phone encrypts your messages, and the server never sees them in plain text.
-The encryption code runs natively on the phone, and the keys never leave the device's secure storage.
+On iOS, the encryption code runs natively and private keys stay in the Keychain. Android support for this is not built yet.
 
 For guides and background, see the [Mobile wiki](https://github.com/Concord-Voice/Mobile/wiki).
 
@@ -282,7 +282,7 @@ We welcome help. Read the [contributing guide](https://github.com/Concord-Voice/
 
 ## License
 
-This repository uses the Concord Voice Source License 1.0 (CVSL 1.0). Anyone can read the source. Personal and non-profit use is free. Commercial self-hosted use by a for-profit or government entity needs a commercial license. On 2030-02-15 the license converts to AGPL-3.0-or-later.
+This repository uses the Concord Voice Source License 1.0 (CVSL 1.0). Anyone can read the source. Personal and non-profit use is free. Any use by a for-profit company or a government body needs a commercial license. Each version converts to AGPL-3.0-or-later on 2030-02-15 at the latest.
 
 See [LICENSE](./LICENSE) for the full terms.
 
