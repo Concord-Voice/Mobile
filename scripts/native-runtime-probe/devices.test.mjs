@@ -241,6 +241,100 @@ test('real failing XCTest subprocess records sanitized locations and still fails
   }
 });
 
+// These subprocess controls exercise only simulator setup. Even the successful
+// boot path stops at scheme discovery; no native/runtime verdict is fabricated.
+for (const failure of ['boot', 'bootstatus', 'after-boot']) {
+  test(`iOS boot diagnostics distinguish ${failure} with owned cleanup`, async () => {
+    const owned = await mkdtemp(join(tmpdir(), 'native-ios-boot-stage-'));
+    const device = '11111111-1111-4111-8111-111111111111';
+    const hidden = 'synthetic-private-boot-diagnostic';
+    try {
+      const bin = join(owned, 'bin');
+      const output = join(owned, 'output');
+      const calls = join(owned, 'calls.jsonl');
+      await mkdir(bin);
+      await writeFile(
+        join(bin, 'xcrun'),
+        `#!/usr/bin/env node
+const fs=require('node:fs');
+const a=process.argv.slice(2);
+const command=a[1];
+fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify(command==='list'?'list-'+a[2]:command)+'\\n');
+if(a[0]!=='simctl')process.exit(91);
+if(command==='list'){
+  console.log(JSON.stringify(a[2]==='runtimes'?{runtimes:[{isAvailable:true,name:'iOS 26.1',version:'26.1',identifier:'owned-runtime'}]}:{devicetypes:[{name:'iPhone owned',identifier:'owned-phone'}]}));
+}else if(command==='create')console.log(${JSON.stringify(device)});
+else{
+  if(a[2]!==${JSON.stringify(device)})process.exit(92);
+  if(command==='bootstatus'&&a[3]!=='-b')process.exit(93);
+  if(command===${JSON.stringify(failure)}){
+    console.error(${JSON.stringify(hidden + ' /private/' + device)});
+    process.exit(65);
+  }
+  if(!['boot','bootstatus','shutdown','delete'].includes(command))process.exit(94);
+}
+`,
+        { mode: 0o700 },
+      );
+      await writeFile(
+        join(bin, 'xcodebuild'),
+        `#!/usr/bin/env node
+require('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify('xcode-list')+'\\n');
+if(!process.argv.includes('-list'))process.exit(95);
+console.error(${JSON.stringify(hidden)});
+process.exit(65);
+`,
+        { mode: 0o700 },
+      );
+      let childLog = '';
+      await assert.rejects(runCommand(process.execPath, [
+        fileURLToPath(new URL('./devices.mjs', import.meta.url)), 'ios', output,
+      ], {
+        env: { ...process.env, RUNNER_TEMP: owned, PATH: `${bin}:${process.env.PATH}` },
+        onFailure: ({ stdout, stderr }) => { childLog = stdout + stderr; },
+      }));
+      const commands = (await readFile(calls, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      assert.deepEqual(commands, [
+        'list-runtimes', 'list-devicetypes', 'create', 'boot',
+        ...(failure === 'boot' ? [] : ['bootstatus']),
+        ...(failure === 'after-boot' ? ['xcode-list'] : []),
+        'shutdown', 'delete',
+      ], 'fixture must reach the intended failing command and clean up its own device');
+      const cleanup = await readFile(join(output, 'device-cleanup.json'), 'utf8');
+      assert.deepEqual(JSON.parse(cleanup), { ownedSimulatorDeleted: true });
+      const failures = childLog.split('\n').filter(line => line.startsWith('{'))
+        .map(line => JSON.parse(line)).filter(value => value.status === 'FAIL');
+      assert.deepEqual(failures, [{ status: 'FAIL', code: 'platform-command-failed' }]);
+      for (const value of [childLog, cleanup]) {
+        for (const secret of [device, hidden, owned, '/private/']) {
+          assert.equal(value.includes(secret), false, 'diagnostics must retain only fixed stages and failure codes');
+        }
+      }
+      for (const name of ['native-tests.json', 'native-test-diagnostics.json', 'runtime.json']) {
+        assert.equal(await readFile(join(output, name), 'utf8').catch(error => {
+          if (error.code !== 'ENOENT') throw error;
+          return null;
+        }), null, 'simulator setup controls must not manufacture native/runtime evidence');
+      }
+      const stages = childLog.split('\n').filter(line => line.startsWith('Native runtime stage: '));
+      assert.ok(stages.includes('Native runtime stage: ios-boot'));
+      assert.ok(stages.includes('Native runtime stage: ios-cleanup'));
+      assert.equal(stages.includes('Native runtime stage: ios-native-tests'), false);
+      assert.equal(stages.includes('Native runtime stage: ios-runtime-observe'), false);
+      assert.equal(
+        stages.includes('Native runtime stage: ios-bootstatus'), failure !== 'boot',
+        'ios-bootstatus must be emitted only after simctl boot succeeds, before its readiness wait',
+      );
+      if (failure !== 'boot') {
+        assert.ok(stages.indexOf('Native runtime stage: ios-boot') < stages.indexOf('Native runtime stage: ios-bootstatus'));
+        assert.ok(stages.indexOf('Native runtime stage: ios-bootstatus') < stages.indexOf('Native runtime stage: ios-cleanup'));
+      }
+    } finally {
+      await rm(owned, { recursive: true, force: true });
+    }
+  });
+}
+
 test('real metadata command failure records only its fixed stage and reason before refusing Android', async () => {
   const owned = await mkdtemp(join(tmpdir(), 'native-tool-diagnostic-'));
   const hidden = 'synthetic-sensitive-comparand';
