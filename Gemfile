@@ -6,7 +6,7 @@ ruby ">= 3.2"
 
 # Pin the CocoaPods toolchain that installs cleanly, and keep activesupport and
 # concurrent-ruby at or above the releases that fix their published advisories.
-gem 'cocoapods', '1.16.2'
+gem 'cocoapods', '1.17.0'
 gem 'activesupport', '>= 7.2.3.1', '< 8'
 gem 'xcodeproj', '1.28.1'
 gem 'concurrent-ruby', '>= 1.3.7'
