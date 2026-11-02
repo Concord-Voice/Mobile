@@ -60,11 +60,23 @@ export async function patchReactNativeGradlePlugin(projectRoot) {
   return 'patched';
 }
 
-if (
-  process.argv[1] &&
-  realpathSync(resolve(process.argv[1])) ===
-    realpathSync(fileURLToPath(import.meta.url))
-) {
+function isDirectEntry() {
+  if (!process.argv[1]) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  const entryPath = resolve(process.argv[1]);
+  if (entryPath === modulePath) return true;
+  let canonicalEntry;
+  try {
+    canonicalEntry = realpathSync(entryPath);
+  } catch (error) {
+    // Eval imports may supply an unrelated path as argv[1] without creating it.
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
+  return canonicalEntry === realpathSync(modulePath);
+}
+
+if (isDirectEntry()) {
   try {
     if (process.argv.length !== 2) throw new Error('unexpected-arguments');
     const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
