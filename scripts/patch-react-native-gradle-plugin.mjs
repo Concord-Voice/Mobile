@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 // RN 0.88.0's included build selects Kotlin 2.2, which cannot read Gradle
 // 9.8.2's embedded Kotlin metadata. Keep the security-fixed Gradle distribution
@@ -61,7 +62,8 @@ export async function patchReactNativeGradlePlugin(projectRoot) {
 
 if (
   process.argv[1] &&
-  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+  realpathSync(resolve(process.argv[1])) ===
+    realpathSync(fileURLToPath(import.meta.url))
 ) {
   try {
     if (process.argv.length !== 2) throw new Error('unexpected-arguments');
