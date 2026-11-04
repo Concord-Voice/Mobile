@@ -328,6 +328,30 @@ repos:
         files: '^scripts/security/(audit-dependabot-coverage\.sh|test-audit-dependabot-coverage\.sh|check-pin-exceptions\.mjs)$'
         pass_filenames: false
 
+  # The changelog promoter and its gate, ported from Desktop with the same
+  # rules. The promoter runs only when a release is cut, so this self-test is
+  # what catches a broken promoter before then.
+  - repo: local
+    hooks:
+      - id: test-promote-unreleased-changelog
+        name: release-notes promoter self-test
+        entry: bash .github/scripts/tests/promote-unreleased-changelog.test.sh
+        language: system
+        files: '^(\.github/scripts/promote-unreleased-changelog\.sh|\.github/scripts/promote_unreleased_changelog\.py|\.github/scripts/tests/promote-unreleased-changelog\.test\.sh|CHANGELOG\.md)$'
+        pass_filenames: false
+      - id: test-verify-changelog
+        name: changelog gate self-test
+        entry: bash .github/scripts/tests/verify-changelog.test.sh
+        language: system
+        files: '^\.github/scripts/(verify-changelog\.sh|tests/verify-changelog\.test\.sh)$'
+        pass_filenames: false
+      - id: test-sync-native-version
+        name: native version sync self-test
+        entry: bash scripts/test-sync-native-version.sh
+        language: system
+        files: '^scripts/(sync-native-version\.mjs|test-sync-native-version\.sh)$'
+        pass_filenames: false
+
   # Remote hook revs are commit SHAs, never tags: a moved tag would run new
   # code on the next `pre-commit install`. Keep the tag as `# frozen: vX`.
   - repo: local
@@ -335,5 +359,8 @@ repos:
       - id: hook-revs-are-shas
         name: pre-commit hook revs are pinned to commit SHAs
         language: pygrep
-        entry: '^\s*rev:\s*(?![0-9a-f]{40}\s+# frozen: \S+\s*$)'
+        # The lookahead sits before the spaces: with `rev:\s*(?!...)` the
+        # \s* backtracks to zero, the lookahead then sees " <sha>" and fails,
+        # and every correctly pinned rev was flagged.
+        entry: '^\s*rev:(?!\s*[0-9a-f]{40}\s+# frozen: \S+\s*$)'
         files: '^\.pre-commit-config\.yaml$'
