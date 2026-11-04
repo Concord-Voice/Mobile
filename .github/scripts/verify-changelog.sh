@@ -235,8 +235,9 @@ fi
 # PLACE; Rule 4 stops them not being written at all. Both failures produced
 # desktop-v0.2.41, which shipped 98 commits behind a single bullet.
 #
-# The include set is what the desktop post-update modal renders to users
-# (#1857); the exempt set is everything whose change a user cannot observe.
+# The include set is the app code a user runs: the JS entry points, src/,
+# the native modules, and the iOS and Android app sources (#1857). The exempt
+# set is everything whose change a user cannot observe.
 # Dependency manifests are exempt so bot PRs stay green without a standing
 # label ritual.
 #
@@ -244,7 +245,7 @@ fi
 # exits, so anything after it is unreachable.
 CHANGED=$(git diff --name-only "${MERGE_BASE}" HEAD || true)
 RELEVANT=$(printf '%s\n' "$CHANGED" \
-  | grep -E '^(App\.tsx$|src/|native/)' \
+  | grep -E '^(App\.tsx$|index\.js$|src/|native/|ios/ConcordVoice/|android/app/src/)' \
   | grep -vE '(^|/)(tests?|testdata|testhelpers|testutil|__tests__|__mocks__|fixtures)/' \
   | grep -vE '\.(test|spec)\.(ts|tsx|js|jsx)$|_test\.go$' \
   | grep -vE '(^|/)(package(-lock)?\.json|go\.(mod|sum))$' \

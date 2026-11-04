@@ -176,6 +176,9 @@ touch_testdir()  { mkdir -p "$1/src/__tests__" && echo "// $2" >> "$1/src/__test
 # survives the whole suite.
 touch_backend()  { mkdir -p "$1/native/ConcordCrypto/Sources" && echo "// $2" >> "$1/native/ConcordCrypto/Sources/Handler.swift"; }
 touch_media()    { echo "// $2" >> "$1/App.tsx"; }
+touch_entry()    { echo "// $2" >> "$1/index.js"; }
+touch_ios()      { mkdir -p "$1/ios/ConcordVoice" && echo "// $2" >> "$1/ios/ConcordVoice/AppDelegate.swift"; }
+touch_android()  { mkdir -p "$1/android/app/src/main/java" && echo "// $2" >> "$1/android/app/src/main/java/MainActivity.kt"; }
 touch_gotest()   { mkdir -p "$1/native/ConcordCrypto" && echo "// $2" >> "$1/native/ConcordCrypto/handler_test.go"; }
 touch_testdata() { mkdir -p "$1/native/ConcordCrypto/testdata" && echo "$2" >> "$1/native/ConcordCrypto/testdata/fixture.json"; }
 touch_gomod()    { mkdir -p "$1/native/ConcordCrypto" && printf 'module x\n// %s\n' "$2" > "$1/native/ConcordCrypto/go.mod"; }
@@ -366,15 +369,23 @@ commit_trailer "$r" "Changelog-Exempt: pure refactor, no observable behaviour ch
 touch_include "$r" second && commit_all "$r"
 run_case "Changelog-Exempt on an earlier commit still passes" 0 "$r" 2
 
-# ── Cases 24-25: the other two-thirds of the include set (#3006 review) ──────
-# Deleting `services/control-plane/` or `services/media-plane/` from Rule 4's
-# include regex survived all 23 prior cases: no fixture put a NON-EXEMPT file
-# under either. Silent non-enforcement on the Go backend is the 0.2.41 shape.
+# ── Cases 24-25: the rest of the include set (#3006 review) ─────────────────
+# Every include pattern needs a non-exempt fixture, or deleting it from Rule 4's
+# regex survives the suite. Silent non-enforcement is the 0.2.41 shape.
 r=$(make_repo 0.2.20); touch_backend "$r" change; commit_all "$r"
 run_case "native module change without an Prerelease entry fails" 1 "$r"
 
 r=$(make_repo 0.2.20); touch_media "$r" change; commit_all "$r"
 run_case "App.tsx change without an Prerelease entry fails" 1 "$r"
+
+r=$(make_repo 0.2.20); touch_entry "$r" change; commit_all "$r"
+run_case "index.js change without a Prerelease entry fails" 1 "$r"
+
+r=$(make_repo 0.2.20); touch_ios "$r" change; commit_all "$r"
+run_case "iOS app source change without a Prerelease entry fails" 1 "$r"
+
+r=$(make_repo 0.2.20); touch_android "$r" change; commit_all "$r"
+run_case "Android app source change without a Prerelease entry fails" 1 "$r"
 
 # ── Cases 26-28: the exemptions, each pinned individually ───────────────────
 # The prior mutation pass deleted whole filters; no single ALTERNATIVE inside
