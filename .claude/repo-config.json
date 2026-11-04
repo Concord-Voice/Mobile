@@ -7,7 +7,12 @@
       "src/ConcordAttest\\.ts$",
       "ios/.*\\.entitlements$",
       "ios/.*Info\\.plist$",
-      "\\.github/workflows/"
+      "\\.github/workflows/",
+      "\\.github/scripts/",
+      "scripts/security/",
+      "CODEOWNERS$",
+      "(^|/)\\.claude/(hooks/|settings\\.json|repo-config\\.json|\\.agentic-dev-tooling\\.lock$|state/hook-bypass/)",
+      "(^|/)scripts/repo-config\\.sh$"
     ]
   }
 }
