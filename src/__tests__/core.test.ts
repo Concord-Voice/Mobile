@@ -350,9 +350,19 @@ describe('ConcordApi', () => {
               user_id: ME,
               username: 'me',
               content: 'Yw==',
-              type: 'text',
+              // The server's type for an ordinary message (dm_messages.type default).
+              type: 'user',
               key_version: 4,
               created_at: 't3',
+            },
+            {
+              id: 'expiry',
+              user_id: PEER,
+              username: 'peer',
+              content: '',
+              type: 'expiration_event',
+              key_version: 4,
+              created_at: 't2b',
             },
             {
               id: 'call',
