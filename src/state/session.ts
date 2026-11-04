@@ -81,6 +81,11 @@ function parsePersisted(raw: string): Persisted | null {
   }
 }
 
+/** What the platform's biometric unlock is called in user-facing copy. */
+export function biometricName(): string {
+  return Platform.OS === 'ios' ? 'Face ID' : 'Fingerprint or face unlock';
+}
+
 /** Writes the session record; best effort, since a lost write only costs a sign-in later. */
 function persist(at: Origin, saved: SavedSession | null): void {
   if (saved)
@@ -103,8 +108,7 @@ function describeApiError(error: ApiError): string {
       error.code === 'CLIENT_VERSION_TOO_OLD')
   )
     return 'This version of the app is no longer supported. Update it to continue.';
-  if (error.status === 403)
-    return 'This server does not accept this app yet.';
+  if (error.status === 403) return 'This server does not accept this app yet.';
   return 'The server could not complete that. Try again.';
 }
 
@@ -115,8 +119,16 @@ export function describeError(error: unknown): string {
   if (error instanceof WsRateLimitedError)
     return 'The server is busy. Try again later.';
   if (error instanceof ApiError) return describeApiError(error);
-  if (nativeErrorCode(error) === 'E_CONCORD_CRYPTO_WRONGPASSWORD') {
-    return 'Your password could not unlock your encryption key.';
+  // No native code emits a password-specific case: a wrong password and a tampered key both
+  // fail AES-GCM authentication. Any native crypto failure is a device-side failure, not a network one.
+  if (nativeErrorCode(error) !== null) {
+    return 'Encryption failed on this device. Try again.';
+  }
+  if (
+    error instanceof Error &&
+    error.message === 'Concord native crypto is unavailable'
+  ) {
+    return 'This build of the app has no secure encryption module, so it cannot sign in.';
   }
   if (
     error instanceof Error &&
@@ -302,8 +314,7 @@ export function createSessionStore(
             if (code !== 'E_CONCORD_CRYPTO_NOTFOUND') {
               // Lockout or a Keychain fault: say so, and leave the password as the way in.
               set({
-                error:
-                  'Face ID could not unlock your saved sign-in. Try again, or log in with your password.',
+                error: `${biometricName()} could not unlock your saved sign-in. Try again, or log in with your password.`,
               });
               return;
             }

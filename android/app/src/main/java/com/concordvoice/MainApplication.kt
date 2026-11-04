@@ -1,6 +1,7 @@
 package com.concordvoice
 
 import android.app.Application
+import com.concordvoice.crypto.ConcordCryptoPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -14,8 +15,8 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
-          // Packages that cannot be autolinked yet can be added manually here, for example:
-          // add(MyReactNativePackage())
+          // Native E2EE crypto (native/ConcordCrypto/android); not an npm package, so not autolinked.
+          add(ConcordCryptoPackage())
         },
     )
   }

@@ -4,3 +4,6 @@ extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autoli
 rootProject.name = 'ConcordVoice'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
+// ConcordCrypto's Android half, next to the iOS pod in native/ConcordCrypto.
+include ':concord-crypto'
+project(':concord-crypto').projectDir = new File(rootDir, '../native/ConcordCrypto/android')

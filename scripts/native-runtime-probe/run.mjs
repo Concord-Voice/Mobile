@@ -27,8 +27,14 @@ export const cases = {
     'layout',
     'nativeVersion',
     'hermesRuntime',
-    'nativeUnavailable',
-    'missingModuleRefusal',
+    'nativeAvailable',
+    'identityRoundTrip',
+    'channelRoundTrip',
+    'tamperRefusal',
+    'wrongPasswordRefusal',
+    'wrongKindRefusal',
+    'releasedHandleRefusal',
+    'cleanup',
   ],
 };
 export class ProbeFailure extends Error {}
@@ -306,7 +312,8 @@ export function nativeSelection(platform, text) {
     platform === 'ios'
       ? text.match(/^ {2}- hermes-engine \(([0-9.]+)\):$/m)?.[1]
       : text.match(/^HERMES_VERSION_NAME=([0-9.]+)$/m)?.[1];
-  if (selected !== HERMES_ENGINE_VERSION) refuse('native-engine-selection-mismatch');
+  if (selected !== HERMES_ENGINE_VERSION)
+    refuse('native-engine-selection-mismatch');
   return selected;
 }
 export function resolvedAndroidEngine(text, expectedVersion) {
@@ -497,10 +504,12 @@ export async function observe(
       const adbTool = sdkAdb();
       const adb = (args, options) =>
         runCommand(adbTool, ['-s', device, ...args], options);
-      const reportFailure = step => ({ stdout, stderr }) =>
-        console.log(
-          JSON.stringify(androidObserveFailure(step, `${stdout}\n${stderr}`)),
-        );
+      const reportFailure =
+        step =>
+        ({ stdout, stderr }) =>
+          console.log(
+            JSON.stringify(androidObserveFailure(step, `${stdout}\n${stderr}`)),
+          );
       // pidof exits 1 when the process is absent; that is an absent app, not a tool failure.
       const pidOf = async () =>
         Number(
@@ -523,8 +532,22 @@ export async function observe(
       await waitForPackageManager();
       // Disposable guest only: skip install-time package verification, which on
       // Google APIs images runs inside the install and can stall or crash it.
-      await adb(['shell', 'settings', 'put', 'global', 'verifier_verify_adb_installs', '0']);
-      await adb(['shell', 'settings', 'put', 'global', 'package_verifier_enable', '0']);
+      await adb([
+        'shell',
+        'settings',
+        'put',
+        'global',
+        'verifier_verify_adb_installs',
+        '0',
+      ]);
+      await adb([
+        'shell',
+        'settings',
+        'put',
+        'global',
+        'package_verifier_enable',
+        '0',
+      ]);
       // A transport drop (protocol fault, broken pipe, reset) or a package manager
       // exception or restart on the freshly booted guest is retried twice on the
       // same owned device, once the package manager answers again. Any other failure, including every INSTALL_* refusal, fails at once.

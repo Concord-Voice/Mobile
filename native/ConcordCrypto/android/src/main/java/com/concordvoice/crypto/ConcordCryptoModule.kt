@@ -1,0 +1,162 @@
+package com.concordvoice.crypto
+
+import android.content.pm.PackageManager
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import javax.crypto.Cipher
+
+/**
+ * React Native bridge for ConcordCryptoService, the same surface as ConcordCryptoModule.swift.
+ * Errors reject with a stable code only, never with key material, plaintext or a system message.
+ */
+class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+  private val service = ConcordCryptoService()
+  // One thread: Argon2id holds 64 MiB for a few hundred milliseconds, and the biometric prompt
+  // blocks it; both stay off the JS and main threads. It also serialises every handle operation.
+  private val executor = Executors.newSingleThreadExecutor()
+  private val identities =
+    ConcordIdentityVault(
+      File(context.noBackupFilesDir, "concord-identity"),
+      context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE),
+      ::authenticate)
+  private val sessions = ConcordSessionVault(File(context.noBackupFilesDir, "concord-session.bin"))
+
+  override fun getName() = "ConcordCryptoModule"
+
+  private fun run(promise: Promise, body: () -> Any?) =
+    executor.execute {
+      try {
+        promise.resolve(body())
+      } catch (e: ConcordCryptoException) {
+        promise.reject("E_CONCORD_CRYPTO_${e.failure.name}", "Crypto operation failed")
+      } catch (_: Throwable) {
+        promise.reject("E_CONCORD_CRYPTO", "Crypto operation failed")
+      }
+    }
+
+  @ReactMethod
+  fun unlockIdentity(password: String, saltBase64: String, wrappedPrivateKeyBase64: String, promise: Promise) =
+    run(promise) { service.unlockIdentity(password, saltBase64, wrappedPrivateKeyBase64) }
+
+  @ReactMethod
+  fun createIdentity(password: String, promise: Promise) =
+    run(promise) {
+      Arguments.createMap().apply { service.createIdentity(password).forEach { (k, v) -> putString(k, v) } }
+    }
+
+  @ReactMethod fun generateChannelKey(promise: Promise) = run(promise) { service.generateChannelKey() }
+
+  @ReactMethod
+  fun unwrapChannelKey(wrappedKeyBase64: String, privateKeyHandle: String, promise: Promise) =
+    run(promise) { service.unwrapChannelKey(wrappedKeyBase64, privateKeyHandle) }
+
+  @ReactMethod
+  fun wrapChannelKey(channelKeyHandle: String, publicKeySpkiBase64: String, promise: Promise) =
+    run(promise) { service.wrapChannelKey(channelKeyHandle, publicKeySpkiBase64) }
+
+  @ReactMethod
+  fun encryptMessage(plaintext: String, channelKeyHandle: String, promise: Promise) =
+    run(promise) { service.encryptMessage(plaintext, channelKeyHandle) }
+
+  @ReactMethod
+  fun decryptMessage(ciphertextBase64: String, channelKeyHandle: String, promise: Promise) =
+    run(promise) { service.decryptMessage(ciphertextBase64, channelKeyHandle) }
+
+  @ReactMethod fun releaseKey(handle: String, promise: Promise) = run(promise) { service.store.release(handle) ; null }
+
+  @ReactMethod fun releaseAll(promise: Promise) = run(promise) { service.store.releaseAll(); null }
+
+  @ReactMethod
+  fun persistIdentity(privateKeyHandle: String, account: String, promise: Promise) =
+    run(promise) {
+      identities.save(service.store.rsaPrivate(privateKeyHandle), account, "Turn on biometric unlock")
+      null
+    }
+
+  @ReactMethod
+  fun loadIdentity(account: String, reason: String, allowUI: Boolean, promise: Promise) =
+    run(promise) {
+      service.store.add(ConcordKeyStore.Entry.RsaPrivate(identities.load(account, reason, allowUI)))
+    }
+
+  @ReactMethod
+  fun deleteIdentity(account: String, promise: Promise) =
+    run(promise) {
+      identities.delete(account)
+      null
+    }
+
+  @ReactMethod
+  fun saveSession(record: String, promise: Promise) =
+    run(promise) {
+      sessions.save(record)
+      null
+    }
+
+  @ReactMethod fun loadSession(promise: Promise) = run(promise) { sessions.load() }
+
+  @ReactMethod
+  fun deleteSession(promise: Promise) =
+    run(promise) {
+      sessions.delete()
+      null
+    }
+
+  /** UUID.randomUUID draws from SecureRandom. */
+  @ReactMethod fun randomId(promise: Promise) = promise.resolve(UUID.randomUUID().toString())
+
+  /** Runs on the executor and blocks it until the prompt finishes. Strong biometrics only. */
+  private fun authenticate(cipher: Cipher, title: String): Cipher {
+    val activity = context.currentActivity as? FragmentActivity ?: fail(Failure.INTERACTIONNOTALLOWED)
+    val result = CompletableFuture<Cipher>()
+    activity.runOnUiThread {
+      val callback =
+        object : BiometricPrompt.AuthenticationCallback() {
+          override fun onAuthenticationSucceeded(outcome: BiometricPrompt.AuthenticationResult) {
+            val unlocked = outcome.cryptoObject?.cipher
+            if (unlocked != null) result.complete(unlocked)
+            else result.completeExceptionally(ConcordCryptoException(Failure.AUTHENTICATIONFAILED))
+          }
+
+          override fun onAuthenticationError(code: Int, message: CharSequence) {
+            val cancelled =
+              code == BiometricPrompt.ERROR_USER_CANCELED ||
+                code == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                code == BiometricPrompt.ERROR_CANCELED
+            result.completeExceptionally(
+              ConcordCryptoException(if (cancelled) Failure.USERCANCELLED else Failure.AUTHENTICATIONFAILED))
+          }
+          // onAuthenticationFailed is one rejected attempt; the prompt stays up for another.
+        }
+      val info =
+        BiometricPrompt.PromptInfo.Builder()
+          .setTitle(title)
+          .setNegativeButtonText("Cancel")
+          .setAllowedAuthenticators(BIOMETRIC_STRONG)
+          .build()
+      try {
+        BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback)
+          .authenticate(info, BiometricPrompt.CryptoObject(cipher))
+      } catch (_: Exception) {
+        result.completeExceptionally(ConcordCryptoException(Failure.INTERACTIONNOTALLOWED))
+      }
+    }
+    return try {
+      result.get()
+    } catch (e: ExecutionException) {
+      throw e.cause as? ConcordCryptoException ?: ConcordCryptoException(Failure.AUTHENTICATIONFAILED)
+    }
+  }
+}

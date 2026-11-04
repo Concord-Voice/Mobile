@@ -37,16 +37,8 @@ const iosCases = [
   'cleanup',
 ];
 function verdict(platform = 'ios') {
-  const names =
-    platform === 'ios'
-      ? iosCases
-      : [
-          'layout',
-          'nativeVersion',
-          'hermesRuntime',
-          'nativeUnavailable',
-          'missingModuleRefusal',
-        ];
+  // Both platforms now run the full native case list.
+  const names = iosCases;
   return {
     schema: 1,
     nonce: expected.nonce,
@@ -60,7 +52,7 @@ function verdict(platform = 'ios') {
     failureCase: null,
   };
 }
-test('accepts complete iOS bridge execution and explicit Android absence evidence', () => {
+test('accepts complete iOS and Android bridge execution', () => {
   assert.deepEqual(validateVerdict(verdict(), expected), verdict());
   const android = verdict('android');
   assert.deepEqual(
@@ -264,10 +256,7 @@ test('fails closed on collector exit and oversized output without leaking child 
 });
 
 test('resolves adb from the SDK and refuses without ANDROID_HOME', () => {
-  assert.equal(
-    sdkAdb({ ANDROID_HOME: '/sdk' }),
-    '/sdk/platform-tools/adb',
-  );
+  assert.equal(sdkAdb({ ANDROID_HOME: '/sdk' }), '/sdk/platform-tools/adb');
   assert.throws(() => sdkAdb({}), /android-sdk-unavailable/);
 });
 
@@ -298,13 +287,17 @@ test('reports only a sanitized category for a failed adb step', () => {
     'activity-missing',
   );
   assert.equal(
-    androidObserveFailure('install', 'adb: failed to install x.apk: Failure [DELETE_FAILED_INTERNAL_ERROR]')
-      .androidObserveFailure.category,
+    androidObserveFailure(
+      'install',
+      'adb: failed to install x.apk: Failure [DELETE_FAILED_INTERNAL_ERROR]',
+    ).androidObserveFailure.category,
     'DELETE_FAILED_INTERNAL_ERROR',
   );
   assert.equal(
-    androidObserveFailure('install', 'cmd: Failure calling service package: Broken pipe (32)')
-      .androidObserveFailure.category,
+    androidObserveFailure(
+      'install',
+      'cmd: Failure calling service package: Broken pipe (32)',
+    ).androidObserveFailure.category,
     'adb-transport',
   );
   assert.equal(
@@ -321,7 +314,7 @@ test('reports only a sanitized category for a failed adb step', () => {
   assert.deepEqual(
     androidObserveFailure(
       'install',
-      'Exception occurred while executing \'install\':\njava.lang.IllegalStateException: secret-123\n\tat com.android.server.pm.Foo.bar(Foo.java:12)',
+      "Exception occurred while executing 'install':\njava.lang.IllegalStateException: secret-123\n\tat com.android.server.pm.Foo.bar(Foo.java:12)",
     ).androidObserveFailure,
     {
       step: 'install',

@@ -153,7 +153,9 @@ describe('session store', () => {
 
   it('logs the server session out when the key will not unlock', async () => {
     crypto.unlockIdentity.mockRejectedValueOnce(
-      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_WRONGPASSWORD' }),
+      Object.assign(new Error('x'), {
+        code: 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+      }),
     );
     const api = fakeApi();
     const { useStore } = store(api);
@@ -162,7 +164,7 @@ describe('session store', () => {
     expect(useStore.getState()).toMatchObject({
       stage: { kind: 'signed_out' },
       api: null,
-      error: 'Your password could not unlock your encryption key.',
+      error: 'Encryption failed on this device. Try again.',
     });
   });
 
@@ -611,5 +613,8 @@ describe('describeError', () => {
     expect(
       describeError(new Error('Unsupported key derivation: pbkdf2')),
     ).toMatch(/older key format/);
+    expect(
+      describeError(new Error('Concord native crypto is unavailable')),
+    ).toMatch(/no secure encryption module/);
   });
 });
