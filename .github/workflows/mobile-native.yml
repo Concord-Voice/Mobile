@@ -194,7 +194,8 @@ jobs:
             'ndk;27.1.12297006' 'cmake;3.30.5'
       - name: Build the existing unsigned release target
         working-directory: android
-        run: ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+        # The crypto JVM tests run first. armeabi-v7a is built because 32-bit-only phones are supported.
+        run: ./gradlew :concord-crypto:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
       # `emulator -version` execs qemu-system-x86_64, which links system libraries
       # the launcher does not (libpulse.so.0 among them). In a clean ubuntu:24.04
       # container with emulator 37.2.13, these packages are the complete set the
@@ -221,7 +222,7 @@ jobs:
             sudo udevadm trigger --name-match=kvm
           fi
           ls -l /dev/kvm || echo 'no /dev/kvm on this runner'
-      - name: Exercise real Hermes, native layout and the Android missing-module refusal
+      - name: Exercise real Hermes, native layout and the production Android crypto module
         timeout-minutes: 30
         env:
           SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

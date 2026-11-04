@@ -488,7 +488,7 @@ The React Native Gradle plugin maps the app declarations to
 `com.facebook.hermes:hermes-android:250829098.0.17`.
 Hermes is enabled; the optional JSC branch is not part of this inventory.
 
-The table records 85 resolved runtime library components, including transitive
+The table records 86 resolved runtime library components, including transitive
 dependencies. Resolution used Gradle 9.4.1, the release/runtime Android JVM
 attributes and the app's Kotlin 2.2.0 declaration; dependency constraints resolve
 the Kotlin standard library to 2.2.10. The coroutines BOM is dependency metadata,
@@ -510,6 +510,7 @@ This metadata inventory does not claim a built or signed release artifact.
 | androidx.arch.core:core-common | 2.2.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.arch.core:core-runtime | 2.2.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.autofill:autofill | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.biometric:biometric | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.collection:collection-jvm | 1.4.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.collection:collection | 1.4.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.concurrent:concurrent-futures | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
