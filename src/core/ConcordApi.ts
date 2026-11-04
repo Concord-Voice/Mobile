@@ -591,7 +591,8 @@ export class ConcordApi {
   async dmHistory(conversationId: string): Promise<DmEncrypted[]> {
     const rows = await this.dmMessages(conversationId);
     return rows
-      .filter(m => (m.type ?? 'text') === 'text')
+      // Ordinary messages are type 'user' (or untyped, as on desktop); the rest are server-authored.
+      .filter(m => (m.type ?? 'user') === 'user')
       .map(m => ({
         id: text(m.id),
         userId: text(m.user_id),
