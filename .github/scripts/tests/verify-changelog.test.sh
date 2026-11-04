@@ -171,17 +171,16 @@ touch_test()    { mkdir -p "$1/src/__tests__" && echo "// $2" >> "$1/src/__tests
 # the directory filter is unfalsifiable: app.test.ts is caught by the filename
 # filter too, so deleting the directory filter changes no result.
 touch_testdir()  { mkdir -p "$1/src/__tests__" && echo "// $2" >> "$1/src/__tests__/helpers.ts"; }
-# Two-thirds of Rule 4's include set had NO fixture: nothing put a non-exempt
-# file under services/control-plane or services/media-plane, so deleting either
-# from the regex survived the whole suite. The Go backend is exactly where the
-# 0.2.41 under-coverage happened, which makes that the worst place to be blind.
+# Every include pattern needs a non-exempt fixture, and every exemption fixture
+# must sit INSIDE the include set; otherwise deleting a pattern or a filter
+# survives the whole suite.
 touch_backend()  { mkdir -p "$1/native/ConcordCrypto/Sources" && echo "// $2" >> "$1/native/ConcordCrypto/Sources/Handler.swift"; }
 touch_media()    { echo "// $2" >> "$1/App.tsx"; }
-touch_gotest()   { mkdir -p "$1/services/control-plane" && echo "// $2" >> "$1/services/control-plane/handler_test.go"; }
-touch_testdata() { mkdir -p "$1/services/control-plane/testdata" && echo "$2" >> "$1/services/control-plane/testdata/fixture.json"; }
-touch_gomod()    { mkdir -p "$1/services/control-plane" && printf 'module x\n// %s\n' "$2" > "$1/services/control-plane/go.mod"; }
+touch_gotest()   { mkdir -p "$1/native/ConcordCrypto" && echo "// $2" >> "$1/native/ConcordCrypto/handler_test.go"; }
+touch_testdata() { mkdir -p "$1/native/ConcordCrypto/testdata" && echo "$2" >> "$1/native/ConcordCrypto/testdata/fixture.json"; }
+touch_gomod()    { mkdir -p "$1/native/ConcordCrypto" && printf 'module x\n// %s\n' "$2" > "$1/native/ConcordCrypto/go.mod"; }
 touch_svcdoc()   { mkdir -p "$1/native/ConcordCrypto" && echo "$2" >> "$1/native/ConcordCrypto/README.md"; }
-touch_testhelp() { mkdir -p "$1/services/control-plane/internal/testhelpers" && echo "// $2" >> "$1/services/control-plane/internal/testhelpers/fixtures.go"; }
+touch_testhelp() { mkdir -p "$1/src/testhelpers" && echo "// $2" >> "$1/src/testhelpers/fixtures.ts"; }
 touch_admin()    { mkdir -p "$1/client/admin/src" && echo "// $2" >> "$1/client/admin/src/panel.tsx"; }
 
 touch_manifest() { mkdir -p "$1/native/ConcordCrypto" && printf '{"version":"1.0.%s"}\n' "$2" > "$1/native/ConcordCrypto/package.json"; }
