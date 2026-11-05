@@ -504,6 +504,19 @@ jobs:
           bash .github/scripts/tests/ci-scan-relevance.test.sh
           bash .github/scripts/tests/resolve-hotfix-label.test.sh
           bash scripts/test-update-notice-md.sh
+          bash .github/scripts/tests/verify-changelog.test.sh
+          bash .github/scripts/tests/promote-unreleased-changelog.test.sh
+          bash scripts/test-sync-native-version.sh
+      # Ported from Desktop's pr-ci with the same rules (#1857). `!cancelled()`
+      # keeps it independent of the steps above, so one run reports every
+      # failure. The script filters paths itself and fast-exits when nothing
+      # applies, so it runs unconditionally.
+      - name: Verify CHANGELOG discipline (#1857)
+        if: ${{ !cancelled() }}
+        env:
+          # Untrusted inputs pass via env, never inline ${{ }} in run: (#836).
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash .github/scripts/verify-changelog.sh
       - name: Protected main pin contracts
         run: |
           set -euo pipefail
