@@ -485,12 +485,13 @@ export async function observe(
       // Allow the live consumer to start before the app. Only a matching positive report can pass.
       await new Promise(resolveReady => setTimeout(resolveReady, 1000));
       collector.read();
-      const launched = await runCommand('xcrun', [
-        'simctl',
-        'launch',
-        device,
-        bundleId,
-      ]);
+      // A cold Release launch on a slow hosted runner can outlast the 15 s default,
+      // which surfaced as platform-command-failed about 37 s into this stage.
+      const launched = await runCommand(
+        'xcrun',
+        ['simctl', 'launch', device, bundleId],
+        { timeout: 60000 },
+      );
       pid = Number(launched.match(/com\.concordvoice\.mobile:\s*(\d+)/)?.[1]);
       logs = async () => collector.read();
       alive = async () => {
