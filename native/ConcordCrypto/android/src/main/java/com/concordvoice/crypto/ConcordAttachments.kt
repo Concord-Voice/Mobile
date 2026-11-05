@@ -156,11 +156,11 @@ object ConcordAttachment {
 /**
  * Attachment files: downloaded ciphertext and decrypted plaintext, in one cache folder that is
  * emptied at sign-out and at every launch. Ciphertext never reaches JavaScript, and plaintext only
- * as a file URI. [open] is swapped by the JVM tests, which serve plain http locally.
+ * as a file URI. [connect] is swapped by the JVM tests, which answer with canned responses.
  */
 class ConcordAttachmentFiles(
   val directory: File,
-  private val open: (URL) -> URLConnection = { it.openConnection() },
+  private val connect: (URL) -> URLConnection = { it.openConnection() },
 ) {
   /**
    * Downloads https [url] with [headers] into a new ciphertext file. Refuses redirects (the headers
@@ -182,7 +182,7 @@ class ConcordAttachmentFiles(
     var finished = false
     val connection =
       try {
-        open(target) as? HttpURLConnection ?: fail(Failure.INVALIDINPUT)
+        connect(target) as? HttpURLConnection ?: fail(Failure.INVALIDINPUT)
       } catch (_: IOException) {
         fail(Failure.NETWORK)
       }

@@ -1,8 +1,8 @@
 package com.concordvoice.crypto
 
-import com.sun.net.httpserver.HttpServer
 import java.io.File
-import java.net.InetSocketAddress
+import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
 import java.security.MessageDigest
@@ -62,7 +62,7 @@ class ConcordAttachmentTest {
   }
 
   /** Decrypts [blob] through the same file service the app uses. */
-  private fun open(blob: ByteArray, key: ByteArray): ByteArray {
+  private fun decryptBlob(blob: ByteArray, key: ByteArray): ByteArray {
     val files = ConcordAttachmentFiles(folder)
     val id = java.util.UUID.randomUUID().toString().uppercase()
     val input = File(folder, "$id.enc").apply { writeBytes(blob) }
@@ -87,9 +87,9 @@ class ConcordAttachmentTest {
       val key = if (c["key"] == "right") vectors.key else vectors.wrongKey
       val blob = decode(c.getValue("blobBase64"))
       when (c["expect"]) {
-        "ok" -> assertArrayEquals(c["id"], decode(c.getValue("plaintextBase64")), open(blob, key))
-        "integrity" -> expect(Failure.AUTHENTICATIONFAILED) { open(blob, key) }
-        "unsupported" -> expect(Failure.UNSUPPORTEDFORMAT) { open(blob, key) }
+        "ok" -> assertArrayEquals(c["id"], decode(c.getValue("plaintextBase64")), decryptBlob(blob, key))
+        "integrity" -> expect(Failure.AUTHENTICATIONFAILED) { decryptBlob(blob, key) }
+        "unsupported" -> expect(Failure.UNSUPPORTEDFORMAT) { decryptBlob(blob, key) }
         else -> fail("unknown expectation in ${c["id"]}")
       }
     }
@@ -118,11 +118,11 @@ class ConcordAttachmentTest {
       assertEquals(recipe.getValue("blobLength").toInt(), blob.size)
       val digest = MessageDigest.getInstance("SHA-256").digest(blob).joinToString("") { "%02x".format(it) }
       assertEquals("v$version", recipe["blobSha256"], digest)
-      assertArrayEquals(plaintext, open(blob, vectors.key))
+      assertArrayEquals(plaintext, decryptBlob(blob, vectors.key))
 
       // Dropping the last chunk breaks the length arithmetic: it reads as a legacy blob, which
       // cannot authenticate.
-      expect(Failure.AUTHENTICATIONFAILED) { open(blob.copyOfRange(0, 28 + 12 + first + 16), vectors.key) }
+      expect(Failure.AUTHENTICATIONFAILED) { decryptBlob(blob.copyOfRange(0, 28 + 12 + first + 16), vectors.key) }
     }
   }
 
@@ -143,40 +143,44 @@ class ConcordAttachmentTest {
   }
 
   @Test fun legacyBlobsOverTheCapAreRefused() {
-    expect(Failure.TOOLARGE) { open(ByteArray(ConcordAttachment.MAX_LEGACY_BYTES.toInt() + 1), ByteArray(32)) }
+    expect(Failure.TOOLARGE) { decryptBlob(ByteArray(ConcordAttachment.MAX_LEGACY_BYTES.toInt() + 1), ByteArray(32)) }
   }
 
-  // MARK: Download, against a local plain-http server standing in for https.
+  // MARK: Download, against canned responses; no network.
 
-  private fun serve(status: Int, headers: Map<String, String>, body: ByteArray, check: (Map<String, String>) -> Unit = {}): ConcordAttachmentFiles {
-    val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-    server.createContext("/") { exchange ->
-      check(exchange.requestHeaders.mapValues { it.value.first() })
-      headers.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
-      exchange.sendResponseHeaders(status, if (body.isEmpty()) -1 else body.size.toLong())
-      exchange.responseBody.use { it.write(body) }
+  /** One canned response. It records the request headers and whether redirects were allowed. */
+  private class Canned(url: URL, val status: Int, val fields: Map<String, String>, val body: ByteArray) :
+    HttpURLConnection(url) {
+    val sent = mutableMapOf<String, String>()
+
+    override fun connect() {}
+
+    override fun disconnect() {}
+
+    override fun usingProxy() = false
+
+    override fun setRequestProperty(key: String, value: String) {
+      sent[key] = value
     }
-    server.start()
-    servers += server
-    return ConcordAttachmentFiles(folder) { url ->
-      URL("http://127.0.0.1:${server.address.port}${url.path}").openConnection()
-    }
+
+    override fun getResponseCode() = status
+
+    override fun getContentLengthLong() = body.size.toLong()
+
+    override fun getHeaderField(name: String): String? = fields[name]
+
+    override fun getInputStream(): InputStream = body.inputStream()
   }
 
-  private val servers = mutableListOf<HttpServer>()
+  private val connections = mutableListOf<Canned>()
 
-  @After fun stopServers() {
-    servers.forEach { it.stop(0) }
-  }
+  private fun serve(status: Int, fields: Map<String, String>, body: ByteArray) =
+    ConcordAttachmentFiles(folder) { url -> Canned(url, status, fields, body).also { connections += it } }
 
   @Test fun downloadsWithHeadersAndReportsTheEpoch() {
-    var auth: String? = null
-    val files =
-      serve(200, mapOf("X-File-Key-Version" to "3", "X-File-Mime-Type" to "image/png"), ByteArray(40)) {
-        auth = it["Authorization"]
-      }
+    val files = serve(200, mapOf("X-File-Key-Version" to "3", "X-File-Mime-Type" to "image/png"), ByteArray(40))
     val result = files.download("https://api.example.test/api/v1/media/attachments/x", mapOf("Authorization" to "Bearer t"), 40)
-    assertEquals("Bearer t", auth)
+    assertEquals("Bearer t", connections.single().sent["Authorization"])
     assertEquals("3", result["keyVersion"])
     assertEquals("image/png", result["mimeType"])
     assertEquals(40.0, result["size"])
@@ -189,6 +193,8 @@ class ConcordAttachmentTest {
     expect(Failure.TOOLARGE) { serve(200, emptyMap(), ByteArray(41)).download("https://h.test/a", emptyMap(), 40) }
     val redirect = serve(302, mapOf("Location" to "https://elsewhere.test/"), ByteArray(0))
     expect(Failure.NETWORK) { redirect.download("https://h.test/a", emptyMap(), 40) }
+    // The session headers never follow a redirect.
+    assertFalse(connections.last().instanceFollowRedirects)
     for (url in listOf("http://h.test/a", "https://user:pw@h.test/a", "not a url")) { // pragma: allowlist secret
       expect(Failure.INVALIDINPUT) { redirect.download(url, emptyMap(), 40) }
     }
