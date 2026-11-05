@@ -26,9 +26,9 @@ belongs in it, and write it if the section has none. Do not edit the
 
 ## [Prerelease]
 
-The first iOS build signs you in, keeps your session behind Face ID, and reads
-and sends end-to-end encrypted direct messages. Android builds run, but
-encryption on Android is not built yet.
+The first builds sign you in, keep your session behind Face ID or your
+fingerprint, and read and send end-to-end encrypted direct messages on both
+iOS and Android.
 
 ### Added
 
@@ -38,3 +38,8 @@ encryption on Android is not built yet.
 - **Security:** The iOS app proves to the server that it is genuine with Apple App Attest.
 - **Messages:** Conversations follow the server's WebSocket event budgets.
 - **Updates:** The app sends its version and platform, so a server can require a minimum app version.
+- **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
+
+### Fixed
+
+- **Sign-in:** An encryption problem on the device no longer shows up as "Could not reach the server", and the unlock button names your phone's biometric feature.
