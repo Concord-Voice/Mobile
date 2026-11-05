@@ -86,8 +86,12 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   reason is invalid). The pause survives token refresh within that sign-in; expiry
   never opens a socket automatically. Valid budget advisories fail pending operations
   with a local busy message; malformed advisories are ignored, and operations are
-  never replayed automatically. Not yet: older pages, starting a new DM, starting a key
-  rotation, edits, reactions, attachments and automatic reconnect.
+  never replayed automatically. GIF messages load through the server's GIF proxy once
+  they are on screen, with an access token rotated ahead of expiry, and wait for a tap
+  when the user's "load GIFs automatically" privacy setting is off. On iOS the URL cache
+  is memory only, so those credentialed requests never reach Cache.db. Attachments show
+  their kind and size. Not yet: older pages, starting a new DM, starting a key rotation,
+  edits, reactions, opening attachments and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token, session id, user id) in a device-only Keychain item readable after

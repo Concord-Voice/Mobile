@@ -12,6 +12,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    // GIFs load through Concord's proxy with the session headers, and a disk cache keeps
+    // each request, headers included, in Cache.db past sign-out. Memory only, set before
+    // React Native creates its URL session.
+    URLCache.shared.removeAllCachedResponses()
+    URLCache.shared = URLCache(memoryCapacity: 16 * 1024 * 1024, diskCapacity: 0)
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()

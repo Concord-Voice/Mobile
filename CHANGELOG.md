@@ -43,6 +43,7 @@ encrypted direct messages.
 - **Messages:** Android no longer says "This version of the app is no longer supported". The app now tells the server it is the Android app and which version it is.
 - **Sign-in:** When fingerprint unlock can't be turned on, for example because no fingerprint is set up, the app now says why instead of silently signing you out next launch.
 - **Layout:** On Android, the tabs and the message box no longer sit under the navigation bar. Screens now pad for the phone's real status and navigation bars.
+- **Messages:** GIF messages and messages with attachments no longer show as empty bubbles. GIFs play through Concord's GIF proxy once their message is on screen (Android shows the first frame for now). As on desktop, they wait for a tap when "Load GIFs automatically" is off in your privacy settings. Each attachment is named with its size, such as "Photo, 2.0 KB", until the app can open it.
 
 ## [0.1.0] - 2026-11-05
 

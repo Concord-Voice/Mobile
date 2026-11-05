@@ -14,7 +14,13 @@ export type ClientInfo = { platform: string; version: string };
 
 /** "1.0(5)" from the bundle becomes "1.0.0": the server wants exactly major.minor.patch. */
 export function clientVersion(bundleVersion: string): string {
-  const parts = bundleVersion.replace(/\(.*\)$/, '').split('.');
+  // Cut a trailing "(build)" at its first "(": a regex here backtracks on long input.
+  const open = bundleVersion.indexOf('(');
+  const base =
+    open >= 0 && bundleVersion.endsWith(')')
+      ? bundleVersion.slice(0, open)
+      : bundleVersion;
+  const parts = base.split('.');
   while (parts.length < 3) parts.push('0');
   return parts.slice(0, 3).join('.');
 }
@@ -31,6 +37,8 @@ export type Session = {
   refreshToken: string;
   sessionId: string;
   userId: string;
+  /** When the access token expires (ms since epoch), if the server said. */
+  expiresAt?: number;
 };
 
 /** Code-based second factors; WebAuthn needs a native passkey bridge first. */
@@ -54,7 +62,42 @@ export type DmEncrypted = {
   content: string;
   keyVersion: number;
   createdAt: string;
+  attachments: Attachment[];
 };
+
+/** A GIF's proxied URL and size. Load it through `mediaSource()`: the proxy needs the session. */
+export type Gif = { uri: string; width?: number; height?: number };
+
+type KlipyRendition = { url?: unknown; width?: number; height?: number };
+type KlipyItem = {
+  file?: Partial<Record<'hd' | 'md' | 'sm', { gif?: KlipyRendition }>> & {
+    gif?: KlipyRendition;
+  };
+  preview?: { gif?: KlipyRendition };
+};
+
+/** The server's slug rule (internal/klipy/validate.go): letters, digits and dashes. */
+const GIF_SLUG = /^[A-Za-z0-9-]{1,100}$/;
+
+/** File details the server sends beside a message. The file itself stays encrypted. */
+export type Attachment = { id: string; fileType: string; fileSize: number };
+
+/** The attachment summaries on a history row or live frame; malformed entries are dropped. */
+export function attachments(value: unknown): Attachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(a => {
+    const v = (typeof a === 'object' && a !== null ? a : {}) as Record<
+      string,
+      unknown
+    >;
+    return typeof v.id === 'string' &&
+      typeof v.file_type === 'string' &&
+      Number.isSafeInteger(v.file_size) &&
+      (v.file_size as number) >= 0
+      ? [{ id: v.id, fileType: v.file_type, fileSize: v.file_size as number }]
+      : [];
+  });
+}
 
 /** A DM conversation as the conversation list shows it. */
 export type DmSummary = {
@@ -152,6 +195,7 @@ export class ConcordApi {
     method: string,
     path: string,
     body?: unknown,
+    refreshOn401 = true,
   ): Promise<Record<string, unknown>> {
     let refreshed = false;
     let attested = false;
@@ -169,7 +213,7 @@ export class ConcordApi {
         }
         // An expired access token gets one refresh, and a missing or stale
         // attestation one fresh proof; each retries the request once.
-        if (error.status === 401 && !refreshed) {
+        if (error.status === 401 && !refreshed && refreshOn401) {
           refreshed = true;
           await this.refresh();
         } else if (
@@ -198,18 +242,14 @@ export class ConcordApi {
     }
   }
 
-  private async request(
-    method: string,
-    path: string,
-    body?: unknown,
-    extraHeaders: Record<string, string> = {},
-  ): Promise<Record<string, unknown>> {
+  /** The identity headers every request carries: machine, client version, session, attestation. */
+  private async headers(
+    extra: Record<string, string> = {},
+  ): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
-      ...extraHeaders,
-      Accept: 'application/json',
+      ...extra,
       'X-Machine-Id': this.machineId,
     };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
     this.clientNow = await this.client().catch(() => null);
     if (this.clientNow) {
       headers['X-Concord-Client-Version'] = this.clientNow.version;
@@ -224,6 +264,20 @@ export class ConcordApi {
       if (this.attestation?.sessionId === this.session.sessionId)
         headers['X-Attestation-Token'] = this.attestation.token;
     }
+    return headers;
+  }
+
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<Record<string, unknown>> {
+    const headers = await this.headers({
+      ...extraHeaders,
+      Accept: 'application/json',
+    });
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
     // A stalled server must not hold a caller (and its native key handles) forever:
     // the abort covers the headers and the body read.
     const abort = new AbortController();
@@ -263,13 +317,53 @@ export class ConcordApi {
   }
 
   private adopt(result: Record<string, unknown>, userId?: string): void {
+    const expiresIn = result.expires_in;
     this.session = {
       accessToken: text(result.access_token),
       refreshToken: text(result.refresh_token),
       sessionId: text(result.session_id),
       userId: userId ?? text(record(result.user).id),
+      expiresAt:
+        typeof expiresIn === 'number' && expiresIn > 0
+          ? Date.now() + expiresIn * 1000
+          : undefined,
     };
     this.onRotated?.();
+  }
+
+  /**
+   * Rotates first when the access token is missing or has under a minute left. For
+   * requests that cannot refresh on a 401 themselves: images, and the GIF proxy, whose
+   * 401 can be KLIPY's rather than ours.
+   */
+  private async fresh(): Promise<void> {
+    const session = this.session;
+    if (
+      session &&
+      (!session.accessToken ||
+        (session.expiresAt !== undefined &&
+          session.expiresAt - Date.now() < 60_000))
+    )
+      await this.refresh();
+  }
+
+  /**
+   * An image source for a Concord media URL, with the session headers it needs. Only
+   * this server's media proxy gets the credentials.
+   */
+  async mediaSource(
+    uri: string,
+  ): Promise<{ uri: string; headers: Record<string, string> }> {
+    if (!uri.startsWith(`${this.base}/klipy/media?`))
+      throw new Error('Not a Concord media URL');
+    await this.fresh();
+    return { uri, headers: await this.headers() };
+  }
+
+  /** The user's "load GIFs automatically" privacy setting, shared with desktop. */
+  async loadGifsAutomatically(): Promise<boolean> {
+    const result = await this.call('GET', '/users/me/privacy');
+    return record(result.privacy).load_gifs_automatically === true;
   }
 
   saved(): SavedSession | null {
@@ -590,25 +684,79 @@ export class ConcordApi {
   /** The newest page of a conversation, oldest first, ready to decrypt. */
   async dmHistory(conversationId: string): Promise<DmEncrypted[]> {
     const rows = await this.dmMessages(conversationId);
-    return rows
-      // Ordinary messages are type 'user' (or untyped, as on desktop); the rest are server-authored.
-      .filter(m => (m.type ?? 'user') === 'user')
-      .map(m => ({
-        id: text(m.id),
-        userId: text(m.user_id),
-        sender:
-          typeof m.display_name === 'string' && m.display_name
-            ? m.display_name
-            : text(m.username),
-        content: text(m.content),
-        // Unlabelled (or garbled) rows predate epochs: 0 means the current key, as on desktop.
-        keyVersion:
-          Number.isSafeInteger(m.key_version) && (m.key_version as number) >= 1
-            ? (m.key_version as number)
-            : 0,
-        createdAt: text(m.created_at),
-      }))
-      .reverse();
+    return (
+      rows
+        // Ordinary messages are type 'user' (or untyped, as on desktop); the rest are server-authored.
+        .filter(m => (m.type ?? 'user') === 'user')
+        .map(m => ({
+          id: text(m.id),
+          userId: text(m.user_id),
+          sender:
+            typeof m.display_name === 'string' && m.display_name
+              ? m.display_name
+              : text(m.username),
+          content: text(m.content),
+          // Unlabelled (or garbled) rows predate epochs: 0 means the current key, as on desktop.
+          keyVersion:
+            Number.isSafeInteger(m.key_version) &&
+            (m.key_version as number) >= 1
+              ? (m.key_version as number)
+              : 0,
+          createdAt: text(m.created_at),
+          attachments: attachments(m.attachments),
+        }))
+        .reverse()
+    );
+  }
+
+  /**
+   * A KLIPY GIF as an image source, through Concord's proxy so KLIPY never sees the
+   * phone. Null when the server has no GIF for the slug (or no KLIPY integration).
+   */
+  async gif(slug: string): Promise<Gif | null> {
+    // Same rule as the server: a slug is interpolated into a credentialed request.
+    if (!GIF_SLUG.test(slug)) return null;
+    let result: Record<string, unknown>;
+    try {
+      // The proxy passes KLIPY's own 401 through, which says nothing about our
+      // session: rotate ahead of time instead of on a 401.
+      await this.fresh();
+      result = await this.call(
+        'GET',
+        `/klipy/gifs/items?slugs=${slug}&format_filter=gif`,
+        undefined,
+        false,
+      );
+    } catch (error) {
+      // 404: this server runs without KLIPY.
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+    // KLIPY nests the list differently by endpoint; desktop accepts the same shapes.
+    const data = result.data as
+      | { data?: unknown; result?: unknown }
+      | unknown[]
+      | undefined;
+    const list = Array.isArray(data)
+      ? data
+      : data?.data ?? data?.result ?? result.result;
+    const item = (Array.isArray(list) ? list[0] : undefined) as
+      | KlipyItem
+      | undefined;
+    const file = item?.file;
+    const gif =
+      file?.hd?.gif ??
+      file?.md?.gif ??
+      file?.sm?.gif ??
+      file?.gif ??
+      item?.preview?.gif;
+    if (typeof gif?.url !== 'string' || !gif.url.startsWith('https://'))
+      return null;
+    return {
+      uri: `${this.base}/klipy/media?url=${encodeURIComponent(gif.url)}`,
+      width: Number.isFinite(gif.width) ? gif.width : undefined,
+      height: Number.isFinite(gif.height) ? gif.height : undefined,
+    };
   }
 
   async markDmRead(conversationId: string): Promise<void> {
