@@ -243,6 +243,8 @@ object ConcordCrypto {
         .toString()
     } catch (_: CharacterCodingException) {
       fail(Failure.INVALIDINPUT)
+    } finally {
+      plaintext.fill(0)
     }
   }
 }

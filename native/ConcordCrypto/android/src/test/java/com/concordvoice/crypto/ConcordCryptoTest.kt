@@ -203,4 +203,16 @@ class ConcordCryptoTest {
     assertEquals(0, service.store.count)
     expect(Failure.UNKNOWNHANDLE) { service.unwrapChannelKey("AA==", created) }
   }
+
+  @Test
+  fun releaseWipesSymmetricKeyBytes() {
+    val store = ConcordKeyStore()
+    val one = ByteArray(32) { 7 }
+    val two = ByteArray(32) { 9 }
+    store.release(store.add(ConcordKeyStore.Entry.Symmetric(one)))
+    store.add(ConcordKeyStore.Entry.Symmetric(two))
+    store.releaseAll()
+    assertArrayEquals(ByteArray(32), one)
+    assertArrayEquals(ByteArray(32), two)
+  }
 }

@@ -15,6 +15,8 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import javax.crypto.Cipher
 
 /**
@@ -34,6 +36,13 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   private val sessions = ConcordSessionVault(File(context.noBackupFilesDir, "concord-session.bin"))
 
   override fun getName() = "ConcordCryptoModule"
+
+  /** A JS reload or teardown drops every key handle and stops the crypto thread. */
+  override fun invalidate() {
+    executor.shutdownNow()
+    service.store.releaseAll()
+    super.invalidate()
+  }
 
   private fun run(promise: Promise, body: () -> Any?) =
     executor.execute {
@@ -121,7 +130,14 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   private fun authenticate(cipher: Cipher, title: String): Cipher {
     val activity = context.currentActivity as? FragmentActivity ?: fail(Failure.INTERACTIONNOTALLOWED)
     val result = CompletableFuture<Cipher>()
+    var prompt: BiometricPrompt? = null
     activity.runOnUiThread {
+      // BiometricPrompt silently drops authenticate() once the activity has saved its state
+      // (app backgrounded), so the callback would never run: refuse instead of waiting forever.
+      if (activity.isFinishing || activity.supportFragmentManager.isStateSaved) {
+        result.completeExceptionally(ConcordCryptoException(Failure.INTERACTIONNOTALLOWED))
+        return@runOnUiThread
+      }
       val callback =
         object : BiometricPrompt.AuthenticationCallback() {
           override fun onAuthenticationSucceeded(outcome: BiometricPrompt.AuthenticationResult) {
@@ -147,16 +163,26 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
           .setAllowedAuthenticators(BIOMETRIC_STRONG)
           .build()
       try {
-        BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback)
-          .authenticate(info, BiometricPrompt.CryptoObject(cipher))
+        prompt =
+          BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback).apply {
+            authenticate(info, BiometricPrompt.CryptoObject(cipher))
+          }
       } catch (_: Exception) {
         result.completeExceptionally(ConcordCryptoException(Failure.INTERACTIONNOTALLOWED))
       }
     }
     return try {
-      result.get()
+      // ponytail: fixed ceiling so a lost callback cannot block the crypto thread for good.
+      result.get(PROMPT_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+    } catch (_: TimeoutException) {
+      activity.runOnUiThread { prompt?.cancelAuthentication() }
+      throw ConcordCryptoException(Failure.INTERACTIONNOTALLOWED)
     } catch (e: ExecutionException) {
       throw e.cause as? ConcordCryptoException ?: ConcordCryptoException(Failure.AUTHENTICATIONFAILED)
     }
+  }
+
+  private companion object {
+    const val PROMPT_TIMEOUT_MINUTES = 5L
   }
 }

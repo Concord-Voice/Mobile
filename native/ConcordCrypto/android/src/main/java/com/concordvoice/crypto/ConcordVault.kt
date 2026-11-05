@@ -11,6 +11,7 @@ import java.io.File
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.PrivateKey
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -79,7 +80,13 @@ class ConcordIdentityVault(
     lateinit var cipher: Cipher
     keystoreCall {
       blob = AtomicFile(file).readFully()
-      val key = keyStore().getKey(name, null) as? SecretKey ?: fail(Failure.NOTFOUND)
+      // A blob without its key can never be read again: clear it rather than fail on every launch.
+      val key =
+        keyStore().getKey(name, null) as? SecretKey
+          ?: run {
+            AtomicFile(file).delete()
+            fail(Failure.NOTFOUND)
+          }
       if (blob.size < ConcordCrypto.IV_LENGTH + ConcordCrypto.TAG_LENGTH) fail(Failure.KEYCHAINFAILURE)
       cipher = Cipher.getInstance(AES_GCM)
       try {
@@ -95,6 +102,10 @@ class ConcordIdentityVault(
     val pkcs8 =
       try {
         unlocked.doFinal(blob, ConcordCrypto.IV_LENGTH, blob.size - ConcordCrypto.IV_LENGTH)
+      } catch (_: AEADBadTagException) {
+        // The user authenticated but the blob does not verify: it is corrupt, so clear it.
+        delete(account)
+        fail(Failure.NOTFOUND)
       } catch (_: Exception) {
         // Without the prompt Keystore refuses the auth-bound key: that is the silent-read proof.
         fail(if (allowUI) Failure.AUTHENTICATIONFAILED else Failure.INTERACTIONNOTALLOWED)

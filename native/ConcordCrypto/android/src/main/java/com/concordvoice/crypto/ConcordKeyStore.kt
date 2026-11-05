@@ -29,11 +29,14 @@ class ConcordKeyStore {
 
   @Synchronized
   fun release(handle: String) {
-    entries.remove(handle)
+    (entries.remove(handle) as? Entry.Symmetric)?.key?.fill(0)
   }
 
   @Synchronized
-  fun releaseAll() = entries.clear()
+  fun releaseAll() {
+    entries.values.forEach { (it as? Entry.Symmetric)?.key?.fill(0) }
+    entries.clear()
+  }
 
   val count: Int
     @Synchronized get() = entries.size
