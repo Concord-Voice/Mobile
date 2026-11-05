@@ -10,6 +10,9 @@ versions and changelogs in the
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The app is pre-alpha at 0.1.0. Until it is ready for a functional beta, each
+release raises only the patch number (0.1.1, 0.1.2, and so on). The functional
+beta is 0.2.0.
 This file names the pending section `[Prerelease]`, not `[Unreleased]`, after
 the release channel that ships it first.
 
@@ -26,9 +29,13 @@ belongs in it, and write it if the section has none. Do not edit the
 
 ## [Prerelease]
 
+## [0.1.0] - 2026-11-05
+
 The first iOS build signs you in, keeps your session behind Face ID, and reads
 and sends end-to-end encrypted direct messages. Android builds run, but
 encryption on Android is not built yet.
+
+**6 Total Changes** | 6 Added
 
 ### Added
 

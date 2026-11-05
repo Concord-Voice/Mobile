@@ -507,6 +507,7 @@ jobs:
           bash .github/scripts/tests/verify-changelog.test.sh
           bash .github/scripts/tests/promote-unreleased-changelog.test.sh
           bash scripts/test-sync-native-version.sh
+          node scripts/sync-native-version.mjs --check
       # Ported from Desktop's pr-ci with the same rules (#1857). `!cancelled()`
       # keeps it independent of the steps above, so one run reports every
       # failure. The script filters paths itself and fast-exits when nothing
