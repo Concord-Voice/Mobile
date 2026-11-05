@@ -542,7 +542,23 @@ Tier C deserves the most care. For each Tier C PR:
 3. **Invoke the configured deep-review skill via the Skill tool** — `$DEEP_REVIEW_SKILL <PR>` (default `/enhanced-pr-review <PR>`). This is the canonical path for Tier C: it fetches the Copilot review that Phase 3.6 requested, runs `/review-pr` internally to add subagent coverage (the repo's declared specialists), and produces a unified triage table that the developer can act on in one pass. Do NOT substitute a direct `/review-pr` invocation that bypasses the Copilot reconciliation — the existing Copilot review is load-bearing and ignoring it would re-do work the bot already finished.
 
    If Phase 3.6 was skipped for this PR (the developer chose "skip — review yourself"), fall back to `/review-pr $PR` directly. `/enhanced-pr-review` still works without a Copilot review present but adds less value than a direct subagent dispatch in that case.
-4. **Run local tests if the bump touches buildable/runnable code.** Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:
+4. **Run local tests if the bump touches buildable/runnable code.** Run them at the PR's head, never in the current checkout: that tree still has the old lockfile, so a pass there proves nothing about the bump. Use a throwaway worktree:
+
+   ```bash
+   # Detached at the fetched head, outside the repo (so the PR's files never land in
+   # an un-ignored path of this checkout), named by its SHA so a re-run after a
+   # force-push neither collides with a stale branch nor reuses an old worktree.
+   git fetch origin "pull/$PR/head"
+   ROOT=$(git rev-parse --show-toplevel)
+   TMP=$(mktemp -d)
+   WT="$TMP/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
+   git worktree add --detach "$WT" FETCH_HEAD
+   cd "$WT/$DIR"   # then install deps and run the commands below
+   ```
+
+   After the tests, drop the worktree by absolute path (each agent command may run in a fresh shell, so substitute the printed values if `$ROOT`, `$WT` and `$TMP` are gone): `cd "$ROOT" && git worktree remove --force "$WT" && rmdir "$TMP"`.
+
+   Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:
 
    ```bash
    # Per-directory override (preferred). $DIR is the PR's manifest directory and comes
@@ -684,11 +700,11 @@ The dependabot branches are deleted server-side by `--delete-branch`. Per operat
   git pull
   # Prune any local dependabot/* branches you may have checked out:
   git branch | grep '^[^*]*dependabot/' | xargs -n1 git branch -D 2>/dev/null
-  # If you used a worktree for this batch, also run:
-  #   git worktree remove .claude/worktrees/<worktree-name>
+  # If a test worktree was left behind (a run that stopped early), also run:
+  #   git worktree list    # then: git worktree remove --force <its path>
 ```
 
-Substitute the real default-branch name and `<worktree-name>` value before printing — never leave the placeholders.
+Substitute the real default-branch name before printing — never leave the placeholders.
 
 ---
 

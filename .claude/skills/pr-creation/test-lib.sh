@@ -11,6 +11,11 @@ out="$(parse_pr_closes $'Title\n\nCloses #12\nFixes #34, Resolves #56')"
 echo "$out" | grep -qx "12" || fail "parse_pr_closes missed 12"
 echo "$out" | grep -qx "34" || fail "parse_pr_closes missed 34"
 echo "$out" | grep -qx "56" || fail "parse_pr_closes missed 56"
+# A keyword inside a longer word (hotfix, prefix) is not a closing reference.
+[[ -z "$(parse_pr_closes 'Ships the hotfix #123 and a prefix #7')" ]] || fail "parse_pr_closes matched hotfix/prefix"
+[[ "$(parse_pr_closes 'Closes: #12')" = "12" ]] || fail "parse_pr_closes missed Closes: #12"
+[[ "$(parse_pr_refs 'Refs: #9')" = "9" ]] || fail "parse_pr_refs missed Refs: #9"
+[[ "$(parse_pr_closes '(fixes #9)')" = "9" ]] || fail "parse_pr_closes missed a keyword after punctuation"
 
 # parse_pr_refs extracts Refs without closing.
 parse_pr_refs 'Refs #99' | grep -qx "99" || fail "parse_pr_refs missed 99"

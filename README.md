@@ -277,6 +277,17 @@ job was accepted on 2026-10-24; Alpha had no Mobile app-level CI.
 
 IOC-gated CodeQL and Scorecard scans also run on pushes to `main` and daily.
 
+The IOC list itself (`scripts/security/iocs/shai-hulud-2.0.txt`) refreshes
+daily through `refresh-ioc-list.yml`. The workflow pins the upstream CSV to a
+commit and regenerates the list. If anything changed, it opens a PR authored
+by the org App, so that PR's required checks run. That needs the org variable
+`PUBLIC_MIRROR_APP_CLIENT_ID` and the secret `PUBLIC_MIRROR_APP_PRIVATE_KEY`
+to be visible to this repository; without them the run fails at the token step.
+`scripts/security/check-ioc-refresh-pr.sh` guards every refresh PR. The guard
+requests auto-merge only for a small, additions-only delta that collides with no
+tracked `package-lock.json`. Removals, oversized deltas, collisions and
+provenance mismatches stay open for `@Concord-Voice/security` review.
+
 Protected scanner runs read Semgrep rules and exclusions from the immutable
 workflow revision, while scanning PR source. PR ignore files and inline Semgrep
 suppressions cannot narrow that coverage. Protected OSV scans also include

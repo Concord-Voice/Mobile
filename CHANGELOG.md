@@ -10,6 +10,9 @@ versions and changelogs in the
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The app is pre-alpha at 0.1.0. Until it is ready for a functional beta, each
+release raises only the patch number (0.1.1, 0.1.2, and so on). The functional
+beta is 0.2.0.
 This file names the pending section `[Prerelease]`, not `[Unreleased]`, after
 the release channel that ships it first.
 
@@ -26,9 +29,25 @@ belongs in it, and write it if the section has none. Do not edit the
 
 ## [Prerelease]
 
-The first builds sign you in, keep your session behind Face ID or your
-fingerprint, and read and send end-to-end encrypted direct messages on both
-iOS and Android.
+Android now encrypts messages natively, so Android matches iOS: it signs you
+in, keeps your session behind your fingerprint, and reads and sends end-to-end
+encrypted direct messages.
+
+### Added
+
+- **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
+
+### Fixed
+
+- **Sign-in:** An encryption problem on the device no longer shows up as "Could not reach the server", and the unlock button names your phone's biometric feature.
+
+## [0.1.0] - 2026-11-05
+
+The first iOS build signs you in, keeps your session behind Face ID, and reads
+and sends end-to-end encrypted direct messages. Android builds run, but
+encryption on Android is not built yet.
+
+**6 Total Changes** | 6 Added
 
 ### Added
 
@@ -38,8 +57,3 @@ iOS and Android.
 - **Security:** The iOS app proves to the server that it is genuine with Apple App Attest.
 - **Messages:** Conversations follow the server's WebSocket event budgets.
 - **Updates:** The app sends its version and platform, so a server can require a minimum app version.
-- **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
-
-### Fixed
-
-- **Sign-in:** An encryption problem on the device no longer shows up as "Could not reach the server", and the unlock button names your phone's biometric feature.

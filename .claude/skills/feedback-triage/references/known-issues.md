@@ -13,9 +13,10 @@ The user-facing **Known Issues** list is a single **pinned issue** in `$PUBLIC` 
 
 ```bash
 # Locate by sentinel (title is stable; confirm via the body sentinel, never the title alone).
+# $ME is resolved once, as in markers-and-templates.md (FT_ME; a bot in its <name>[bot] form).
 KI=$(gh issue list -R "$PUBLIC" --state open --search "Known Issues in:title" --limit 20 \
-  --json number,body \
-  --jq "[.[] | select(.body | startswith(\"<!-- feedback-triage:known-issues v1 -->\"))][0].number")
+  --json number,body,author \
+  | jq -r --arg me "$ME" '[.[] | select((.author.login | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end) == $me and (.body | startswith("<!-- feedback-triage:known-issues v1 -->")))][0].number')
 
 # First run only — create + pin with a BOOTSTRAP body (the real body is built later,
 # in Phase 6.5; Phase 0 just needs the issue to exist so Phases 3/5 can link it).
@@ -58,7 +59,7 @@ _Last updated by automated triage on YYYY-MM-DD._
 - …
 ```
 
-A section with no entries is **omitted**. If every section is empty, the body is a single line: `_No known issues are currently tracked — file away!_`
+A section with no entries is **omitted**. If every section is empty, the body is the sentinel line followed by `_No known issues are currently tracked — file away!_`. Keep the sentinel: without it the next run cannot find the issue and creates a second one.
 
 ### Entry rules
 - **Sort** within each group by report count descending (demand-ranked).
