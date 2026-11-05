@@ -167,7 +167,7 @@ test('marks what it cannot decrypt and unwraps GIF envelopes', async () => {
 });
 
 test('keeps attachment details beside an empty text', async () => {
-  const photo = { fileType: 'photo', fileSize: 2048 };
+  const photo = { id: 'a1', fileType: 'photo', fileSize: 2048 };
   const { conv, socket } = setup([
     { ...row('m1', '2: ', 2), attachments: [photo] },
     { ...row('m2', '2:caption', 2), attachments: [] },
@@ -180,7 +180,7 @@ test('keeps attachment details beside an empty text', async () => {
     userId: PEER,
     content: '2: ',
     keyVersion: 2,
-    attachments: [{ fileType: 'file', fileSize: 5 }],
+    attachments: [{ id: 'a2', fileType: 'file', fileSize: 5 }],
   });
   await flush();
   expect(
@@ -190,7 +190,7 @@ test('keeps attachment details beside an empty text', async () => {
     ['caption', null, false],
     // The details are server metadata, so they show even when the text will not open.
     [expect.any(String), [photo], true],
-    ['', [{ fileType: 'file', fileSize: 5 }], false],
+    ['', [{ id: 'a2', fileType: 'file', fileSize: 5 }], false],
   ]);
 });
 

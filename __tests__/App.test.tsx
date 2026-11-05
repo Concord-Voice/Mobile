@@ -304,9 +304,9 @@ test('plays GIFs through the proxy and names attachments', async () => {
         sender: 'Peer',
         text: '',
         attachments: [
-          { fileType: 'photo', fileSize: 2048 },
-          { fileType: 'file', fileSize: 3 * 1024 * 1024 },
-          { fileType: 'audio', fileSize: 12 },
+          { id: 'a1', fileType: 'photo', fileSize: 2048 },
+          { id: 'a2', fileType: 'file', fileSize: 3 * 1024 * 1024 },
+          { id: 'a3', fileType: 'audio', fileSize: 12 },
         ],
       },
       {
@@ -314,7 +314,7 @@ test('plays GIFs through the proxy and names attachments', async () => {
         userId: 'peer',
         sender: 'Peer',
         text: 'caption',
-        attachments: [{ fileType: 'video', fileSize: 1536 }],
+        attachments: [{ id: 'a4', fileType: 'video', fileSize: 1536 }],
       },
     ],
     dropped: false,

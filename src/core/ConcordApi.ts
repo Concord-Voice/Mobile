@@ -14,7 +14,13 @@ export type ClientInfo = { platform: string; version: string };
 
 /** "1.0(5)" from the bundle becomes "1.0.0": the server wants exactly major.minor.patch. */
 export function clientVersion(bundleVersion: string): string {
-  const parts = bundleVersion.replace(/\(.*\)$/, '').split('.');
+  // Cut a trailing "(build)" at its first "(": a regex here backtracks on long input.
+  const open = bundleVersion.indexOf('(');
+  const base =
+    open >= 0 && bundleVersion.endsWith(')')
+      ? bundleVersion.slice(0, open)
+      : bundleVersion;
+  const parts = base.split('.');
   while (parts.length < 3) parts.push('0');
   return parts.slice(0, 3).join('.');
 }
@@ -72,7 +78,7 @@ type KlipyItem = {
 const GIF_SLUG = /^[A-Za-z0-9-]{1,100}$/;
 
 /** File details the server sends beside a message. The file itself stays encrypted. */
-export type Attachment = { fileType: string; fileSize: number };
+export type Attachment = { id: string; fileType: string; fileSize: number };
 
 /** The attachment summaries on a history row or live frame; malformed entries are dropped. */
 export function attachments(value: unknown): Attachment[] {
@@ -82,10 +88,11 @@ export function attachments(value: unknown): Attachment[] {
       string,
       unknown
     >;
-    return typeof v.file_type === 'string' &&
+    return typeof v.id === 'string' &&
+      typeof v.file_type === 'string' &&
       Number.isSafeInteger(v.file_size) &&
       (v.file_size as number) >= 0
-      ? [{ fileType: v.file_type, fileSize: v.file_size as number }]
+      ? [{ id: v.id, fileType: v.file_type, fileSize: v.file_size as number }]
       : [];
   });
 }

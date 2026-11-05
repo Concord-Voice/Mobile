@@ -25,7 +25,10 @@ const gifLookups = new WeakMap<ConcordApi, Map<string, Promise<Gif | null>>>();
 
 function lookupGif(api: ConcordApi, slug: string): Promise<Gif | null> {
   let lookups = gifLookups.get(api);
-  if (!lookups) gifLookups.set(api, (lookups = new Map()));
+  if (!lookups) {
+    lookups = new Map();
+    gifLookups.set(api, lookups);
+  }
   let lookup = lookups.get(slug);
   if (!lookup) {
     lookup = api.gif(slug);
@@ -44,7 +47,7 @@ function fit(width = 0, height = 0) {
 }
 
 /** A GIF message, loaded through Concord's proxy. Shows "GIF" while loading or if it fails. */
-function GifView({ api, slug }: { api: ConcordApi; slug: string }) {
+function GifView({ api, slug }: Readonly<{ api: ConcordApi; slug: string }>) {
   const [source, setSource] = useState<
     (Gif & { headers: Record<string, string> }) | null
   >(null);
@@ -86,13 +89,11 @@ const KINDS: Record<string, string> = {
 
 /** "Photo, 2.0 KB": attachments are named until the app can decrypt and show them. */
 function attachmentLabel({ fileType, fileSize }: Attachment): string {
-  const size =
-    fileSize < 1024
-      ? `${fileSize} B`
-      : fileSize < 1024 * 1024
-      ? `${(fileSize / 1024).toFixed(1)} KB`
-      : `${(fileSize / 1024 / 1024).toFixed(1)} MB`;
-  return `${KINDS[fileType] ?? 'File'}, ${size}`;
+  const kind = KINDS[fileType] ?? 'File';
+  if (fileSize < 1024) return `${kind}, ${fileSize} B`;
+  if (fileSize < 1024 * 1024)
+    return `${kind}, ${(fileSize / 1024).toFixed(1)} KB`;
+  return `${kind}, ${(fileSize / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** One DM conversation: decrypted history, live messages and a composer. */
@@ -214,8 +215,8 @@ export function Chat({
             {item.gifSlug && api ? (
               <GifView api={api} slug={item.gifSlug} />
             ) : null}
-            {item.attachments?.map((a, i) => (
-              <Text key={i} style={styles.attachment}>
+            {item.attachments?.map(a => (
+              <Text key={a.id} style={styles.attachment}>
                 {attachmentLabel(a)}
               </Text>
             ))}

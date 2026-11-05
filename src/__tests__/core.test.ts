@@ -363,6 +363,7 @@ describe('ConcordApi', () => {
                   file_size: 2048,
                 },
                 { id: 'a2', file_type: 'file', file_size: -1 },
+                { file_type: 'photo', file_size: 1 },
                 'junk',
               ],
             },
@@ -444,7 +445,7 @@ describe('ConcordApi', () => {
         keyVersion: 4,
         createdAt: 't3',
         // Malformed summaries are dropped rather than failing the page.
-        attachments: [{ fileType: 'photo', fileSize: 2048 }],
+        attachments: [{ id: 'a1', fileType: 'photo', fileSize: 2048 }],
       },
     ]);
     await api.markDmRead('c1');
@@ -510,7 +511,7 @@ describe('ConcordApi', () => {
     const before = calls.length;
     expect(await api.gif('../auth/logout')).toBeNull();
     expect(await api.gif('')).toBeNull();
-    expect(calls.length).toBe(before);
+    expect(calls).toHaveLength(before);
   });
 
   it('reports every rotation and resumes a saved session', async () => {
@@ -866,6 +867,8 @@ describe('ConcordApi', () => {
     expect(clientVersion('1.0(5)')).toBe('1.0.0');
     expect(clientVersion('2.3.4(17)')).toBe('2.3.4');
     expect(clientVersion('1')).toBe('1.0.0');
+    // Only a closed, trailing "(build)" is cut.
+    expect(clientVersion('2.1(7')).toBe('2.1(7.0');
   });
 
   it('treats a malformed body as empty and rejects invalid shapes', async () => {
@@ -957,7 +960,7 @@ describe('DmSocket', () => {
       userId: PEER,
       content: 'cipher',
       keyVersion: 1,
-      attachments: [{ fileType: 'video', fileSize: 9 }],
+      attachments: [{ id: 'a1', fileType: 'video', fileSize: 9 }],
     });
     // The live listener sees every valid frame; filtering is the caller's job.
     expect(live).toEqual(['spoof', 'm2']);
