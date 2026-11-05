@@ -354,6 +354,18 @@ describe('ConcordApi', () => {
               type: 'user',
               key_version: 4,
               created_at: 't3',
+              // Desktop sends a file with the text " "; the details sit beside it.
+              attachments: [
+                {
+                  id: 'a1',
+                  file_type: 'photo',
+                  mime_type: 'image/png',
+                  file_size: 2048,
+                },
+                { id: 'a2', file_type: 'file', file_size: -1 },
+                { file_type: 'photo', file_size: 1 },
+                'junk',
+              ],
             },
             {
               id: 'expiry',
@@ -414,6 +426,7 @@ describe('ConcordApi', () => {
         content: 'YQ==',
         keyVersion: 0,
         createdAt: 't0',
+        attachments: [],
       },
       {
         id: 'm1',
@@ -422,6 +435,7 @@ describe('ConcordApi', () => {
         content: 'Yg==',
         keyVersion: 2,
         createdAt: 't1',
+        attachments: [],
       },
       {
         id: 'm3',
@@ -430,10 +444,146 @@ describe('ConcordApi', () => {
         content: 'Yw==',
         keyVersion: 4,
         createdAt: 't3',
+        // Malformed summaries are dropped rather than failing the page.
+        attachments: [{ id: 'a1', fileType: 'photo', fileSize: 2048 }],
       },
     ]);
     await api.markDmRead('c1');
     expect(calls.at(-1)?.key).toBe('POST /dm/conversations/c1/read');
+  });
+
+  it('resolves a GIF through the proxy, loaded with the session headers', async () => {
+    const media = 'https://static.klipy.com/ii/x/cat.gif';
+    const { api, calls } = signedIn({
+      'GET /klipy/gifs/items?slugs=cat-1&format_filter=gif': () => [
+        200,
+        {
+          data: {
+            data: [
+              {
+                file: { md: { gif: { url: media, width: 320, height: 240 } } },
+              },
+            ],
+          },
+        },
+      ],
+      'GET /klipy/gifs/items?slugs=flat&format_filter=gif': () => [
+        200,
+        { data: [{ preview: { gif: { url: media } } }] },
+      ],
+      'GET /klipy/gifs/items?slugs=plain&format_filter=gif': () => [
+        200,
+        { data: [{ file: { gif: { url: 'http://static.klipy.com/a.gif' } } }] },
+      ],
+      'GET /klipy/gifs/items?slugs=gone&format_filter=gif': () => [
+        200,
+        { result: [] },
+      ],
+      'GET /klipy/gifs/items?slugs=boom&format_filter=gif': () => [500, {}],
+    });
+    await api.login('e', 'p');
+    const gif = await api.gif('cat-1');
+    expect(gif).toEqual({
+      uri: `https://api.example.test/api/v1/klipy/media?url=${encodeURIComponent(
+        media,
+      )}`,
+      width: 320,
+      height: 240,
+    });
+    const { headers } = await api.mediaSource(gif!.uri);
+    expect(headers).toEqual(
+      expect.objectContaining({
+        Authorization: 'Bearer a1',
+        'X-Session-ID': 's1',
+        'X-Machine-Id': MACHINE,
+      }),
+    );
+    expect(headers.Accept).toBeUndefined();
+    // The session headers go only to this server's media proxy.
+    await expect(api.mediaSource(media)).rejects.toThrow();
+    await expect(
+      api.mediaSource('https://api.example.test/api/v1/auth/logout'),
+    ).rejects.toThrow();
+    expect(await api.gif('flat')).toEqual(
+      expect.objectContaining({ width: undefined, height: undefined }),
+    );
+    // Only https renditions, only found GIFs, only servers that run KLIPY.
+    expect(await api.gif('plain')).toBeNull();
+    expect(await api.gif('gone')).toBeNull();
+    expect(await api.gif('nokey')).toBeNull();
+    await expect(api.gif('boom')).rejects.toThrow();
+    // A slug that is not the server's shape never reaches a request path.
+    const before = calls.length;
+    expect(await api.gif('../auth/logout')).toBeNull();
+    expect(await api.gif('')).toBeNull();
+    expect(calls).toHaveLength(before);
+  });
+
+  it('rotates before a GIF request instead of after its 401', async () => {
+    let issued = 1;
+    const { api, calls } = signedIn({
+      'POST /auth/login': () => [
+        200,
+        {
+          access_token: 'a1',
+          refresh_token: 'r1',
+          session_id: 's1',
+          expires_in: 900,
+          user: { id: ME },
+          e2ee_keys: {
+            wrapped_private_key: 'V1JBUA==', // pragma: allowlist secret
+            key_derivation_salt: 'U0FMVA==',
+            key_derivation_alg: 'argon2id',
+          },
+        },
+      ],
+      'POST /auth/refresh': () => {
+        issued += 1;
+        return [
+          200,
+          {
+            access_token: `a${issued}`,
+            refresh_token: `r${issued}`,
+            session_id: 's1',
+            expires_in: 900,
+          },
+        ];
+      },
+      'GET /klipy/gifs/items?slugs=cat-1&format_filter=gif': () => [401, {}],
+      'GET /users/me/privacy': () => [
+        200,
+        { privacy: { load_gifs_automatically: true } },
+      ],
+    });
+    const now = jest.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(1_000_000);
+      await api.login('e', 'p');
+      const uri = 'https://api.example.test/api/v1/klipy/media?url=x';
+      // Fresh: no rotation. A 401 from the GIF proxy may be KLIPY's, so none then either.
+      expect((await api.mediaSource(uri)).headers.Authorization).toBe(
+        'Bearer a1',
+      );
+      await expect(api.gif('cat-1')).rejects.toThrow();
+      expect(calls.filter(c => c.key === 'POST /auth/refresh')).toHaveLength(0);
+      // Under a minute left: rotate first, so the image carries a live token.
+      now.mockReturnValue(1_000_000 + 14.5 * 60_000);
+      expect((await api.mediaSource(uri)).headers.Authorization).toBe(
+        'Bearer a2',
+      );
+      expect(calls.filter(c => c.key === 'POST /auth/refresh')).toHaveLength(1);
+      expect(await api.loadGifsAutomatically()).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('reads the GIF setting as off unless the server says on', async () => {
+    const { api } = signedIn({
+      'GET /users/me/privacy': () => [200, { privacy: {} }],
+    });
+    await api.login('e', 'p');
+    expect(await api.loadGifsAutomatically()).toBe(false);
   });
 
   it('reports every rotation and resumes a saved session', async () => {
@@ -789,6 +939,8 @@ describe('ConcordApi', () => {
     expect(clientVersion('1.0(5)')).toBe('1.0.0');
     expect(clientVersion('2.3.4(17)')).toBe('2.3.4');
     expect(clientVersion('1')).toBe('1.0.0');
+    // Only a closed, trailing "(build)" is cut.
+    expect(clientVersion('2.1(7')).toBe('2.1(7.0');
   });
 
   it('treats a malformed body as empty and rejects invalid shapes', async () => {
@@ -857,6 +1009,14 @@ describe('DmSocket', () => {
               user_id: PEER,
               content: 'cipher',
               key_version: 1,
+              attachments: [
+                {
+                  id: 'a1',
+                  file_type: 'video',
+                  mime_type: 'video/mp4',
+                  file_size: 9,
+                },
+              ],
             });
           }
         })),
@@ -872,6 +1032,7 @@ describe('DmSocket', () => {
       userId: PEER,
       content: 'cipher',
       keyVersion: 1,
+      attachments: [{ id: 'a1', fileType: 'video', fileSize: 9 }],
     });
     // The live listener sees every valid frame; filtering is the caller's job.
     expect(live).toEqual(['spoof', 'm2']);
