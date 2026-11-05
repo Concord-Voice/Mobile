@@ -1,7 +1,9 @@
+import { FlatList } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import App from '../App';
 import type { ConcordApi } from '../src/core/ConcordApi';
 import { useSession } from '../src/state/session';
+import type { ChatLine } from '../src/state/conversation';
 import { Chat } from '../src/ui/Chat';
 
 const text = (tree: ReactTestRenderer.ReactTestRenderer) =>
@@ -275,7 +277,7 @@ test('sends a message and shows decrypted lines', async () => {
   expect(fake.close).toHaveBeenCalled();
 });
 
-test('plays GIFs through the proxy and names attachments', async () => {
+function gifApi(auto: boolean | Error) {
   const gif = jest.fn(async (slug: string) => {
     if (slug === 'boom') throw new Error('offline');
     return slug === 'cat'
@@ -290,92 +292,199 @@ test('plays GIFs through the proxy and names attachments', async () => {
   });
   const api = {
     gif,
-    headers: jest.fn(async () => ({ Authorization: 'Bearer t' })),
+    mediaSource: jest.fn(async (uri: string) => ({
+      uri,
+      headers: { Authorization: 'Bearer t' },
+    })),
+    loadGifsAutomatically: jest.fn(async () => {
+      if (auto instanceof Error) throw auto;
+      return auto;
+    }),
   } as unknown as ConcordApi;
-  const fake = {
-    lines: [
-      { id: 'm1', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'cat' },
-      { id: 'm2', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'gone' },
-      { id: 'm3', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'boom' },
-      { id: 'm4', userId: 'u', sender: '', text: '', gifSlug: 'tiny' },
-      {
-        id: 'm5',
-        userId: 'peer',
-        sender: 'Peer',
-        text: '',
-        attachments: [
-          { id: 'a1', fileType: 'photo', fileSize: 2048 },
-          { id: 'a2', fileType: 'file', fileSize: 3 * 1024 * 1024 },
-          { id: 'a3', fileType: 'audio', fileSize: 12 },
-        ],
-      },
-      {
-        id: 'm6',
-        userId: 'peer',
-        sender: 'Peer',
-        text: 'caption',
-        attachments: [{ id: 'a4', fileType: 'video', fileSize: 1536 }],
-      },
-    ],
+  return { api, gif };
+}
+
+function chatWith(lines: ChatLine[]) {
+  return {
+    lines,
     dropped: false,
     onChange: null,
     start: jest.fn(async () => {}),
     send: jest.fn(async () => {}),
     close: jest.fn(),
   };
+}
+
+/** The list reports which messages are on screen; the test renderer never lays out. */
+async function onScreen(
+  tree: ReactTestRenderer.ReactTestRenderer,
+  ids: string[],
+) {
+  await ReactTestRenderer.act(async () =>
+    tree.root.findByType(FlatList).props.onViewableItemsChanged({
+      viewableItems: ids.map(key => ({ key })),
+      changed: [],
+    }),
+  );
+}
+
+test('plays GIFs through the proxy and names attachments', async () => {
+  const { api, gif } = gifApi(true);
+  const fake = chatWith([
+    { id: 'm1', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'cat' },
+    { id: 'm2', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'gone' },
+    { id: 'm3', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'boom' },
+    { id: 'm4', userId: 'u', sender: '', text: '', gifSlug: 'tiny' },
+    {
+      id: 'm5',
+      userId: 'peer',
+      sender: 'Peer',
+      text: '',
+      attachments: [
+        { id: 'a1', fileType: 'photo', fileSize: 2048 },
+        { id: 'a2', fileType: 'file', fileSize: 3 * 1024 * 1024 },
+        { id: 'a3', fileType: 'audio', fileSize: 12 },
+        { id: 'a5', fileType: 'constructor', fileSize: 2 },
+      ],
+    },
+    {
+      id: 'm6',
+      userId: 'peer',
+      sender: 'Peer',
+      text: 'caption',
+      attachments: [{ id: 'a4', fileType: 'video', fileSize: 1536 }],
+    },
+    { id: 'm7', userId: 'peer', sender: 'Peer', text: '', gifSlug: '' },
+  ]);
   useSession.setState({
     stage: { kind: 'signed_in', userId: 'u' },
     api,
     identity: 'HANDLE' as never,
   });
   const dm = { id: 'd1', title: 'Peer', unreadCount: 0, lastActivity: 'now' };
-  await ReactTestRenderer.act(async () => {
-    mounted = ReactTestRenderer.create(
-      <Chat dm={dm} onBack={() => {}} open={() => fake} />,
-    );
-  });
-  const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
-  const images = () =>
-    tree.root.findAll(
-      n => n.props.accessibilityLabel === 'GIF' && !!n.props.onError,
-    );
-  // The list is newest first, so pick each GIF by its URL.
-  const image = (id: string) =>
-    images().find(n =>
-      n.props.source.uri.endsWith(id),
-    ) as ReactTestRenderer.ReactTestInstance;
-  const [cat, tiny] = [image('=a'), image('=b')];
-  expect(cat.props.source).toEqual({
-    uri: 'https://api.example.test/klipy/media?url=a',
-    headers: { Authorization: 'Bearer t' },
-  });
-  // 480 x 270 fits 240 wide; a GIF with no size gets a default frame.
-  expect(cat.props.style).toContainEqual({ width: 240, height: 135 });
-  expect(tiny.props.style).toContainEqual({ width: 200, height: 150 });
-  const shown = text(tree);
-  // A missing or failed GIF says what it was instead of an empty bubble.
-  expect(shown.split('|').filter(t => t === 'GIF')).toHaveLength(2);
-  expect(shown).toContain('Photo, 2.0 KB');
-  expect(shown).toContain('File, 3.0 MB');
-  expect(shown).toContain('Audio, 12 B');
-  expect(shown).toContain('caption|Video, 1.5 KB');
-  await ReactTestRenderer.act(async () => cat.props.onError());
-  expect(
-    text(tree)
-      .split('|')
-      .filter(t => t === 'GIF'),
-  ).toHaveLength(3);
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+  try {
+    await ReactTestRenderer.act(async () => {
+      mounted = ReactTestRenderer.create(
+        <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+      );
+    });
+    const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+    // Nothing is fetched for a message that has not been on screen.
+    expect(gif).not.toHaveBeenCalled();
+    await onScreen(tree, ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7']);
+    const images = () =>
+      tree.root.findAll(
+        n => n.props.accessibilityLabel === 'GIF' && !!n.props.onError,
+      );
+    // The list is newest first, so pick each GIF by its URL.
+    const image = (id: string) =>
+      images().find(n =>
+        n.props.source.uri.endsWith(id),
+      ) as ReactTestRenderer.ReactTestInstance;
+    const [cat, tiny] = [image('=a'), image('=b')];
+    expect(cat.props.source).toEqual({
+      uri: 'https://api.example.test/klipy/media?url=a',
+      headers: { Authorization: 'Bearer t' },
+    });
+    // 480 x 270 fits 240 wide; a GIF with no size gets a default frame.
+    expect(cat.props.style).toContainEqual({ width: 240, height: 135 });
+    expect(tiny.props.style).toContainEqual({ width: 200, height: 150 });
+    const shown = text(tree);
+    // A missing or failed GIF says what it was instead of an empty bubble.
+    expect(shown.split('|').filter(t => t === 'GIF')).toHaveLength(2);
+    expect(shown).toContain('Photo, 2.0 KB');
+    expect(shown).toContain('File, 3.0 MB');
+    expect(shown).toContain('Audio, 12 B');
+    expect(shown).toContain('File, 2 B');
+    expect(shown).toContain('caption|Video, 1.5 KB');
+    // A message with nothing to show still says so.
+    expect(shown).toContain('Empty message');
+    await ReactTestRenderer.act(async () => cat.props.onError());
+    expect(
+      text(tree)
+        .split('|')
+        .filter(t => t === 'GIF'),
+    ).toHaveLength(3);
 
-  // Found GIFs are looked up once; a failed lookup is tried again next time.
-  await ReactTestRenderer.act(() => mounted?.unmount());
-  await ReactTestRenderer.act(async () => {
-    mounted = ReactTestRenderer.create(
-      <Chat dm={dm} onBack={() => {}} open={() => fake} />,
-    );
-  });
-  expect(gif.mock.calls.filter(([s]) => s === 'cat')).toHaveLength(1);
-  expect(gif.mock.calls.filter(([s]) => s === 'boom')).toHaveLength(2);
+    // Found GIFs are looked up once and keep their size while they reload; a failed
+    // lookup is tried again after a minute.
+    const remount = async () => {
+      await ReactTestRenderer.act(() => mounted?.unmount());
+      await ReactTestRenderer.act(async () => {
+        mounted = ReactTestRenderer.create(
+          <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+        );
+      });
+      return mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+    };
+    let again = await remount();
+    expect(
+      again.root.findAll(
+        n =>
+          Array.isArray(n.props.style) &&
+          n.props.style.some(
+            (s: { width?: number; height?: number } | null) =>
+              s?.width === 240 && s?.height === 135,
+          ),
+      ).length,
+    ).toBeGreaterThan(0);
+    await onScreen(again, ['m1', 'm3']);
+    expect(gif.mock.calls.filter(([s]) => s === 'cat')).toHaveLength(1);
+    expect(gif.mock.calls.filter(([s]) => s === 'boom')).toHaveLength(1);
+    now.mockReturnValue(1_000_000 + 61_000);
+    again = await remount();
+    await onScreen(again, ['m3']);
+    expect(gif.mock.calls.filter(([s]) => s === 'boom')).toHaveLength(2);
+  } finally {
+    now.mockRestore();
+  }
 });
+
+test.each([
+  ['is off', false],
+  ['cannot be read', new Error('offline')],
+] as const)(
+  'waits for a tap when automatic GIF loading %s',
+  async (_, auto) => {
+    const { api, gif } = gifApi(auto);
+    const fake = chatWith([
+      { id: 'm1', userId: 'peer', sender: 'Peer', text: 'hi', gifSlug: 'tiny' },
+    ]);
+    useSession.setState({
+      stage: { kind: 'signed_in', userId: 'u' },
+      api,
+      identity: 'HANDLE' as never,
+    });
+    const dm = { id: 'd2', title: 'Peer', unreadCount: 0, lastActivity: 'now' };
+    await ReactTestRenderer.act(async () => {
+      mounted = ReactTestRenderer.create(
+        <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+      );
+    });
+    const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+    await onScreen(tree, ['m1']);
+    expect(text(tree)).toContain('hi|GIF, tap to load');
+    expect(gif).not.toHaveBeenCalled();
+    const [tap] = tree.root.findAll(
+      n =>
+        n.props.accessibilityRole === 'button' &&
+        !!n.props.onPress &&
+        n
+          .findAllByType('Text' as never)
+          .some(t => t.props.children === 'GIF, tap to load'),
+    );
+    await ReactTestRenderer.act(async () => tap.props.onPress());
+    expect(gif).toHaveBeenCalledWith('tiny');
+    expect(
+      tree.root.findAll(
+        n =>
+          n.props.accessibilityLabel === 'GIF' &&
+          n.props.source?.uri === 'https://api.example.test/klipy/media?url=b',
+      ).length,
+    ).toBeGreaterThan(0);
+  },
+);
 
 test.each(['late error', 'late success'] as const)(
   'ignores %s from an old Chat start after replacing the conversation',

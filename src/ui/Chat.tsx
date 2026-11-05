@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  type ListViewToken,
 } from 'react-native';
 import type {
   Attachment,
@@ -21,21 +22,37 @@ import { colors } from './theme';
 
 // ponytail: GIF lookups are kept for the app run, because the proxy allows 30 a
 // minute per user. Persist them if GIF-heavy conversations still hit that limit.
-const gifLookups = new WeakMap<ConcordApi, Map<string, Promise<Gif | null>>>();
+type Lookup = {
+  promise: Promise<Gif | null>;
+  gif?: Gif | null;
+  failedAt?: number;
+};
+const gifLookups = new WeakMap<ConcordApi, Map<string, Lookup>>();
+const GIF_RETRY_MS = 60_000;
 
-function lookupGif(api: ConcordApi, slug: string): Promise<Gif | null> {
+function lookupGif(api: ConcordApi, slug: string): Lookup {
   let lookups = gifLookups.get(api);
   if (!lookups) {
     lookups = new Map();
     gifLookups.set(api, lookups);
   }
-  let lookup = lookups.get(slug);
-  if (!lookup) {
-    lookup = api.gif(slug);
-    lookups.set(slug, lookup);
-    // A failed lookup is forgotten, so the next view of the message retries it.
-    lookup.catch(() => lookups.delete(slug));
-  }
+  const known = lookups.get(slug);
+  // A failed lookup is tried again after a minute, not on every view of the message.
+  if (
+    known &&
+    (known.failedAt === undefined || Date.now() - known.failedAt < GIF_RETRY_MS)
+  )
+    return known;
+  const lookup: Lookup = { promise: api.gif(slug) };
+  lookup.promise.then(
+    gif => {
+      lookup.gif = gif;
+    },
+    () => {
+      lookup.failedAt = Date.now();
+    },
+  );
+  lookups.set(slug, lookup);
   return lookup;
 }
 
@@ -46,30 +63,69 @@ function fit(width = 0, height = 0) {
   return { width: w * scale, height: h * scale };
 }
 
-/** A GIF message, loaded through Concord's proxy. Shows "GIF" while loading or if it fails. */
-function GifView({ api, slug }: Readonly<{ api: ConcordApi; slug: string }>) {
+/**
+ * A GIF message, through Concord's proxy. As on desktop, it loads once the message is
+ * on screen, and only after a tap when the user turned automatic GIF loading off.
+ */
+function GifView({
+  api,
+  slug,
+  visible,
+  auto,
+}: Readonly<{
+  api: ConcordApi;
+  slug: string;
+  visible: boolean;
+  auto: boolean | null;
+}>) {
+  const [tapped, setTapped] = useState(false);
   const [source, setSource] = useState<
     (Gif & { headers: Record<string, string> }) | null
   >(null);
   const [failed, setFailed] = useState(false);
+  const load = visible && (auto === true || tapped);
   useEffect(() => {
+    setSource(null);
+    setFailed(false);
+    if (!load) return;
     let live = true;
-    // Headers are read per view: they carry the current access token.
-    Promise.all([lookupGif(api, slug), api.headers()]).then(
-      ([gif, headers]) => {
-        if (!live) return;
-        if (gif) setSource({ ...gif, headers });
-        else setFailed(true);
-      },
-      () => {
-        if (live) setFailed(true);
-      },
-    );
+    // Headers are read after the lookup, so they carry a current access token.
+    lookupGif(api, slug)
+      .promise.then(gif =>
+        gif
+          ? api.mediaSource(gif.uri).then(media => ({ ...gif, ...media }))
+          : null,
+      )
+      .then(
+        next => {
+          if (!live) return;
+          if (next) setSource(next);
+          else setFailed(true);
+        },
+        () => {
+          if (live) setFailed(true);
+        },
+      );
     return () => {
       live = false;
     };
-  }, [api, slug]);
-  if (failed || !source) return <Text style={styles.attachment}>GIF</Text>;
+  }, [api, slug, load]);
+  if (auto === false && !tapped)
+    return (
+      <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
+        <Text style={styles.attachment}>GIF, tap to load</Text>
+      </Pressable>
+    );
+  if (failed) return <Text style={styles.attachment}>GIF</Text>;
+  if (!source) {
+    // A GIF seen before keeps its size while it reloads, so the list does not jump.
+    const known = gifLookups.get(api)?.get(slug)?.gif;
+    return known ? (
+      <View style={[styles.gif, fit(known.width, known.height)]} />
+    ) : (
+      <Text style={styles.attachment}>GIF</Text>
+    );
+  }
   return (
     <Image
       accessibilityLabel="GIF"
@@ -80,16 +136,16 @@ function GifView({ api, slug }: Readonly<{ api: ConcordApi; slug: string }>) {
   );
 }
 
-const KINDS: Record<string, string> = {
-  photo: 'Photo',
-  animated: 'Animated image',
-  video: 'Video',
-  audio: 'Audio',
-};
+const KINDS = new Map([
+  ['photo', 'Photo'],
+  ['animated', 'Animated image'],
+  ['video', 'Video'],
+  ['audio', 'Audio'],
+]);
 
 /** "Photo, 2.0 KB": attachments are named until the app can decrypt and show them. */
 function attachmentLabel({ fileType, fileSize }: Attachment): string {
-  const kind = KINDS[fileType] ?? 'File';
+  const kind = KINDS.get(fileType) ?? 'File';
   if (fileSize < 1024) return `${kind}, ${fileSize} B`;
   if (fileSize < 1024 * 1024)
     return `${kind}, ${(fileSize / 1024).toFixed(1)} KB`;
@@ -124,6 +180,38 @@ export function Chat({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const liveConversation = useRef<typeof conversation>(null);
+  // null until the privacy setting arrives; a failed read counts as off.
+  const [autoGifs, setAutoGifs] = useState<boolean | null>(null);
+  // Messages that have been on screen; a GIF starts loading once its message has.
+  const [seen, markSeen] = useReducer(
+    (prev: ReadonlySet<string>, ids: string[]) =>
+      ids.every(id => prev.has(id)) ? prev : new Set([...prev, ...ids]),
+    new Set<string>(),
+  );
+  const onViewable = useRef((info: { viewableItems: ListViewToken[] }) =>
+    markSeen(info.viewableItems.map(v => v.key)),
+  ).current;
+  const listState = useMemo(() => ({ seen, autoGifs }), [seen, autoGifs]);
+
+  const lines = conversation?.lines ?? [];
+  const hasGifs = lines.some(l => l.gifSlug);
+
+  useEffect(() => {
+    // Read only for a conversation that has GIFs.
+    if (!api || !hasGifs) return;
+    let live = true;
+    api.loadGifsAutomatically().then(
+      on => {
+        if (live) setAutoGifs(on);
+      },
+      () => {
+        if (live) setAutoGifs(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, hasGifs]);
 
   useEffect(() => {
     if (!conversation) return;
@@ -171,7 +259,6 @@ export function Chat({
     }
   };
 
-  const lines = conversation?.lines ?? [];
   return (
     <KeyboardAvoidingView behavior="padding" style={styles.screen}>
       <View style={styles.bar}>
@@ -200,6 +287,8 @@ export function Chat({
         inverted
         data={[...lines].reverse()}
         keyExtractor={l => l.id}
+        extraData={listState}
+        onViewableItemsChanged={onViewable}
         renderItem={({ item }) => (
           <View
             style={[styles.bubble, item.userId === me ? styles.mine : null]}
@@ -213,13 +302,21 @@ export function Chat({
               </Text>
             ) : null}
             {item.gifSlug && api ? (
-              <GifView api={api} slug={item.gifSlug} />
+              <GifView
+                api={api}
+                slug={item.gifSlug}
+                visible={seen.has(item.id)}
+                auto={autoGifs}
+              />
             ) : null}
             {item.attachments?.map(a => (
               <Text key={a.id} style={styles.attachment}>
                 {attachmentLabel(a)}
               </Text>
             ))}
+            {item.text || item.gifSlug || item.attachments?.length ? null : (
+              <Text style={styles.unreadable}>Empty message</Text>
+            )}
           </View>
         )}
       />

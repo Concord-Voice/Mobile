@@ -490,7 +490,7 @@ describe('ConcordApi', () => {
       width: 320,
       height: 240,
     });
-    const headers = await api.headers();
+    const { headers } = await api.mediaSource(gif!.uri);
     expect(headers).toEqual(
       expect.objectContaining({
         Authorization: 'Bearer a1',
@@ -499,6 +499,11 @@ describe('ConcordApi', () => {
       }),
     );
     expect(headers.Accept).toBeUndefined();
+    // The session headers go only to this server's media proxy.
+    await expect(api.mediaSource(media)).rejects.toThrow();
+    await expect(
+      api.mediaSource('https://api.example.test/api/v1/auth/logout'),
+    ).rejects.toThrow();
     expect(await api.gif('flat')).toEqual(
       expect.objectContaining({ width: undefined, height: undefined }),
     );
@@ -512,6 +517,73 @@ describe('ConcordApi', () => {
     expect(await api.gif('../auth/logout')).toBeNull();
     expect(await api.gif('')).toBeNull();
     expect(calls).toHaveLength(before);
+  });
+
+  it('rotates before a GIF request instead of after its 401', async () => {
+    let issued = 1;
+    const { api, calls } = signedIn({
+      'POST /auth/login': () => [
+        200,
+        {
+          access_token: 'a1',
+          refresh_token: 'r1',
+          session_id: 's1',
+          expires_in: 900,
+          user: { id: ME },
+          e2ee_keys: {
+            wrapped_private_key: 'V1JBUA==', // pragma: allowlist secret
+            key_derivation_salt: 'U0FMVA==',
+            key_derivation_alg: 'argon2id',
+          },
+        },
+      ],
+      'POST /auth/refresh': () => {
+        issued += 1;
+        return [
+          200,
+          {
+            access_token: `a${issued}`,
+            refresh_token: `r${issued}`,
+            session_id: 's1',
+            expires_in: 900,
+          },
+        ];
+      },
+      'GET /klipy/gifs/items?slugs=cat-1&format_filter=gif': () => [401, {}],
+      'GET /users/me/privacy': () => [
+        200,
+        { privacy: { load_gifs_automatically: true } },
+      ],
+    });
+    const now = jest.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(1_000_000);
+      await api.login('e', 'p');
+      const uri = 'https://api.example.test/api/v1/klipy/media?url=x';
+      // Fresh: no rotation. A 401 from the GIF proxy may be KLIPY's, so none then either.
+      expect((await api.mediaSource(uri)).headers.Authorization).toBe(
+        'Bearer a1',
+      );
+      await expect(api.gif('cat-1')).rejects.toThrow();
+      expect(calls.filter(c => c.key === 'POST /auth/refresh')).toHaveLength(0);
+      // Under a minute left: rotate first, so the image carries a live token.
+      now.mockReturnValue(1_000_000 + 14.5 * 60_000);
+      expect((await api.mediaSource(uri)).headers.Authorization).toBe(
+        'Bearer a2',
+      );
+      expect(calls.filter(c => c.key === 'POST /auth/refresh')).toHaveLength(1);
+      expect(await api.loadGifsAutomatically()).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('reads the GIF setting as off unless the server says on', async () => {
+    const { api } = signedIn({
+      'GET /users/me/privacy': () => [200, { privacy: {} }],
+    });
+    await api.login('e', 'p');
+    expect(await api.loadGifsAutomatically()).toBe(false);
   });
 
   it('reports every rotation and resumes a saved session', async () => {

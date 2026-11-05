@@ -37,6 +37,8 @@ export type Session = {
   refreshToken: string;
   sessionId: string;
   userId: string;
+  /** When the access token expires (ms since epoch), if the server said. */
+  expiresAt?: number;
 };
 
 /** Code-based second factors; WebAuthn needs a native passkey bridge first. */
@@ -63,7 +65,7 @@ export type DmEncrypted = {
   attachments: Attachment[];
 };
 
-/** A GIF's proxied URL and size. Load it with fresh `headers()`: they carry the access token. */
+/** A GIF's proxied URL and size. Load it through `mediaSource()`: the proxy needs the session. */
 export type Gif = { uri: string; width?: number; height?: number };
 
 type KlipyRendition = { url?: unknown; width?: number; height?: number };
@@ -193,6 +195,7 @@ export class ConcordApi {
     method: string,
     path: string,
     body?: unknown,
+    refreshOn401 = true,
   ): Promise<Record<string, unknown>> {
     let refreshed = false;
     let attested = false;
@@ -210,7 +213,7 @@ export class ConcordApi {
         }
         // An expired access token gets one refresh, and a missing or stale
         // attestation one fresh proof; each retries the request once.
-        if (error.status === 401 && !refreshed) {
+        if (error.status === 401 && !refreshed && refreshOn401) {
           refreshed = true;
           await this.refresh();
         } else if (
@@ -240,7 +243,7 @@ export class ConcordApi {
   }
 
   /** The identity headers every request carries: machine, client version, session, attestation. */
-  async headers(
+  private async headers(
     extra: Record<string, string> = {},
   ): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
@@ -314,13 +317,53 @@ export class ConcordApi {
   }
 
   private adopt(result: Record<string, unknown>, userId?: string): void {
+    const expiresIn = result.expires_in;
     this.session = {
       accessToken: text(result.access_token),
       refreshToken: text(result.refresh_token),
       sessionId: text(result.session_id),
       userId: userId ?? text(record(result.user).id),
+      expiresAt:
+        typeof expiresIn === 'number' && expiresIn > 0
+          ? Date.now() + expiresIn * 1000
+          : undefined,
     };
     this.onRotated?.();
+  }
+
+  /**
+   * Rotates first when the access token is missing or has under a minute left. For
+   * requests that cannot refresh on a 401 themselves: images, and the GIF proxy, whose
+   * 401 can be KLIPY's rather than ours.
+   */
+  private async fresh(): Promise<void> {
+    const session = this.session;
+    if (
+      session &&
+      (!session.accessToken ||
+        (session.expiresAt !== undefined &&
+          session.expiresAt - Date.now() < 60_000))
+    )
+      await this.refresh();
+  }
+
+  /**
+   * An image source for a Concord media URL, with the session headers it needs. Only
+   * this server's media proxy gets the credentials.
+   */
+  async mediaSource(
+    uri: string,
+  ): Promise<{ uri: string; headers: Record<string, string> }> {
+    if (!uri.startsWith(`${this.base}/klipy/media?`))
+      throw new Error('Not a Concord media URL');
+    await this.fresh();
+    return { uri, headers: await this.headers() };
+  }
+
+  /** The user's "load GIFs automatically" privacy setting, shared with desktop. */
+  async loadGifsAutomatically(): Promise<boolean> {
+    const result = await this.call('GET', '/users/me/privacy');
+    return record(result.privacy).load_gifs_automatically === true;
   }
 
   saved(): SavedSession | null {
@@ -675,9 +718,14 @@ export class ConcordApi {
     if (!GIF_SLUG.test(slug)) return null;
     let result: Record<string, unknown>;
     try {
+      // The proxy passes KLIPY's own 401 through, which says nothing about our
+      // session: rotate ahead of time instead of on a 401.
+      await this.fresh();
       result = await this.call(
         'GET',
         `/klipy/gifs/items?slugs=${slug}&format_filter=gif`,
+        undefined,
+        false,
       );
     } catch (error) {
       // 404: this server runs without KLIPY.
