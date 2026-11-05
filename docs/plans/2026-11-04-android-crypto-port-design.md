@@ -28,9 +28,10 @@ Approved by Mark on 2026-11-04. The review copy is the "Android E2EE crypto port
 ## Differences from the review copy
 
 1. **Saving prompts as well.** Keystore gates encryption under an auth-bound AES key too, so `persistIdentity` shows the prompt ("Turn on biometric unlock") right after sign-in. iOS writes without a prompt.
-2. **New reject code `E_CONCORD_CRYPTO_NOSECUREHARDWARE` (Android only).** The UI can use it to explain why biometric unlock is off.
+2. **New reject codes (Android only).** `E_CONCORD_CRYPTO_NOSECUREHARDWARE` means the phone has no TEE or StrongBox, or no usable strong-biometric hardware. `E_CONCORD_CRYPTO_NOBIOMETRICS` means the hardware is there but no strong biometric (a fingerprint) is enrolled. Face unlock on many phones is a weak biometric and does not count. `persistIdentity` checks `BiometricManager.canAuthenticate(BIOMETRIC_STRONG)` before it generates the key. When saving fails, the Home screen says why, and the user signs in with the password on the next launch.
 3. **The in-app transparency copy and the "Mobile security model" wiki page move to the app-lock follow-up**, which includes the first-launch setup. The app has no Settings › Security screen yet.
-4. **Sign-in errors.** `describeError` no longer reports native crypto failures as network failures. It also drops a branch for `E_CONCORD_CRYPTO_WRONGPASSWORD`, a code no native module ever emitted. Biometric copy now names the platform's feature (`biometricName()`).
+4. **Client version header.** Android has no attest module, so `appClient()` reports platform `android` and the `package.json` version, which CI keeps equal to `versionName`. Without a platform header, the server applies the desktop minimum version and refuses the phone with `CLIENT_VERSION_TOO_OLD`.
+5. **Sign-in errors.** `describeError` no longer reports native crypto failures as network failures. It also drops a branch for `E_CONCORD_CRYPTO_WRONGPASSWORD`, a code no native module ever emitted. Biometric copy now names the platform's feature (`biometricName()`).
 
 ## Verification
 

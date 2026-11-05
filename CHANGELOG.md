@@ -40,6 +40,8 @@ encrypted direct messages.
 ### Fixed
 
 - **Sign-in:** An encryption problem on the device no longer shows up as "Could not reach the server", and the unlock button names your phone's biometric feature.
+- **Messages:** Android no longer says "This version of the app is no longer supported". The app now tells the server it is the Android app and which version it is.
+- **Sign-in:** When fingerprint unlock can't be turned on, for example because no fingerprint is set up, the app now says why instead of silently signing you out next launch.
 
 ## [0.1.0] - 2026-11-05
 

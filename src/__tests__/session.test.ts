@@ -314,6 +314,18 @@ describe('session store', () => {
     await useStore.getState().signIn('https://c.test', 'm', 'pw');
     expect(crypto.saveSession).not.toHaveBeenCalled();
     expect(useStore.getState().stage.kind).toBe('signed_in');
+    expect(useStore.getState().notice).toMatch(/password next time/);
+  });
+
+  it('says when no fingerprint is enrolled, and clears the notice on sign-out', async () => {
+    crypto.persistIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_NOBIOMETRICS' }),
+    );
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(useStore.getState().notice).toMatch(/no fingerprint set up/);
+    await useStore.getState().signOut();
+    expect(useStore.getState().notice).toBeNull();
   });
 
   it('resumes a saved session with Face ID on launch', async () => {

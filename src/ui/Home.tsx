@@ -66,10 +66,12 @@ function You() {
 export function Home() {
   const [tab, setTab] = useState<Tab>('Messages');
   const [openDm, setOpenDm] = useState<DmSummary | null>(null);
+  const notice = useSession(s => s.notice);
   if (openDm) return <Chat dm={openDm} onBack={() => setOpenDm(null)} />;
   return (
     <View style={styles.screen}>
       <Text style={styles.header}>{tab}</Text>
+      {notice ? <Text style={styles.note}>{notice}</Text> : null}
       <View style={styles.pane}>
         {tab === 'Messages' ? <Messages onOpen={setOpenDm} /> : null}
         {tab === 'You' ? <You /> : null}

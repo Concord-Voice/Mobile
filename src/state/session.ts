@@ -14,6 +14,7 @@ import {
   unlockIdentity,
 } from '../ConcordCrypto';
 import { Platform } from 'react-native';
+import { version as appVersion } from '../../package.json';
 import { nativeAttester } from '../ConcordAttest';
 import {
   WsRateLimitedError,
@@ -39,6 +40,8 @@ export type SessionState = {
   stage: Stage;
   busy: boolean;
   error: string | null;
+  /** Shown while signed in: why biometric unlock did not turn on. */
+  notice: string | null;
   api: ConcordApi | null;
   identity: KeyHandle | null;
   /** A saved session exists that Face ID can reopen. */
@@ -98,6 +101,21 @@ function persist(at: Origin, saved: SavedSession | null): void {
     ).catch(() => {});
 }
 
+/** Why the saved sign-in was not kept, in words; the password still works every launch. */
+export function persistNotice(code: string | null): string {
+  const next = 'You will sign in with your password next time.';
+  switch (code) {
+    case 'E_CONCORD_CRYPTO_NOBIOMETRICS':
+      return `Fingerprint unlock is off because this phone has no fingerprint set up. ${next}`;
+    case 'E_CONCORD_CRYPTO_NOSECUREHARDWARE':
+      return `This phone has no secure hardware for ${biometricName()}. ${next}`;
+    case 'E_CONCORD_CRYPTO_USERCANCELLED':
+      return `${biometricName()} was not turned on. ${next}`;
+    default:
+      return `${biometricName()} could not be turned on. ${next}`;
+  }
+}
+
 /** Maps HTTP failures without exposing server text or changing auth state. */
 function describeApiError(error: ApiError): string {
   if (error.status === 401) return 'Wrong email, password or code.';
@@ -146,13 +164,18 @@ export function describeError(error: unknown): string {
 }
 
 /**
- * This build's platform and version, read from the bundle via the attest module.
+ * This build's platform and version: iOS reads the bundle via the attest module.
+ * Android has no attest module, so it reports package.json's version, which CI keeps
+ * equal to versionName (sync-native-version --check). Without a platform the server
+ * would judge the phone against the desktop minimum and refuse it as too old.
  * A failed lookup is not cached, so the next request retries it.
- * ponytail: Android has no native module yet, so it sends no version until one lands.
  */
 let client: Promise<ClientInfo | null> | null = null;
 export function appClient(): Promise<ClientInfo | null> {
-  client ??= (nativeAttester()?.info() ?? Promise.resolve(null)).then(
+  client ??= (
+    nativeAttester()?.info() ??
+    Promise.resolve(Platform.OS === 'android' ? { version: appVersion } : null)
+  ).then(
     info =>
       info
         ? { platform: Platform.OS, version: clientVersion(info.version) }
@@ -243,9 +266,11 @@ export function createSessionStore(
           return;
         }
         if (get().api !== api) return;
-      } catch {
-        // No biometrics enrolled (native reports it as a Keychain failure, so the two look
-        // alike): sign in on every launch, and drop any older record so it is not offered.
+      } catch (error) {
+        // Sign in on every launch, drop any older record so it is not offered, and say why.
+        const code = nativeErrorCode(error);
+        console.warn(`Biometric unlock not saved: ${code ?? 'unknown'}`);
+        set({ notice: persistNotice(code) });
         await deleteSession().catch(() => {});
         return;
       }
@@ -287,6 +312,7 @@ export function createSessionStore(
       stage: { kind: 'starting' },
       busy: false,
       error: null,
+      notice: null,
       api: null,
       identity: null,
       canResume: false,
@@ -412,6 +438,7 @@ export function createSessionStore(
           identity: null,
           canResume: false,
           error: null,
+          notice: null,
         });
         // Local state is gone first; server revocation and key release are best effort.
         const [, , wiped] = await Promise.allSettled([

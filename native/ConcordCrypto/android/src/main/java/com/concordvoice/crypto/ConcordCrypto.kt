@@ -36,6 +36,8 @@ enum class Failure {
   KEYCHAINFAILURE,
   /** Android only: no TEE or StrongBox, so the identity is not persisted (password each time). */
   NOSECUREHARDWARE,
+  /** Android only: secure hardware is there but no strong biometric (fingerprint) is enrolled. */
+  NOBIOMETRICS,
 }
 
 /** Carries only the case: never a cause, key material or a system message. */

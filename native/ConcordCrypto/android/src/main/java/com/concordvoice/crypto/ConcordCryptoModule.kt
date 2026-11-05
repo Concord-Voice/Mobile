@@ -1,6 +1,7 @@
 package com.concordvoice.crypto
 
 import android.content.pm.PackageManager
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -90,6 +91,12 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   @ReactMethod
   fun persistIdentity(privateKeyHandle: String, account: String, promise: Promise) =
     run(promise) {
+      // The vault key needs a strong biometric; say which case it is rather than a Keystore fault.
+      when (BiometricManager.from(context).canAuthenticate(BIOMETRIC_STRONG)) {
+        BiometricManager.BIOMETRIC_SUCCESS -> Unit
+        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> fail(Failure.NOBIOMETRICS)
+        else -> fail(Failure.NOSECUREHARDWARE)
+      }
       identities.save(service.store.rsaPrivate(privateKeyHandle), account, "Turn on biometric unlock")
       null
     }
