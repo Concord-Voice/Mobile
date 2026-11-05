@@ -1197,9 +1197,12 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
         | while IFS= read -r cpline; do
             cpd=$(printf '%s' "$cpline" | awk '{print $NF}')
             cpdisdir=1
-            case "$cpd" in
-              */) cpd="${cpd%/}" ;;
-              *)  # Only when the destination REALLY IS a directory. Composing
+            # Case patterns inside this $( ) are written as `if` tests: bash 3.2 needs a
+            # leading `(` on such patterns, and Semgrep's bash parser rejects that form.
+            if [[ "$cpd" == */ ]]; then
+              cpd="${cpd%/}"
+            else
+                  # Only when the destination REALLY IS a directory. Composing
                   # unconditionally was wrong, and the comment that justified it was
                   # wrong in a specific way worth recording: it assumed a composed
                   # child can only match when the destination already does. That
@@ -1210,12 +1213,9 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                   # so a pure READ-copy was blocked. The repo's live patterns are
                   # mostly filename-shaped, and the test that missed it used /auth/.
                   cpabs="$cpd"
-                  case "$cpabs" in
-                    /*) ;;
-                    *)  cpabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpd" ;;
-                  esac
-                  [ -d "$cpabs" ] || cpdisdir=0 ;;
-            esac
+                  [[ "$cpabs" == /* ]] || cpabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpd"
+                  [ -d "$cpabs" ] || cpdisdir=0
+            fi
             # A recursive copy to a destination that does NOT yet exist copies the
             # source AS that destination: `cp -r /tmp/tree services/new` creates
             # services/new/auth/login.go, with no `tree` component. Skipping the
@@ -1226,16 +1226,12 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
             # `cp -r /tmp/tree services` creates services/tree/auth/login.go, which
             # neither `services` nor `services/tree` names. Bounded like every other
             # walk here, and only for sources that exist to be walked.
-            case "$cpline" in
-              *' -'[a-zA-Z]*[rR]*|*--recursive*|*' -a'*)
+            if [[ "$cpline" == *' -'[a-zA-Z]*[rR]* || "$cpline" == *--recursive* || "$cpline" == *' -a'* ]]; then
                 printf '%s' "$cpline" | tr ' ' '\n' | awk 'NR > 1 && $0 !~ /^-/ && $0 != ""' \
                   | sed '$d' \
                   | while IFS= read -r cpsrc; do
                       cpsabs="$cpsrc"
-                      case "$cpsabs" in
-                        /*) ;;
-                        *)  cpsabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpsrc" ;;
-                      esac
+                      [[ "$cpsabs" == /* ]] || cpsabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpsrc"
                       [ -d "$cpsabs" ] || continue
                       # Into `<dest>/<basename>/` when the destination exists as a
                       # directory, and directly into `<dest>/` when it does not --
@@ -1244,9 +1240,8 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                       find "$cpsabs" -maxdepth 6 2>/dev/null \
                         | sed "s|^${cpsabs%/}/||" | grep -v "^${cpsabs}\$" \
                         | while IFS= read -r rel; do printf '%s/%s\n' "$cppfx" "$rel"; done
-                    done ;;
-              *) ;;
-            esac
+                    done
+            fi
           done
       # `ln SRC LINK` creates a HARD link by default — an alias to the same inode, so
       # a later write through it is a write to the protected file. Only `-s` makes a
@@ -1456,8 +1451,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       # CONTAINS, so treating the filename as a deletion target refused a command
       # that may touch nothing protected. That is the same read-blocking friction
       # this rule was shaped to avoid, one level in.
-      case "$raw" in
-        *xargs*)
+      if [[ "$raw" == *xargs* ]]; then
           printf '%s' "$seg" | grep -qE "^[[:space:]]*(${MUTATING_VERBS}([[:space:]]|\$)|sed([[:space:]]+-[a-zA-Z]*)*[[:space:]]+-[a-zA-Z]*i)" \
             && printf '%s' "$COMMAND" | mask_quoted | tr '\004\005;&' '\n\n\n\n' \
                  | awk '{
@@ -1494,9 +1488,8 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                        if (w[1] == "git" && m >= 2 && (w[2] == "ls-files" || w[2] == "diff"))
                          for (j = 3; j <= m; j++) if (w[j] !~ /^-/) print w[j]
                      }
-                   }' | grep -vE '^-|^$' ;;
-        *) ;;
-      esac
+                   }' | grep -vE '^-|^$'
+      fi
       # Deleting a control removes it exactly as effectively as overwriting it.
       printf '%s' "$seg" | grep -oE '^[[:space:]]*(git[[:space:]]+)?(rm|unlink)\b[^;&|]*' | tr ' ' '\n' | grep -vE '^-|^git$|^rm$|^unlink$|^$'
     ) || true
