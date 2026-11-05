@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -31,6 +32,20 @@ export function Chat({
 }) {
   const { api, identity, stage } = useSession();
   const insets = useSafeAreaInsets();
+  // The keyboard already covers the bottom bar, so drop that inset while it is open.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () =>
+      setKeyboardOpen(true),
+    );
+    const hide = Keyboard.addListener('keyboardDidHide', () =>
+      setKeyboardOpen(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const me = stage.kind === 'signed_in' ? stage.userId : '';
   const conversation = useMemo(
     () => (api && identity ? open(api, identity, dm.id, me) : null),
@@ -135,7 +150,12 @@ export function Chat({
           </View>
         )}
       />
-      <View style={[styles.composer, { paddingBottom: insets.bottom + 8 }]}>
+      <View
+        style={[
+          styles.composer,
+          { paddingBottom: (keyboardOpen ? 0 : insets.bottom) + 8 },
+        ]}
+      >
         <TextInput
           accessibilityLabel="Message"
           style={styles.input}
