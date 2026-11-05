@@ -12,6 +12,9 @@ import { useSession } from '../src/state/session';
 import type { ChatLine } from '../src/state/conversation';
 import { Chat } from '../src/ui/Chat';
 
+// Renders as a host element, so tests read its props.
+jest.mock('react-native-video', () => 'Video');
+
 const text = (tree: ReactTestRenderer.ReactTestRenderer) =>
   tree.root
     .findAllByType('Text' as never)
@@ -811,6 +814,62 @@ test('opens files through the native share sheet on Android', async () => {
   } finally {
     jest.restoreAllMocks();
   }
+});
+
+test('plays videos inline up to 64 MiB and asks before larger ones', async () => {
+  const openAttachment = jest.fn<
+    ReturnType<OpenAttachment>,
+    Parameters<OpenAttachment>
+  >(async a => `file:///c/${a.id}`);
+  const { tree, show } = await chatWithFiles(
+    [
+      file('v1', 'video', 5 * MIB, 'video/mp4'),
+      file('v2', 'video', 70 * MIB, 'video/mp4'),
+      file('v3', 'video', 300 * MIB, 'video/mp4'),
+      file('v4', 'video', 1024, 'video/webm'),
+    ],
+    openAttachment,
+  );
+  const video = (label: string) =>
+    tree.root.findAll(
+      n => n.props.accessibilityLabel === label && !!n.props.onLoad,
+    )[0]?.props;
+  expect(openAttachment).not.toHaveBeenCalled();
+  await show();
+  // Small videos preload, held to the auto-load limit, and wait paused for play.
+  expect(openAttachment.mock.calls.map(([a, limit]) => [a.id, limit])).toEqual([
+    ['v1', 64 * MIB + 4096],
+    ['v4', 64 * MIB + 4096],
+  ]);
+  expect(video('Video, 5.0 MB')).toMatchObject({
+    source: { uri: 'file:///c/v1' },
+    controls: true,
+    paused: true,
+  });
+  await ReactTestRenderer.act(async () =>
+    video('Video, 5.0 MB').onLoad({
+      naturalSize: { width: 1920, height: 1080 },
+    }),
+  );
+  expect(video('Video, 5.0 MB').style).toContainEqual({
+    width: 240,
+    height: 135,
+  });
+  // A large video asks first; one past the phone's limit is a card.
+  const shown = text(tree);
+  expect(shown).toContain('Video, 70.0 MB|Large video — download 70.0 MB?');
+  expect(shown).toContain('Video, 300.0 MB|Too large to open on this phone');
+  await ReactTestRenderer.act(async () =>
+    button(tree, 'Video, 70.0 MB').props.onPress(),
+  );
+  expect(openAttachment).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: 'v2' }),
+    256 * MIB + 4096,
+  );
+  expect(video('Video, 70.0 MB').source).toEqual({ uri: 'file:///c/v2' });
+  // A video the phone cannot play becomes a card that can still share it.
+  await ReactTestRenderer.act(async () => video('Video, 1.0 KB').onError());
+  expect(text(tree)).toContain('Video, 1.0 KB|Tap to open');
 });
 
 test('previews text and Markdown files, collapsed, as plain text', async () => {

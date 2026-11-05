@@ -21,6 +21,7 @@ import {
   View,
   type ListViewToken,
 } from 'react-native';
+import Video from 'react-native-video';
 import {
   attachmentImageSize,
   deleteAttachment,
@@ -75,7 +76,7 @@ function lookupGif(api: ConcordApi, slug: string): Lookup {
   return lookup;
 }
 
-/** Fits a GIF inside 240 x 320 points, keeping its shape. */
+/** Fits a GIF, photo or video inside 240 x 320 points, keeping its shape. */
 function fit(width = 0, height = 0) {
   const [w, h] = width > 0 && height > 0 ? [width, height] : [200, 150];
   const scale = Math.min(1, 240 / w, 320 / h);
@@ -215,7 +216,7 @@ function GifView({
 }
 
 const MIB = 1024 * 1024;
-/** Photos and animated images up to this load on their own (the policy's mobile limit). */
+/** Photos, animated images and videos up to this load on their own (the policy's mobile limit). */
 const AUTO_LIMIT = 64 * MIB;
 /** The largest file the phone downloads at all, on a tap. */
 const OPEN_LIMIT = 256 * MIB;
@@ -257,9 +258,9 @@ function openError(error: unknown): string {
 }
 
 /**
- * An attachment, by the shared display policy: photos and animated images show inline (up to
- * 64 MiB on their own, animated ones by the GIF rules); anything else is a card that downloads
- * only when tapped, then opens the share sheet.
+ * An attachment, by the shared display policy: photos, animated images and videos show inline
+ * (up to 64 MiB on their own, animated ones by the GIF rules); text previews; anything else is
+ * a card that downloads only when tapped, then opens the share sheet.
  */
 function AttachmentView({
   attachment,
@@ -319,7 +320,75 @@ function AttachmentView({
       />
     );
   }
+  if (fileType === 'video' && fileSize <= OPEN_LIMIT)
+    return (
+      <VideoView attachment={attachment} openFile={openFile} active={visible} />
+    );
   return <FileCard attachment={attachment} openFile={openFile} />;
+}
+
+/**
+ * A video, inline and paused until played. It preloads once on screen up to 64 MiB; a larger
+ * one asks first, as on desktop. One that cannot be fetched or played becomes a file card, which
+ * can still share it.
+ */
+function VideoView({
+  attachment,
+  openFile,
+  active,
+}: Readonly<{
+  attachment: Attachment;
+  openFile: OpenFile;
+  active: boolean;
+}>) {
+  const label = attachmentLabel(attachment);
+  const large = attachment.fileSize > AUTO_LIMIT;
+  const [tapped, setTapped] = useState(false);
+  const [uri, setUri] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [shape, setShape] = useState<{ width: number; height: number }>();
+  const load = active && (!large || tapped);
+  useEffect(() => {
+    if (!load) return;
+    let live = true;
+    // A file sent as small is held to that, as for photos.
+    openFile(attachment, (large ? OPEN_LIMIT : AUTO_LIMIT) + OVERHEAD).then(
+      next => {
+        if (live) setUri(next);
+      },
+      () => {
+        if (live) setFailed(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [openFile, attachment, large, load]);
+  if (failed) return <FileCard attachment={attachment} openFile={openFile} />;
+  if (large && !tapped)
+    return (
+      <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
+        <Text style={styles.attachment}>{label}</Text>
+        <Text style={styles.hint}>
+          {`Large video — download ${formatSize(attachment.fileSize)}?`}
+        </Text>
+      </Pressable>
+    );
+  if (!uri) return <Text style={styles.attachment}>{label}</Text>;
+  return (
+    <Video
+      accessibilityLabel={label}
+      source={{ uri }}
+      controls
+      paused
+      resizeMode="contain"
+      style={[styles.gif, fit(shape?.width, shape?.height)]}
+      onLoad={({ naturalSize: { width, height } }) => {
+        if (width > 0 && height > 0) setShape({ width, height });
+      }}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 /**
