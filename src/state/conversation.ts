@@ -5,7 +5,7 @@ import {
   releaseKey,
   unwrapChannelKey,
 } from '../ConcordCrypto';
-import type { ConcordApi, DmEncrypted } from '../core/ConcordApi';
+import type { Attachment, ConcordApi, DmEncrypted } from '../core/ConcordApi';
 import {
   DmSocket,
   type DmMessage,
@@ -18,9 +18,14 @@ export type ChatLine = {
   id: string;
   userId: string;
   sender: string;
+  /** Empty when the message is only a GIF or attachments (desktop sends those with a space). */
   text: string;
   /** True when the message could not be decrypted; text then says so. */
   unreadable?: boolean;
+  /** The KLIPY GIF sent with the message. */
+  gifSlug?: string;
+  /** Details of the attached files, which stay encrypted on the server. */
+  attachments?: Attachment[];
 };
 
 const UNREADABLE = 'This message could not be decrypted.';
@@ -32,17 +37,20 @@ const REFUSED_MS = 30_000;
 /** The key could not be fetched or unwrapped, as opposed to a message that will not decrypt. */
 class KeyUnavailable extends Error {}
 
-/** Desktop wraps a message with a GIF as {"text", "gif_slug"} before encrypting it. */
-function messageText(plaintext: string): string {
-  if (!plaintext.startsWith('{')) return plaintext;
-  try {
-    const v = JSON.parse(plaintext) as { text?: unknown; gif_slug?: unknown };
-    if (typeof v.gif_slug === 'string' && typeof v.text === 'string')
-      return v.text || 'GIF';
-  } catch {
-    // Not an envelope: plain text that starts with a brace.
+/** Desktop wraps a message with a GIF as {"text", "gif_slug"}; a GIF alone has the text " ". */
+function unwrap(plaintext: string): { text: string; gifSlug?: string } {
+  if (plaintext.startsWith('{')) {
+    try {
+      const v = JSON.parse(plaintext) as { text?: unknown; gif_slug?: unknown };
+      if (typeof v.gif_slug === 'string') {
+        const text = typeof v.text === 'string' ? v.text : '';
+        return { text: text.trim() ? text : '', gifSlug: v.gif_slug };
+      }
+    } catch {
+      // Not an envelope: plain text that starts with a brace.
+    }
   }
-  return plaintext;
+  return { text: plaintext.trim() ? plaintext : '' };
 }
 
 // ponytail: Math.random is enough here; the nonce only pairs a send with its ack and is no secret.
@@ -166,25 +174,32 @@ export class Conversation {
   private async decrypt(
     m: Pick<DmEncrypted, 'id' | 'userId' | 'content' | 'keyVersion'> & {
       sender?: string;
+      attachments?: Attachment[];
     },
   ): Promise<ChatLine> {
-    const base = { id: m.id, userId: m.userId, sender: m.sender ?? '' };
+    const base: ChatLine = {
+      id: m.id,
+      userId: m.userId,
+      sender: m.sender ?? '',
+      text: '',
+    };
+    if (m.attachments?.length) base.attachments = m.attachments;
     const open = async (version: number) =>
-      messageText(await decryptMessage(m.content, await this.keyFor(version)));
+      unwrap(await decryptMessage(m.content, await this.keyFor(version)));
     try {
-      return { ...base, text: await open(m.keyVersion) };
+      return { ...base, ...(await open(m.keyVersion)) };
     } catch (error) {
       // Older clients labelled every write 1 whatever key they used: try the current key too.
       if (m.keyVersion === 1) {
         try {
-          return { ...base, text: await open(0) };
+          return { ...base, ...(await open(0)) };
         } catch {
           // The current epoch may have rotated since it was looked up: ask again, at most
           // once per REFUSED_MS, since the label (and so this retry) is the sender's choice.
           if (Date.now() - this.lookedUpAt >= REFUSED_MS) {
             this.current = null;
             try {
-              return { ...base, text: await open(0) };
+              return { ...base, ...(await open(0)) };
             } catch {
               // Report the labelled epoch's failure below.
             }

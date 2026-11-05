@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -8,10 +9,91 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import type { DmSummary } from '../core/ConcordApi';
+import type {
+  Attachment,
+  ConcordApi,
+  DmSummary,
+  Gif,
+} from '../core/ConcordApi';
 import { Conversation } from '../state/conversation';
 import { describeError, useSession } from '../state/session';
 import { colors } from './theme';
+
+// ponytail: GIF lookups are kept for the app run, because the proxy allows 30 a
+// minute per user. Persist them if GIF-heavy conversations still hit that limit.
+const gifLookups = new WeakMap<ConcordApi, Map<string, Promise<Gif | null>>>();
+
+function lookupGif(api: ConcordApi, slug: string): Promise<Gif | null> {
+  let lookups = gifLookups.get(api);
+  if (!lookups) gifLookups.set(api, (lookups = new Map()));
+  let lookup = lookups.get(slug);
+  if (!lookup) {
+    lookup = api.gif(slug);
+    lookups.set(slug, lookup);
+    // A failed lookup is forgotten, so the next view of the message retries it.
+    lookup.catch(() => lookups.delete(slug));
+  }
+  return lookup;
+}
+
+/** Fits a GIF inside 240 x 320 points, keeping its shape. */
+function fit(width = 0, height = 0) {
+  const [w, h] = width > 0 && height > 0 ? [width, height] : [200, 150];
+  const scale = Math.min(1, 240 / w, 320 / h);
+  return { width: w * scale, height: h * scale };
+}
+
+/** A GIF message, loaded through Concord's proxy. Shows "GIF" while loading or if it fails. */
+function GifView({ api, slug }: { api: ConcordApi; slug: string }) {
+  const [source, setSource] = useState<
+    (Gif & { headers: Record<string, string> }) | null
+  >(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    // Headers are read per view: they carry the current access token.
+    Promise.all([lookupGif(api, slug), api.headers()]).then(
+      ([gif, headers]) => {
+        if (!live) return;
+        if (gif) setSource({ ...gif, headers });
+        else setFailed(true);
+      },
+      () => {
+        if (live) setFailed(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, slug]);
+  if (failed || !source) return <Text style={styles.attachment}>GIF</Text>;
+  return (
+    <Image
+      accessibilityLabel="GIF"
+      source={{ uri: source.uri, headers: source.headers }}
+      style={[styles.gif, fit(source.width, source.height)]}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+const KINDS: Record<string, string> = {
+  photo: 'Photo',
+  animated: 'Animated image',
+  video: 'Video',
+  audio: 'Audio',
+};
+
+/** "Photo, 2.0 KB": attachments are named until the app can decrypt and show them. */
+function attachmentLabel({ fileType, fileSize }: Attachment): string {
+  const size =
+    fileSize < 1024
+      ? `${fileSize} B`
+      : fileSize < 1024 * 1024
+      ? `${(fileSize / 1024).toFixed(1)} KB`
+      : `${(fileSize / 1024 / 1024).toFixed(1)} MB`;
+  return `${KINDS[fileType] ?? 'File'}, ${size}`;
+}
 
 /** One DM conversation: decrypted history, live messages and a composer. */
 export function Chat({
@@ -124,9 +206,19 @@ export function Chat({
             {item.userId === me ? null : (
               <Text style={styles.sender}>{item.sender || dm.title}</Text>
             )}
-            <Text style={item.unreadable ? styles.unreadable : styles.text}>
-              {item.text}
-            </Text>
+            {item.text ? (
+              <Text style={item.unreadable ? styles.unreadable : styles.text}>
+                {item.text}
+              </Text>
+            ) : null}
+            {item.gifSlug && api ? (
+              <GifView api={api} slug={item.gifSlug} />
+            ) : null}
+            {item.attachments?.map((a, i) => (
+              <Text key={i} style={styles.attachment}>
+                {attachmentLabel(a)}
+              </Text>
+            ))}
           </View>
         )}
       />
@@ -182,6 +274,8 @@ const styles = StyleSheet.create({
   sender: { color: colors.accent, fontSize: 12, marginBottom: 2 },
   text: { color: colors.text, fontSize: 16 },
   unreadable: { color: colors.textMuted, fontSize: 15, fontStyle: 'italic' },
+  attachment: { color: colors.textMuted, fontSize: 15 },
+  gif: { borderRadius: 8, marginTop: 2 },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',

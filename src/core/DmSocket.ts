@@ -3,6 +3,7 @@
  * Frames are validated here, at the dispatch boundary, before anything uses them.
  */
 
+import { attachments, type Attachment } from './ConcordApi';
 import {
   parseBudgetError,
   parseWsRetryAfterMs,
@@ -18,6 +19,7 @@ export type DmMessage = {
   /** Display name, else username; absent on frames that omit both. */
   sender?: string;
   createdAt?: string;
+  attachments?: Attachment[];
 };
 
 const optionalText = (v: unknown) =>
@@ -97,6 +99,7 @@ function dmMessage(frame: Frame): DmMessage | undefined {
     keyVersion: d.key_version as number,
     sender: optionalText(d.display_name) ?? optionalText(d.username),
     createdAt: optionalText(d.created_at),
+    attachments: attachments(d.attachments),
   };
 }
 

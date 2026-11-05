@@ -1,5 +1,10 @@
-import { ConcordApi } from '../core/ConcordApi';
-import { DmSocket, type DmMessage, type DmSocketOpenOptions, type SocketLike } from '../core/DmSocket';
+import { ConcordApi, type Attachment } from '../core/ConcordApi';
+import {
+  DmSocket,
+  type DmMessage,
+  type DmSocketOpenOptions,
+  type SocketLike,
+} from '../core/DmSocket';
 import { WsReconnectCooldownError } from '../core/wsEventBudget';
 import { Conversation } from '../state/conversation';
 import type { KeyHandle } from '../ConcordCrypto';
@@ -31,6 +36,7 @@ const row = (id: string, content: string, keyVersion = 1, userId = PEER) => ({
   content,
   keyVersion,
   createdAt: 't',
+  attachments: [] as Attachment[],
 });
 
 // Caller seam fake: pure gate grammar/lifetime vectors live in wsEventBudget.test.
@@ -139,17 +145,52 @@ test('marks what it cannot decrypt and unwraps GIF envelopes', async () => {
     row('m0', '2:legacy', 1),
     row('m1', '3:garbage', 2),
     row('m2', `2:${JSON.stringify({ text: 'look', gif_slug: 'g' })}`, 2),
-    row('m3', `2:${JSON.stringify({ text: '', gif_slug: 'g' })}`, 2),
-    row('m4', '2:{"just":"json"}', 2),
+    // Desktop sends a GIF alone with the text " ".
+    row('m3', `2:${JSON.stringify({ text: ' ', gif_slug: 'g2' })}`, 2),
+    row('m4', `2:${JSON.stringify({ gif_slug: 'g3' })}`, 2),
+    row('m5', '2:{"just":"json"}', 2),
+    row('m6', '2:{not json', 2),
   ]);
   await conv.start();
-  expect(conv.lines.map(l => [l.text, !!l.unreadable])).toEqual([
+  expect(
+    conv.lines.map(l => [l.text, !!l.unreadable, l.gifSlug ?? null]),
+  ).toEqual([
     // Older clients labelled every write 1: the current key opens it.
-    ['legacy', false],
-    ['This message could not be decrypted.', true],
-    ['look', false],
-    ['GIF', false],
-    ['{"just":"json"}', false],
+    ['legacy', false, null],
+    ['This message could not be decrypted.', true, null],
+    ['look', false, 'g'],
+    ['', false, 'g2'],
+    ['', false, 'g3'],
+    ['{"just":"json"}', false, null],
+    ['{not json', false, null],
+  ]);
+});
+
+test('keeps attachment details beside an empty text', async () => {
+  const photo = { fileType: 'photo', fileSize: 2048 };
+  const { conv, socket } = setup([
+    { ...row('m1', '2: ', 2), attachments: [photo] },
+    { ...row('m2', '2:caption', 2), attachments: [] },
+    { ...row('m3', '3:lost', 2), attachments: [photo] },
+  ]);
+  await conv.start();
+  socket.onMessage?.({
+    id: 'm4',
+    conversationId: 'c1',
+    userId: PEER,
+    content: '2: ',
+    keyVersion: 2,
+    attachments: [{ fileType: 'file', fileSize: 5 }],
+  });
+  await flush();
+  expect(
+    conv.lines.map(l => [l.text, l.attachments ?? null, !!l.unreadable]),
+  ).toEqual([
+    ['', [photo], false],
+    ['caption', null, false],
+    // The details are server metadata, so they show even when the text will not open.
+    [expect.any(String), [photo], true],
+    ['', [{ fileType: 'file', fileSize: 5 }], false],
   ]);
 });
 
@@ -729,15 +770,22 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
     onopen: (() => void) | null = null;
     onmessage: ((event: { data: unknown }) => void) | null = null;
     onerror: (() => void) | null = null;
-    onclose: ((event?: { code?: unknown; reason?: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: unknown; reason?: unknown }) => void) | null =
+      null;
     sent: string[] = [];
-    send(data: string): void { this.sent.push(data); }
+    send(data: string): void {
+      this.sent.push(data);
+    }
     close(): void {}
-    open(): void { this.onopen?.(); }
+    open(): void {
+      this.onopen?.();
+    }
     frame(type: string, data: Record<string, unknown>): void {
       this.onmessage?.({ data: JSON.stringify({ type, data }) });
     }
-    end(code: number, reason: string): void { this.onclose?.({ code, reason }); }
+    end(code: number, reason: string): void {
+      this.onclose?.({ code, reason });
+    }
   }
 
   jest.useFakeTimers();
@@ -750,11 +798,13 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
       else throw new Error('unexpected HTTP route');
       return { ok: true, status: 200, json: async () => body } as Response;
     });
-    const ticketCalls = () => fetchImpl.mock.calls.filter(([url]) =>
-      url.endsWith('/auth/ws-ticket'),
-    ).length;
+    const ticketCalls = () =>
+      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/auth/ws-ticket'))
+        .length;
     const api = new ConcordApi(
-      'https://x.test', 'machine-id', fetchImpl as unknown as typeof fetch,
+      'https://x.test',
+      'machine-id',
+      fetchImpl as unknown as typeof fetch,
     );
     const owner = api.wsReconnect;
     const nativeSockets: NativeDmSocket[] = [];
@@ -769,7 +819,13 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
     const microtasks = async () => {
       for (let i = 0; i < 8; i++) await Promise.resolve();
     };
-    const first = new Conversation(api, 'ID' as KeyHandle, 'first-dm', ME, openSocket);
+    const first = new Conversation(
+      api,
+      'ID' as KeyHandle,
+      'first-dm',
+      ME,
+      openSocket,
+    );
     const firstStart = first.start();
     await microtasks();
     expect(nativeSockets).toHaveLength(1);
@@ -780,19 +836,32 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
     expect(api.wsReconnect).toBe(owner);
     expect(ticketCalls()).toBe(1);
     expect(nativeSockets[0].sent).toEqual([
-      JSON.stringify({ type: 'subscribe_dm', data: { conversation_id: 'first-dm' } }),
+      JSON.stringify({
+        type: 'subscribe_dm',
+        data: { conversation_id: 'first-dm' },
+      }),
     ]);
 
     nativeSockets[0].end(1013, 'retry_after_ms=3000');
     expect(first.dropped).toBe(true);
     first.close();
     const freshApi = new ConcordApi(
-      'https://other.test', 'new-machine-id', fetchImpl as unknown as typeof fetch,
+      'https://other.test',
+      'new-machine-id',
+      fetchImpl as unknown as typeof fetch,
     );
     expect(freshApi.wsReconnect).not.toBe(owner);
     expect(() => freshApi.wsReconnect.assertCanOpen()).not.toThrow();
-    const otherDm = new Conversation(api, 'ID' as KeyHandle, 'second-dm', ME, openSocket);
-    await expect(otherDm.start()).rejects.toBeInstanceOf(WsReconnectCooldownError);
+    const otherDm = new Conversation(
+      api,
+      'ID' as KeyHandle,
+      'second-dm',
+      ME,
+      openSocket,
+    );
+    await expect(otherDm.start()).rejects.toBeInstanceOf(
+      WsReconnectCooldownError,
+    );
     expect(ticketCalls()).toBe(1);
     expect(createNative).toHaveBeenCalledTimes(1);
 
@@ -800,7 +869,13 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
     await microtasks();
     expect(ticketCalls()).toBe(1);
     expect(createNative).toHaveBeenCalledTimes(1);
-    const stillEarly = new Conversation(api, 'ID' as KeyHandle, 'second-dm', ME, openSocket);
+    const stillEarly = new Conversation(
+      api,
+      'ID' as KeyHandle,
+      'second-dm',
+      ME,
+      openSocket,
+    );
     await expect(stillEarly.start()).rejects.toMatchObject({ retryAfterMs: 1 });
     expect(ticketCalls()).toBe(1);
     jest.advanceTimersByTime(1);
@@ -808,7 +883,13 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
     expect(ticketCalls()).toBe(1);
     expect(createNative).toHaveBeenCalledTimes(1);
 
-    const reopened = new Conversation(api, 'ID' as KeyHandle, 'second-dm', ME, openSocket);
+    const reopened = new Conversation(
+      api,
+      'ID' as KeyHandle,
+      'second-dm',
+      ME,
+      openSocket,
+    );
     const manualStart = reopened.start();
     await microtasks();
     expect(nativeSockets).toHaveLength(2);
@@ -819,7 +900,10 @@ test('native 1013 uses the real API-owned gate across DMs until an exact manual 
     expect(ticketCalls()).toBe(2);
     expect(openSocket).toHaveBeenCalledTimes(2);
     expect(nativeSockets[1].sent).toEqual([
-      JSON.stringify({ type: 'subscribe_dm', data: { conversation_id: 'second-dm' } }),
+      JSON.stringify({
+        type: 'subscribe_dm',
+        data: { conversation_id: 'second-dm' },
+      }),
     ]);
     expect(api.wsReconnect).toBe(owner);
     reopened.close();

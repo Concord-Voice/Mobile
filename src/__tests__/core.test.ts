@@ -354,6 +354,17 @@ describe('ConcordApi', () => {
               type: 'user',
               key_version: 4,
               created_at: 't3',
+              // Desktop sends a file with the text " "; the details sit beside it.
+              attachments: [
+                {
+                  id: 'a1',
+                  file_type: 'photo',
+                  mime_type: 'image/png',
+                  file_size: 2048,
+                },
+                { id: 'a2', file_type: 'file', file_size: -1 },
+                'junk',
+              ],
             },
             {
               id: 'expiry',
@@ -414,6 +425,7 @@ describe('ConcordApi', () => {
         content: 'YQ==',
         keyVersion: 0,
         createdAt: 't0',
+        attachments: [],
       },
       {
         id: 'm1',
@@ -422,6 +434,7 @@ describe('ConcordApi', () => {
         content: 'Yg==',
         keyVersion: 2,
         createdAt: 't1',
+        attachments: [],
       },
       {
         id: 'm3',
@@ -430,10 +443,74 @@ describe('ConcordApi', () => {
         content: 'Yw==',
         keyVersion: 4,
         createdAt: 't3',
+        // Malformed summaries are dropped rather than failing the page.
+        attachments: [{ fileType: 'photo', fileSize: 2048 }],
       },
     ]);
     await api.markDmRead('c1');
     expect(calls.at(-1)?.key).toBe('POST /dm/conversations/c1/read');
+  });
+
+  it('resolves a GIF through the proxy, loaded with the session headers', async () => {
+    const media = 'https://static.klipy.com/ii/x/cat.gif';
+    const { api, calls } = signedIn({
+      'GET /klipy/gifs/items?slugs=cat-1&format_filter=gif': () => [
+        200,
+        {
+          data: {
+            data: [
+              {
+                file: { md: { gif: { url: media, width: 320, height: 240 } } },
+              },
+            ],
+          },
+        },
+      ],
+      'GET /klipy/gifs/items?slugs=flat&format_filter=gif': () => [
+        200,
+        { data: [{ preview: { gif: { url: media } } }] },
+      ],
+      'GET /klipy/gifs/items?slugs=plain&format_filter=gif': () => [
+        200,
+        { data: [{ file: { gif: { url: 'http://static.klipy.com/a.gif' } } }] },
+      ],
+      'GET /klipy/gifs/items?slugs=gone&format_filter=gif': () => [
+        200,
+        { result: [] },
+      ],
+      'GET /klipy/gifs/items?slugs=boom&format_filter=gif': () => [500, {}],
+    });
+    await api.login('e', 'p');
+    const gif = await api.gif('cat-1');
+    expect(gif).toEqual({
+      uri: `https://api.example.test/api/v1/klipy/media?url=${encodeURIComponent(
+        media,
+      )}`,
+      width: 320,
+      height: 240,
+    });
+    const headers = await api.headers();
+    expect(headers).toEqual(
+      expect.objectContaining({
+        Authorization: 'Bearer a1',
+        'X-Session-ID': 's1',
+        'X-Machine-Id': MACHINE,
+      }),
+    );
+    expect(headers.Accept).toBeUndefined();
+    expect(await api.gif('flat')).toEqual(
+      expect.objectContaining({ width: undefined, height: undefined }),
+    );
+    // Only https renditions, only found GIFs, only servers that run KLIPY.
+    expect(await api.gif('plain')).toBeNull();
+    expect(await api.gif('gone')).toBeNull();
+    expect(await api.gif('nokey')).toBeNull();
+    await expect(api.gif('boom')).rejects.toThrow();
+    // A slug that is not the server's shape never reaches a request path.
+    const before = calls.length;
+    expect(await api.gif('../auth/logout')).toBeNull();
+    expect(await api.gif('')).toBeNull();
+    expect(calls.length).toBe(before);
   });
 
   it('reports every rotation and resumes a saved session', async () => {
@@ -857,6 +934,14 @@ describe('DmSocket', () => {
               user_id: PEER,
               content: 'cipher',
               key_version: 1,
+              attachments: [
+                {
+                  id: 'a1',
+                  file_type: 'video',
+                  mime_type: 'video/mp4',
+                  file_size: 9,
+                },
+              ],
             });
           }
         })),
@@ -872,6 +957,7 @@ describe('DmSocket', () => {
       userId: PEER,
       content: 'cipher',
       keyVersion: 1,
+      attachments: [{ fileType: 'video', fileSize: 9 }],
     });
     // The live listener sees every valid frame; filtering is the caller's job.
     expect(live).toEqual(['spoof', 'm2']);

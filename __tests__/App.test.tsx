@@ -275,6 +275,108 @@ test('sends a message and shows decrypted lines', async () => {
   expect(fake.close).toHaveBeenCalled();
 });
 
+test('plays GIFs through the proxy and names attachments', async () => {
+  const gif = jest.fn(async (slug: string) => {
+    if (slug === 'boom') throw new Error('offline');
+    return slug === 'cat'
+      ? {
+          uri: 'https://api.example.test/klipy/media?url=a',
+          width: 480,
+          height: 270,
+        }
+      : slug === 'tiny'
+      ? { uri: 'https://api.example.test/klipy/media?url=b' }
+      : null;
+  });
+  const api = {
+    gif,
+    headers: jest.fn(async () => ({ Authorization: 'Bearer t' })),
+  } as unknown as ConcordApi;
+  const fake = {
+    lines: [
+      { id: 'm1', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'cat' },
+      { id: 'm2', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'gone' },
+      { id: 'm3', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'boom' },
+      { id: 'm4', userId: 'u', sender: '', text: '', gifSlug: 'tiny' },
+      {
+        id: 'm5',
+        userId: 'peer',
+        sender: 'Peer',
+        text: '',
+        attachments: [
+          { fileType: 'photo', fileSize: 2048 },
+          { fileType: 'file', fileSize: 3 * 1024 * 1024 },
+          { fileType: 'audio', fileSize: 12 },
+        ],
+      },
+      {
+        id: 'm6',
+        userId: 'peer',
+        sender: 'Peer',
+        text: 'caption',
+        attachments: [{ fileType: 'video', fileSize: 1536 }],
+      },
+    ],
+    dropped: false,
+    onChange: null,
+    start: jest.fn(async () => {}),
+    send: jest.fn(async () => {}),
+    close: jest.fn(),
+  };
+  useSession.setState({
+    stage: { kind: 'signed_in', userId: 'u' },
+    api,
+    identity: 'HANDLE' as never,
+  });
+  const dm = { id: 'd1', title: 'Peer', unreadCount: 0, lastActivity: 'now' };
+  await ReactTestRenderer.act(async () => {
+    mounted = ReactTestRenderer.create(
+      <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+    );
+  });
+  const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+  const images = () =>
+    tree.root.findAll(
+      n => n.props.accessibilityLabel === 'GIF' && !!n.props.onError,
+    );
+  // The list is newest first, so pick each GIF by its URL.
+  const image = (id: string) =>
+    images().find(n =>
+      n.props.source.uri.endsWith(id),
+    ) as ReactTestRenderer.ReactTestInstance;
+  const [cat, tiny] = [image('=a'), image('=b')];
+  expect(cat.props.source).toEqual({
+    uri: 'https://api.example.test/klipy/media?url=a',
+    headers: { Authorization: 'Bearer t' },
+  });
+  // 480 x 270 fits 240 wide; a GIF with no size gets a default frame.
+  expect(cat.props.style).toContainEqual({ width: 240, height: 135 });
+  expect(tiny.props.style).toContainEqual({ width: 200, height: 150 });
+  const shown = text(tree);
+  // A missing or failed GIF says what it was instead of an empty bubble.
+  expect(shown.split('|').filter(t => t === 'GIF')).toHaveLength(2);
+  expect(shown).toContain('Photo, 2.0 KB');
+  expect(shown).toContain('File, 3.0 MB');
+  expect(shown).toContain('Audio, 12 B');
+  expect(shown).toContain('caption|Video, 1.5 KB');
+  await ReactTestRenderer.act(async () => cat.props.onError());
+  expect(
+    text(tree)
+      .split('|')
+      .filter(t => t === 'GIF'),
+  ).toHaveLength(3);
+
+  // Found GIFs are looked up once; a failed lookup is tried again next time.
+  await ReactTestRenderer.act(() => mounted?.unmount());
+  await ReactTestRenderer.act(async () => {
+    mounted = ReactTestRenderer.create(
+      <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+    );
+  });
+  expect(gif.mock.calls.filter(([s]) => s === 'cat')).toHaveLength(1);
+  expect(gif.mock.calls.filter(([s]) => s === 'boom')).toHaveLength(2);
+});
+
 test.each(['late error', 'late success'] as const)(
   'ignores %s from an old Chat start after replacing the conversation',
   async outcome => {

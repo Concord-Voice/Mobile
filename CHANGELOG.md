@@ -42,6 +42,7 @@ encrypted direct messages.
 - **Sign-in:** An encryption problem on the device no longer shows up as "Could not reach the server", and the unlock button names your phone's biometric feature.
 - **Messages:** Android no longer says "This version of the app is no longer supported". The app now tells the server it is the Android app and which version it is.
 - **Sign-in:** When fingerprint unlock can't be turned on, for example because no fingerprint is set up, the app now says why instead of silently signing you out next launch.
+- **Messages:** GIF messages and messages with attachments no longer show as empty bubbles. GIFs play through Concord's GIF proxy (Android shows the first frame for now), and each attachment is named with its size, such as "Photo, 2.0 KB", until the app can open it.
 
 ## [0.1.0] - 2026-11-05
 

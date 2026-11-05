@@ -54,7 +54,41 @@ export type DmEncrypted = {
   content: string;
   keyVersion: number;
   createdAt: string;
+  attachments: Attachment[];
 };
+
+/** A GIF's proxied URL and size. Load it with fresh `headers()`: they carry the access token. */
+export type Gif = { uri: string; width?: number; height?: number };
+
+type KlipyRendition = { url?: unknown; width?: number; height?: number };
+type KlipyItem = {
+  file?: Partial<Record<'hd' | 'md' | 'sm', { gif?: KlipyRendition }>> & {
+    gif?: KlipyRendition;
+  };
+  preview?: { gif?: KlipyRendition };
+};
+
+/** The server's slug rule (internal/klipy/validate.go): letters, digits and dashes. */
+const GIF_SLUG = /^[A-Za-z0-9-]{1,100}$/;
+
+/** File details the server sends beside a message. The file itself stays encrypted. */
+export type Attachment = { fileType: string; fileSize: number };
+
+/** The attachment summaries on a history row or live frame; malformed entries are dropped. */
+export function attachments(value: unknown): Attachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(a => {
+    const v = (typeof a === 'object' && a !== null ? a : {}) as Record<
+      string,
+      unknown
+    >;
+    return typeof v.file_type === 'string' &&
+      Number.isSafeInteger(v.file_size) &&
+      (v.file_size as number) >= 0
+      ? [{ fileType: v.file_type, fileSize: v.file_size as number }]
+      : [];
+  });
+}
 
 /** A DM conversation as the conversation list shows it. */
 export type DmSummary = {
@@ -198,18 +232,14 @@ export class ConcordApi {
     }
   }
 
-  private async request(
-    method: string,
-    path: string,
-    body?: unknown,
-    extraHeaders: Record<string, string> = {},
-  ): Promise<Record<string, unknown>> {
+  /** The identity headers every request carries: machine, client version, session, attestation. */
+  async headers(
+    extra: Record<string, string> = {},
+  ): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
-      ...extraHeaders,
-      Accept: 'application/json',
+      ...extra,
       'X-Machine-Id': this.machineId,
     };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
     this.clientNow = await this.client().catch(() => null);
     if (this.clientNow) {
       headers['X-Concord-Client-Version'] = this.clientNow.version;
@@ -224,6 +254,20 @@ export class ConcordApi {
       if (this.attestation?.sessionId === this.session.sessionId)
         headers['X-Attestation-Token'] = this.attestation.token;
     }
+    return headers;
+  }
+
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<Record<string, unknown>> {
+    const headers = await this.headers({
+      ...extraHeaders,
+      Accept: 'application/json',
+    });
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
     // A stalled server must not hold a caller (and its native key handles) forever:
     // the abort covers the headers and the body read.
     const abort = new AbortController();
@@ -590,25 +634,74 @@ export class ConcordApi {
   /** The newest page of a conversation, oldest first, ready to decrypt. */
   async dmHistory(conversationId: string): Promise<DmEncrypted[]> {
     const rows = await this.dmMessages(conversationId);
-    return rows
-      // Ordinary messages are type 'user' (or untyped, as on desktop); the rest are server-authored.
-      .filter(m => (m.type ?? 'user') === 'user')
-      .map(m => ({
-        id: text(m.id),
-        userId: text(m.user_id),
-        sender:
-          typeof m.display_name === 'string' && m.display_name
-            ? m.display_name
-            : text(m.username),
-        content: text(m.content),
-        // Unlabelled (or garbled) rows predate epochs: 0 means the current key, as on desktop.
-        keyVersion:
-          Number.isSafeInteger(m.key_version) && (m.key_version as number) >= 1
-            ? (m.key_version as number)
-            : 0,
-        createdAt: text(m.created_at),
-      }))
-      .reverse();
+    return (
+      rows
+        // Ordinary messages are type 'user' (or untyped, as on desktop); the rest are server-authored.
+        .filter(m => (m.type ?? 'user') === 'user')
+        .map(m => ({
+          id: text(m.id),
+          userId: text(m.user_id),
+          sender:
+            typeof m.display_name === 'string' && m.display_name
+              ? m.display_name
+              : text(m.username),
+          content: text(m.content),
+          // Unlabelled (or garbled) rows predate epochs: 0 means the current key, as on desktop.
+          keyVersion:
+            Number.isSafeInteger(m.key_version) &&
+            (m.key_version as number) >= 1
+              ? (m.key_version as number)
+              : 0,
+          createdAt: text(m.created_at),
+          attachments: attachments(m.attachments),
+        }))
+        .reverse()
+    );
+  }
+
+  /**
+   * A KLIPY GIF as an image source, through Concord's proxy so KLIPY never sees the
+   * phone. Null when the server has no GIF for the slug (or no KLIPY integration).
+   */
+  async gif(slug: string): Promise<Gif | null> {
+    // Same rule as the server: a slug is interpolated into a credentialed request.
+    if (!GIF_SLUG.test(slug)) return null;
+    let result: Record<string, unknown>;
+    try {
+      result = await this.call(
+        'GET',
+        `/klipy/gifs/items?slugs=${slug}&format_filter=gif`,
+      );
+    } catch (error) {
+      // 404: this server runs without KLIPY.
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+    // KLIPY nests the list differently by endpoint; desktop accepts the same shapes.
+    const data = result.data as
+      | { data?: unknown; result?: unknown }
+      | unknown[]
+      | undefined;
+    const list = Array.isArray(data)
+      ? data
+      : data?.data ?? data?.result ?? result.result;
+    const item = (Array.isArray(list) ? list[0] : undefined) as
+      | KlipyItem
+      | undefined;
+    const file = item?.file;
+    const gif =
+      file?.hd?.gif ??
+      file?.md?.gif ??
+      file?.sm?.gif ??
+      file?.gif ??
+      item?.preview?.gif;
+    if (typeof gif?.url !== 'string' || !gif.url.startsWith('https://'))
+      return null;
+    return {
+      uri: `${this.base}/klipy/media?url=${encodeURIComponent(gif.url)}`,
+      width: Number.isFinite(gif.width) ? gif.width : undefined,
+      height: Number.isFinite(gif.height) ? gif.height : undefined,
+    };
   }
 
   async markDmRead(conversationId: string): Promise<void> {
