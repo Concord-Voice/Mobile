@@ -463,40 +463,40 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 ## iOS dependencies
 
 Versions come from `ios/Podfile.lock`; license declarations come from the
-corresponding React Native 0.87.1 podspecs and upstream license files.
+corresponding React Native 0.88.0 podspecs and upstream license files.
 React Native's React, RCT, FBLazyVector, ReactCommon and generated bridge pods
 are components of the same MIT-licensed React Native distribution.
 
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
-| React Native and its React/RCT bridge pods | 0.87.1 | MIT | https://github.com/facebook/react-native |
-| ReactNativeDependencies | 0.87.1 | MIT wrapper; component licenses below | https://github.com/facebook/react-native |
+| React Native and its React/RCT bridge pods | 0.88.0 | MIT | https://github.com/facebook/react-native |
+| ReactNativeDependencies | 0.88.0 | MIT wrapper; component licenses below | https://github.com/facebook/react-native |
 | Boost | 1.84.0 | BSL-1.0 | https://www.boost.org/LICENSE_1_0.txt |
 | DoubleConversion | 1.1.6 | BSD-3-Clause | https://github.com/google/double-conversion/blob/v1.1.6/LICENSE |
 | fast_float | 8.0.0 | MIT | https://github.com/fastfloat/fast_float |
 | fmt | 12.1.0 | MIT | https://github.com/fmtlib/fmt |
 | glog | 0.3.5 | BSD-3-Clause | https://github.com/google/glog |
-| Hermes | 250829098.0.17 | MIT | https://github.com/facebook/hermes |
+| Hermes | 260318099.0.4 | MIT | https://github.com/facebook/hermes |
 | RCT-Folly | 2024.11.18.00 | Apache-2.0 | https://github.com/facebook/folly |
 | SocketRocket | 0.7.1 | BSD-3-Clause | https://github.com/facebookincubator/SocketRocket |
-| Yoga | 0.0.0 pod version, React Native 0.87.1 source | MIT | https://github.com/facebook/yoga |
+| Yoga | 0.0.0 pod version, React Native 0.88.0 source | MIT | https://github.com/facebook/yoga |
 
 ## Android runtime dependencies
 
 The React Native Gradle plugin maps the app declarations to
-`com.facebook.react:react-android:0.87.1` and
-`com.facebook.hermes:hermes-android:250829098.0.17`. The app also declares
+`com.facebook.react:react-android:0.88.0` and
+`com.facebook.hermes:hermes-android:260318099.0.4`. The app also declares
 `com.facebook.fresco:animated-gif:3.7.0`, React Native's Fresco version, so GIFs
 animate.
 Hermes is enabled; the optional JSC branch is not part of this inventory.
 
 The table records 98 resolved runtime library components, including transitive
-dependencies. Resolution used Gradle 9.4.1, the release/runtime Android JVM
-attributes and the app's Kotlin 2.2.0 declaration; dependency constraints resolve
-the Kotlin standard library to 2.2.10. The coroutines BOM is dependency metadata,
-so it is omitted from the code attribution table. License names and links come
-from the resolved upstream POMs; `javax.inject:1` has no POM license declaration,
-so its Apache-2.0 attribution was verified in the published source JAR.
+dependencies. They are what Gradle 9.8.2 resolves for the app's
+`releaseRuntimeClasspath`, with the app's Kotlin 2.4.21 declaration. The
+coroutines BOM is dependency metadata, so it is omitted from the code attribution
+table. License names and links come from the resolved upstream POMs;
+`javax.inject:1` has no POM license declaration, so its Apache-2.0 attribution was
+verified in the published source JAR.
 This metadata inventory does not claim a built or signed release artifact.
 
 <!-- mobile-android:start -->
@@ -513,8 +513,8 @@ This metadata inventory does not claim a built or signed release artifact.
 | androidx.arch.core:core-runtime | 2.2.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.autofill:autofill | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.biometric:biometric | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| androidx.collection:collection-jvm | 1.4.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| androidx.collection:collection | 1.4.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.collection:collection-jvm | 1.4.4 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.collection:collection | 1.4.4 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.concurrent:concurrent-futures | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.core:core-ktx | 1.13.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.core:core | 1.13.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
@@ -543,7 +543,7 @@ This metadata inventory does not claim a built or signed release artifact.
 | androidx.vectordrawable:vectordrawable | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.versionedparcelable:versionedparcelable | 1.1.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.viewpager:viewpager | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| androidx.window:window-core-jvm | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.window:window-core-android | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.window:window-core | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.window:window | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | com.facebook.fbjni:fbjni | 0.7.0 | [APACHE-2](https://github.com/facebookincubator/fbjni/blob/main/LICENSE) |
@@ -577,9 +577,9 @@ This metadata inventory does not claim a built or signed release artifact.
 | com.facebook.fresco:vito-provider | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:vito-renderer | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:vito-source | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
-| com.facebook.hermes:hermes-android | 250829098.0.17 | [MIT License](https://github.com/facebook/hermes/blob/HEAD/LICENSE) |
+| com.facebook.hermes:hermes-android | 260318099.0.4 | [MIT License](https://github.com/facebook/hermes/blob/HEAD/LICENSE) |
 | com.facebook.infer.annotation:infer-annotation | 0.18.0 | [MIT license](https://github.com/facebook/infer/blob/master/LICENSE) |
-| com.facebook.react:react-android | 0.87.1 | [MIT License](https://github.com/facebook/react-native/blob/HEAD/LICENSE) |
+| com.facebook.react:react-android | 0.88.0 | [MIT License](https://github.com/facebook/react-native/blob/HEAD/LICENSE) |
 | com.facebook.soloader:annotation | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
 | com.facebook.soloader:nativeloader | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
 | com.facebook.soloader:soloader | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
@@ -592,10 +592,10 @@ This metadata inventory does not claim a built or signed release artifact.
 | com.squareup.okio:okio | 2.9.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | javax.inject:javax.inject | 1 | [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | org.jetbrains.kotlin:kotlin-annotations-jvm | 1.3.72 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| org.jetbrains.kotlin:kotlin-stdlib-common | 2.2.10 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib-common | 2.4.21 | [Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-stdlib-jdk7 | 1.8.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-stdlib-jdk8 | 1.8.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| org.jetbrains.kotlin:kotlin-stdlib | 2.2.10 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib | 2.4.21 | [Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlinx:kotlinx-coroutines-android | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlinx:kotlinx-coroutines-core | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
