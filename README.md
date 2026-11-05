@@ -98,15 +98,17 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   load on tap or the phone asks for reduced motion. A photo over 24 megapixels opens from
   a card instead, because Android cannot draw it. A failed photo says why and tries again
   on a tap. Other files show their kind and size and download only when tapped, up to
-  256 MiB, then open in the share sheet, typed by the file's extension. The ciphertext
-  downloads natively (https only, no redirects, capped in bytes and at 30 minutes) and
-  never enters JavaScript. Attachments decrypt with the key epoch the server names in
-  `X-File-Key-Version`, else the current one. Plaintext lands in the app's cache folder,
-  which is emptied at sign-out (cancelling a running download), at session expiry and at
-  every launch; a failed decrypt leaves none behind. The app keeps up to 256 MiB of
+  256 MiB, then open in the share sheet, typed by the file's extension, except
+  `text/plain` and `text/markdown` files up to 1 MiB, which preload into a nine-line
+  preview that expands. Both show as plain text, never rendered as Markdown. The
+  ciphertext downloads natively (https only, no redirects, capped in bytes and at 30
+  minutes) and never enters JavaScript. Attachments decrypt with the key epoch the server
+  names in `X-File-Key-Version`, else the current one. Plaintext lands in the app's cache
+  folder, which is emptied at sign-out (cancelling a running download), at session expiry
+  and at every launch; a failed decrypt leaves none behind. The app keeps up to 256 MiB of
   opened files and deletes the oldest past that. A file is reused only in the chat that
-  opened it. Not yet: older pages, starting a new DM, starting a key rotation,
-  edits, reactions, text previews, video playback and automatic reconnect.
+  opened it. Not yet: older pages, starting a new DM, starting a key rotation, edits,
+  reactions, video playback and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token, session id, user id) in a device-only Keychain item readable after

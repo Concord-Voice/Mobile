@@ -16,6 +16,7 @@ import {
   nativeErrorCode,
   persistIdentity,
   randomId,
+  readAttachmentText,
   releaseAll,
   releaseKey,
   saveSession,
@@ -222,6 +223,18 @@ describe('ConcordCrypto', () => {
       size: 1,
     });
     await expect(decryptAttachment(HANDLE, key, 'png')).rejects.toThrow(
+      'Invalid native crypto output',
+    );
+    module.readAttachmentText = jest
+      .fn()
+      .mockResolvedValueOnce('hi')
+      .mockResolvedValueOnce(7);
+    expect(await readAttachmentText('file:///c/a.txt', 10)).toBe('hi');
+    expect(module.readAttachmentText).toHaveBeenCalledWith(
+      'file:///c/a.txt',
+      10,
+    );
+    await expect(readAttachmentText('file:///c/a.txt', 10)).rejects.toThrow(
       'Invalid native crypto output',
     );
     await clearAttachments();

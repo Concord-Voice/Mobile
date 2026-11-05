@@ -25,6 +25,7 @@ import {
   attachmentImageSize,
   deleteAttachment,
   nativeErrorCode,
+  readAttachmentText,
   shareAttachment,
 } from '../ConcordCrypto';
 import type {
@@ -226,6 +227,11 @@ const OVERHEAD = 4096;
  * per-format limits if larger JPEG photos need to show inline.
  */
 const MAX_PIXELS = 24_000_000;
+/** Text and Markdown files up to this preload into a collapsed preview. */
+const TEXT_LIMIT = MIB;
+const TEXT_TYPES = new Set(['text/plain', 'text/markdown']);
+/** Lines a collapsed text preview shows. */
+const PREVIEW_LINES = 9;
 
 type OpenFile = (a: Attachment, limit: number) => Promise<string>;
 
@@ -281,6 +287,15 @@ function AttachmentView({
     // The header's size ignores EXIF rotation, so the shape still comes from the loaded image.
     return { uri };
   }, [openFile, attachment]);
+  const mime = attachment.mimeType.split(';')[0].trim().toLowerCase();
+  if (TEXT_TYPES.has(mime) && fileSize <= TEXT_LIMIT)
+    return (
+      <TextPreview
+        attachment={attachment}
+        openFile={openFile}
+        visible={visible}
+      />
+    );
   if (
     (fileType === 'photo' || fileType === 'animated') &&
     fileSize <= OPEN_LIMIT &&
@@ -300,6 +315,67 @@ function AttachmentView({
     );
   }
   return <FileCard attachment={attachment} openFile={openFile} />;
+}
+
+/**
+ * A text or Markdown file, preloaded once on screen into a collapsed preview. Both show as plain
+ * text. If it cannot be read, it falls back to a file card.
+ */
+function TextPreview({
+  attachment,
+  openFile,
+  visible,
+}: Readonly<{ attachment: Attachment; openFile: OpenFile; visible: boolean }>) {
+  const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!visible) return;
+    let live = true;
+    openFile(attachment, TEXT_LIMIT + OVERHEAD)
+      .then(uri => readAttachmentText(uri, TEXT_LIMIT))
+      .then(
+        read => {
+          if (live) setText(read);
+        },
+        () => {
+          if (live) setFailed(true);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [visible, openFile, attachment]);
+  if (failed) return <FileCard attachment={attachment} openFile={openFile} />;
+  if (text === null)
+    return <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>;
+  // ponytail: guesses overflow from line and character counts (about 40 per line); measure the
+  // laid-out text if long lines without breaks get cut off with no Expand.
+  const long =
+    text.split('\n').length > PREVIEW_LINES || text.length > PREVIEW_LINES * 40;
+  return (
+    <View>
+      <Text
+        style={styles.text}
+        selectable
+        numberOfLines={expanded ? undefined : PREVIEW_LINES}
+      >
+        {text}
+      </Text>
+      {long ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setExpanded(open => !open)}
+        >
+          <Text style={styles.hint}>
+            {expanded
+              ? 'Collapse'
+              : `Expand (${formatSize(attachment.fileSize)})`}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
 
 /** A file that waits for a tap, then downloads, decrypts and opens the share sheet. */
@@ -341,13 +417,16 @@ const KINDS = new Map([
   ['audio', 'Audio'],
 ]);
 
+/** "2.0 KB": 1024-based with one decimal, as desktop's formatFileSize. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < MIB) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / MIB).toFixed(1)} MB`;
+}
+
 /** "Photo, 2.0 KB": what the attachment is, before anything is downloaded. */
 function attachmentLabel({ fileType, fileSize }: Attachment): string {
-  const kind = KINDS.get(fileType) ?? 'File';
-  if (fileSize < 1024) return `${kind}, ${fileSize} B`;
-  if (fileSize < 1024 * 1024)
-    return `${kind}, ${(fileSize / 1024).toFixed(1)} KB`;
-  return `${kind}, ${(fileSize / 1024 / 1024).toFixed(1)} MB`;
+  return `${KINDS.get(fileType) ?? 'File'}, ${formatSize(fileSize)}`;
 }
 
 // One attachment downloads at a time, each with fresh headers when its turn comes. Opened

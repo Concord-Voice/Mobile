@@ -174,6 +174,13 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
     }
 
   @ReactMethod
+  fun readAttachmentText(uri: String, maxBytes: Double, promise: Promise) =
+    run(promise, attachmentExecutor) {
+      if (!maxBytes.isFinite() || maxBytes < 0) fail(Failure.INVALIDINPUT)
+      attachments.readText(uri, maxBytes.toLong())
+    }
+
+  @ReactMethod
   fun clearAttachments(promise: Promise) {
     // Cancelled first, off the thread: a running download would otherwise hold the clear back.
     attachments.cancel()

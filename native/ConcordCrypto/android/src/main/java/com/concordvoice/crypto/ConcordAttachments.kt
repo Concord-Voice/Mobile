@@ -245,6 +245,16 @@ class ConcordAttachmentFiles(
     }
   }
 
+  /**
+   * The text of a plaintext file this class wrote, at most [maxBytes], as UTF-8. Invalid bytes
+   * become U+FFFD, as desktop's TextDecoder does.
+   */
+  fun readText(uri: String, maxBytes: Long): String {
+    val file = fileFor(uri) ?: fail(Failure.INVALIDINPUT)
+    if (file.length() > maxBytes) fail(Failure.TOOLARGE)
+    return file.readBytes().toString(Charsets.UTF_8)
+  }
+
   /** Deletes every attachment file, ciphertext and plaintext. */
   fun clear() {
     directory.deleteRecursively()

@@ -149,6 +149,27 @@ final class ConcordAttachmentTests: XCTestCase {
     }
   }
 
+  func testReadsTextOnlyFromItsOwnPlaintextFiles() throws {
+    let files = ConcordAttachmentFiles(directory: folder)
+    let id = UUID().uuidString
+    let text = folder.appendingPathComponent("\(id).txt")
+    // Invalid UTF-8 becomes U+FFFD, as with desktop's TextDecoder.
+    try (Data("héllo\n".utf8) + Data([0xff])).write(to: text)
+    try Data([1]).write(to: folder.appendingPathComponent("\(id).enc"))
+    XCTAssertEqual(try files.readText(uri: text.absoluteString, maxBytes: 8), "héllo\n\u{FFFD}")
+    XCTAssertThrowsError(try files.readText(uri: text.absoluteString, maxBytes: 7)) {
+      XCTAssertEqual($0 as? ConcordCryptoError, .tooLarge)
+    }
+    for uri in [
+      folder.appendingPathComponent("\(id).enc").absoluteString,
+      folder.appendingPathComponent("../x").absoluteString, "https://h/a",
+    ] {
+      XCTAssertThrowsError(try files.readText(uri: uri, maxBytes: 8)) {
+        XCTAssertEqual($0 as? ConcordCryptoError, .invalidInput)
+      }
+    }
+  }
+
   func testLegacyBlobsOverTheCapAreRefused() throws {
     let blob = Data(count: Int(ConcordAttachment.maxLegacyBytes) + 1)
     XCTAssertThrowsError(try open(blob, key: SymmetricKey(size: .bits256)).get()) {

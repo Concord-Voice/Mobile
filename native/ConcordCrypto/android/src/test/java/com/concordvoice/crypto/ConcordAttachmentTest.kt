@@ -147,6 +147,20 @@ class ConcordAttachmentTest {
     assertTrue(File(folder, "$id.enc").exists())
   }
 
+  @Test fun readsTextOnlyFromItsOwnPlaintextFiles() {
+    val files = ConcordAttachmentFiles(folder)
+    val id = java.util.UUID.randomUUID().toString().uppercase()
+    // Invalid UTF-8 becomes U+FFFD, as with desktop's TextDecoder.
+    File(folder, "$id.txt").writeBytes("héllo\n".toByteArray() + byteArrayOf(0xff.toByte()))
+    File(folder, "$id.enc").writeBytes(ByteArray(1))
+    val uri = "file://${folder.absolutePath}/$id.txt"
+    assertEquals("héllo\n\uFFFD", files.readText(uri, 8))
+    expect(Failure.TOOLARGE) { files.readText(uri, 7) }
+    for (bad in listOf("file://${folder.absolutePath}/$id.enc", "file://${folder.absolutePath}/../x", "https://h/a")) {
+      expect(Failure.INVALIDINPUT) { files.readText(bad, 8) }
+    }
+  }
+
   @Test fun legacyBlobsOverTheCapAreRefused() {
     expect(Failure.TOOLARGE) { decryptBlob(ByteArray(ConcordAttachment.MAX_LEGACY_BYTES.toInt() + 1), ByteArray(32)) }
   }

@@ -200,6 +200,18 @@ final class ConcordCryptoModule: NSObject {
     }
   }
 
+  @objc func readAttachmentText(
+    _ uri: String, maxBytes: Double,
+    resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject, on: attachmentQueue) {
+      guard maxBytes.isFinite, maxBytes >= 0, maxBytes <= Double(Int64.max) else {
+        throw ConcordCryptoError.invalidInput
+      }
+      return try self.service.attachments.readText(uri: uri, maxBytes: Int64(maxBytes))
+    }
+  }
+
   @objc func clearAttachments(
     _ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
   ) {

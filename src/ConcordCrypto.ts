@@ -56,6 +56,7 @@ type NativeCrypto = {
     channelKeyHandle: string,
     fileExtension: string,
   ): Promise<unknown>;
+  readAttachmentText(uri: string, maxBytes: number): Promise<unknown>;
   clearAttachments(): Promise<unknown>;
   attachmentImageSize(uri: string): Promise<unknown>;
   deleteAttachment(uri: string): Promise<unknown>;
@@ -285,6 +286,17 @@ export async function decryptAttachment(
   if (typeof record.uri !== 'string' || !record.uri.startsWith('file://'))
     throw new Error('Invalid native crypto output');
   return { uri: record.uri };
+}
+
+/** The text of a decrypted attachment file, at most `maxBytes`, decoded as UTF-8. */
+export async function readAttachmentText(
+  uri: string,
+  maxBytes: number,
+): Promise<string> {
+  const value = await native().readAttachmentText(uri, maxBytes);
+  if (typeof value !== 'string')
+    throw new Error('Invalid native crypto output');
+  return value;
 }
 
 /** Deletes every attachment file. Native code also does this at launch. */

@@ -30,9 +30,18 @@ async function render() {
 
 const actions = useSession.getState();
 
-/** The native calls Chat makes itself. An image's pixel size comes from `pixels`, by URI. */
+/**
+ * The native calls Chat makes itself. An image's pixel size comes from `pixels` and a text
+ * file's contents from `texts`, by URI; a URI missing from `texts` fails to read.
+ */
 const pixels = new Map<string, { width: number; height: number }>();
+const texts = new Map<string, string>();
 const nativeFiles = {
+  readAttachmentText: jest.fn(async (uri: string, _maxBytes: number) => {
+    const read = texts.get(uri);
+    if (read === undefined) throw new Error('auth');
+    return read;
+  }),
   attachmentImageSize: jest.fn(
     async (uri: string) => pixels.get(uri) ?? { width: 0, height: 0 },
   ),
@@ -46,6 +55,7 @@ afterEach(async () => {
   mounted = null;
   delete modules.ConcordCryptoModule;
   pixels.clear();
+  texts.clear();
   Object.values(nativeFiles).forEach(f => f.mockClear());
   useSession.setState({
     ...actions,
@@ -777,6 +787,58 @@ test('opens files through the native share sheet on Android', async () => {
   } finally {
     jest.restoreAllMocks();
   }
+});
+
+test('previews text and Markdown files, collapsed, as plain text', async () => {
+  const long = Array.from({ length: 12 }, (_, i) => `# line ${i}`).join('\n');
+  texts.set('file:///c/long', long);
+  texts.set('file:///c/short', 'hi');
+  const { readAttachmentText } = nativeFiles;
+  const openAttachment = jest.fn(async (a: Attachment) => `file:///c/${a.id}`);
+  const { tree, show } = await chatWithFiles(
+    [
+      file('long', 'file', 2048, 'text/markdown; charset=utf-8'),
+      file('short', 'file', 2, 'text/plain'),
+      file('bad', 'file', 3, 'text/plain'),
+      file('big', 'file', 2 * MIB, 'text/plain'),
+    ],
+    openAttachment,
+  );
+  // Only a name and size until the message is on screen.
+  expect(text(tree)).toContain('File, 2.0 KB');
+  expect(openAttachment).not.toHaveBeenCalled();
+  await show();
+  // Text up to 1 MiB preloads; a larger file waits for a tap like any other.
+  expect(openAttachment.mock.calls.map(([a]) => a.id)).toEqual([
+    'long',
+    'short',
+    'bad',
+  ]);
+  expect(openAttachment).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'long' }),
+    MIB + 4096,
+  );
+  expect(readAttachmentText).toHaveBeenCalledWith('file:///c/long', MIB);
+  const preview = () =>
+    tree.root.findAll(
+      n => n.props.children === long && n.props.numberOfLines !== null,
+    )[0];
+  // Markdown shows as written, collapsed to nine lines.
+  expect(preview().props.numberOfLines).toBe(9);
+  await ReactTestRenderer.act(async () =>
+    button(tree, 'Expand (2.0 KB)').props.onPress(),
+  );
+  expect(preview().props.numberOfLines).toBeUndefined();
+  await ReactTestRenderer.act(async () =>
+    button(tree, 'Collapse').props.onPress(),
+  );
+  expect(preview().props.numberOfLines).toBe(9);
+  const shown = text(tree);
+  // Short text needs no toggle; an unreadable one becomes a card that can be tapped.
+  expect(shown).toContain('hi');
+  expect(shown).not.toContain('Expand (2 B)');
+  expect(shown).toContain('File, 3 B|Tap to open');
+  expect(shown).toContain('File, 2.0 MB|Tap to open');
 });
 
 test('holds animation for a tap while the phone asks for reduced motion', async () => {

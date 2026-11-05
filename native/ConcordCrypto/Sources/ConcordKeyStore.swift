@@ -245,6 +245,15 @@ public final class ConcordAttachmentFiles {
     return ["uri": output.absoluteString, "size": size ?? NSNumber(value: 0)]
   }
 
+  /// The text of a plaintext file this class wrote, at most `maxBytes`, as UTF-8. Invalid bytes
+  /// become U+FFFD, as desktop's TextDecoder does.
+  public func readText(uri: String, maxBytes: Int64) throws -> String {
+    let file = try plaintext(uri)
+    let size = try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber
+    guard (size?.int64Value ?? 0) <= maxBytes else { throw ConcordCryptoError.tooLarge }
+    return String(decoding: try Data(contentsOf: file), as: UTF8.self)
+  }
+
   /// Deletes every attachment file, ciphertext and plaintext.
   public func clear() {
     try? FileManager.default.removeItem(at: directory)
