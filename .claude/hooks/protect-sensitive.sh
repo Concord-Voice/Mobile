@@ -1214,7 +1214,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                   # mostly filename-shaped, and the test that missed it used /auth/.
                   cpabs="$cpd"
                   [[ "$cpabs" == /* ]] || cpabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpd"
-                  [ -d "$cpabs" ] || cpdisdir=0
+                  [[ -d "$cpabs" ]] || cpdisdir=0
             fi
             # A recursive copy to a destination that does NOT yet exist copies the
             # source AS that destination: `cp -r /tmp/tree services/new` creates
