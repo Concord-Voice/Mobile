@@ -328,6 +328,16 @@ describe('session store', () => {
     expect(useStore.getState().notice).toBeNull();
   });
 
+  it('clears an old notice when a later sign-in saves', async () => {
+    crypto.persistIdentity.mockRejectedValueOnce(new Error('cancelled'));
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(useStore.getState().notice).not.toBeNull();
+    useStore.setState({ stage: { kind: 'signed_out' }, api: null });
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(useStore.getState().notice).toBeNull();
+  });
+
   it('resumes a saved session with Face ID on launch', async () => {
     crypto.loadSession.mockResolvedValueOnce(JSON.stringify(SAVED));
     const api = fakeApi();

@@ -236,6 +236,7 @@ export function createSessionStore(
           api: null,
           identity: null,
           canResume: false,
+          notice: null,
           error: 'Your session ended. Log in again.',
         });
         releaseAll().catch(() => {});
@@ -243,7 +244,7 @@ export function createSessionStore(
         forget(userId ? { ...at, userId } : undefined).catch(() => {});
       };
       origin = at;
-      set({ api });
+      set({ api, notice: null });
       return api;
     };
 
@@ -270,7 +271,7 @@ export function createSessionStore(
         // Sign in on every launch, drop any older record so it is not offered, and say why.
         const code = nativeErrorCode(error);
         console.warn(`Biometric unlock not saved: ${code ?? 'unknown'}`);
-        set({ notice: persistNotice(code) });
+        if (get().api === api) set({ notice: persistNotice(code) });
         await deleteSession().catch(() => {});
         return;
       }
