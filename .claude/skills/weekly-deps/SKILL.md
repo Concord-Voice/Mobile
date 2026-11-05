@@ -545,13 +545,16 @@ Tier C deserves the most care. For each Tier C PR:
 4. **Run local tests if the bump touches buildable/runnable code.** Run them at the PR's head, never in the current checkout: that tree still has the old lockfile, so a pass there proves nothing about the bump. Use a throwaway worktree:
 
    ```bash
-   # Detached at the fetched head, named by its SHA, so a re-run after a force-push
-   # neither collides with a stale local branch nor reuses an old worktree.
+   # Detached at the fetched head, outside the repo (so the PR's files never land in
+   # an un-ignored path of this checkout), named by its SHA so a re-run after a
+   # force-push neither collides with a stale branch nor reuses an old worktree.
    git fetch origin "pull/$PR/head"
-   WT=".claude/worktrees/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
+   WT="$(mktemp -d)/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
    git worktree add --detach "$WT" FETCH_HEAD
    cd "$WT/$DIR"   # then install deps and run the commands below
    ```
+
+   After the tests, return to the primary checkout and drop the worktree: `cd - >/dev/null && git worktree remove --force "$WT"`.
 
    Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:
 
@@ -695,11 +698,11 @@ The dependabot branches are deleted server-side by `--delete-branch`. Per operat
   git pull
   # Prune any local dependabot/* branches you may have checked out:
   git branch | grep '^[^*]*dependabot/' | xargs -n1 git branch -D 2>/dev/null
-  # If you used a worktree for this batch, also run:
-  #   git worktree remove .claude/worktrees/<worktree-name>
+  # If a test worktree was left behind (a run that stopped early), also run:
+  #   git worktree list    # then: git worktree remove --force <its path>
 ```
 
-Substitute the real default-branch name and `<worktree-name>` value before printing — never leave the placeholders.
+Substitute the real default-branch name before printing — never leave the placeholders.
 
 ---
 

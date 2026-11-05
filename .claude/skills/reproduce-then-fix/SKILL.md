@@ -43,9 +43,13 @@ A bounded, test-first debugging workflow for issue `$0` — a numeric GitHub iss
 Validate that `$0` is a numeric issue number before touching any branch. If `$0` is not numeric (e.g., free-text description), refuse to proceed and instruct the developer to file an issue via `/issue-creation`, then re-invoke `/reproduce-then-fix <new-issue-number>`. The branch name, commit messages and PR body templates reference `#$0` and `Closes #$0`, which require a numeric value. Also stop if `git status --porcelain` shows uncommitted changes, so a checkout cannot carry them onto the wrong branch.
 
 ```bash
-case "$0" in ''|*[!0-9]*) echo "Issue number must be numeric: $0" >&2; exit 1 ;; esac
-BRANCH=$(git branch --list "feature/$0-*" --format='%(refname:short)' | head -1)
-[ -z "$BRANCH" ] && BRANCH=$(git branch -r --list "origin/feature/$0-*" --format='%(refname:short)' | head -1)
+case "$0" in
+  ''|*[!0-9]*) echo "Issue number must be numeric: $0" >&2; exit 1 ;;
+esac
+[ -z "$(git status --porcelain)" ] || { echo "Uncommitted changes present; commit or stash them first" >&2; exit 1; }
+# Same names /dev-lifecycle recognises: the bare feature/<N> and feature/<N>-<topic>.
+BRANCH=$(git branch --list "feature/$0" "feature/$0-*" --format='%(refname:short)' | head -1)
+[ -z "$BRANCH" ] && BRANCH=$(git branch -r --list "origin/feature/$0" "origin/feature/$0-*" --format='%(refname:short)' | head -1)
 if [ -n "$BRANCH" ]; then
   git checkout "${BRANCH#origin/}" 2>/dev/null || git checkout --track "$BRANCH"
 else
