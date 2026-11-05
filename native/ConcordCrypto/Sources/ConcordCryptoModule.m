@@ -66,5 +66,11 @@ RCT_EXTERN_METHOD(decryptAttachment:(NSString *)fileId
                   reject:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(clearAttachments:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(attachmentImageSize:(NSString *)uri
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(deleteAttachment:(NSString *)uri
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 
 @end

@@ -3,7 +3,7 @@
     <application>
         <!-- Hands a decrypted attachment to the share sheet the user opened; nothing else. -->
         <provider
-            android:name="androidx.core.content.FileProvider"
+            android:name="com.concordvoice.crypto.ConcordAttachmentProvider"
             android:authorities="${applicationId}.concordattachments"
             android:exported="false"
             android:grantUriPermissions="true">

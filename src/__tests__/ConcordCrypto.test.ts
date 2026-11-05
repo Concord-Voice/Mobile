@@ -1,9 +1,11 @@
 import { NativeModules } from 'react-native';
 import {
+  attachmentImageSize,
   clearAttachments,
   createIdentity,
   decryptAttachment,
   decryptMessage,
+  deleteAttachment,
   deleteIdentity,
   deleteSession,
   downloadAttachment,
@@ -180,13 +182,17 @@ describe('ConcordCrypto', () => {
   });
 
   it('keeps attachment bytes native and checks what comes back', async () => {
-    const download = { id: HANDLE, size: 40, mimeType: null, keyVersion: '3' };
+    const download = { id: HANDLE, mimeType: null, keyVersion: '3' };
     const module = install({
       downloadAttachment: jest.fn().mockResolvedValue(download),
       decryptAttachment: jest
         .fn()
         .mockResolvedValue({ uri: 'file:///c/a.png', size: 12 }),
       clearAttachments: jest.fn().mockResolvedValue(null),
+      attachmentImageSize: jest
+        .fn()
+        .mockResolvedValue({ width: 640, height: 480 }),
+      deleteAttachment: jest.fn().mockResolvedValue(null),
       shareAttachment: jest.fn().mockResolvedValue(null),
     });
     expect(await downloadAttachment('https://h/a', { A: 'b' }, 40)).toEqual(
@@ -199,9 +205,8 @@ describe('ConcordCrypto', () => {
     );
     for (const bad of [
       { ...download, id: '../x' },
-      { ...download, size: -1 },
-      { ...download, size: 1.5 },
       { ...download, mimeType: 7 },
+      { ...download, keyVersion: 3 },
       null,
     ]) {
       module.downloadAttachment.mockResolvedValueOnce(bad);
@@ -209,7 +214,6 @@ describe('ConcordCrypto', () => {
     }
     expect(await decryptAttachment(HANDLE, key, 'png')).toEqual({
       uri: 'file:///c/a.png',
-      size: 12,
     });
     expect(module.decryptAttachment).toHaveBeenCalledWith(HANDLE, key, 'png');
     // Plaintext is only ever a local file.
@@ -222,14 +226,23 @@ describe('ConcordCrypto', () => {
     );
     await clearAttachments();
     expect(module.clearAttachments).toHaveBeenCalled();
-    await shareAttachment('file:///c/a.png', 'image/png');
-    expect(module.shareAttachment).toHaveBeenCalledWith(
-      'file:///c/a.png',
-      'image/png',
-    );
+    expect(await attachmentImageSize('file:///c/a.png')).toEqual({
+      width: 640,
+      height: 480,
+    });
+    for (const bad of [{ width: -1, height: 1 }, { width: 1.5 }, null]) {
+      module.attachmentImageSize.mockResolvedValueOnce(bad);
+      await expect(attachmentImageSize('file:///c/a.png')).rejects.toThrow(
+        'Invalid native crypto output',
+      );
+    }
+    await deleteAttachment('file:///c/a.png');
+    expect(module.deleteAttachment).toHaveBeenCalledWith('file:///c/a.png');
+    await shareAttachment('file:///c/a.png');
+    expect(module.shareAttachment).toHaveBeenCalledWith('file:///c/a.png');
     // iOS has no native share; it uses React Native's.
     delete module.shareAttachment;
-    await expect(shareAttachment('file:///c/a.png', '')).rejects.toThrow(
+    await expect(shareAttachment('file:///c/a.png')).rejects.toThrow(
       'Sharing is not available',
     );
   });

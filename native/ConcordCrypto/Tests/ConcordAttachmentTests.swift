@@ -1,5 +1,7 @@
+import CoreGraphics
 import CryptoKit
 import Foundation
+import ImageIO
 import XCTest
 
 @testable import ConcordCrypto
@@ -152,6 +154,40 @@ final class ConcordAttachmentTests: XCTestCase {
     XCTAssertThrowsError(try open(blob, key: SymmetricKey(size: .bits256)).get()) {
       XCTAssertEqual($0 as? ConcordCryptoError, .tooLarge)
     }
+  }
+
+  func testImageSizeAndDeleteTouchOnlyDecryptedFiles() throws {
+    let files = ConcordAttachmentFiles(directory: folder)
+    let png = folder.appendingPathComponent("\(UUID().uuidString).png")
+    let image = try XCTUnwrap(
+      CGContext(
+        data: nil, width: 3, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage())
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithURL(png as CFURL, "public.png" as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, image, nil)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    let size = try files.imageSize(uri: png.absoluteString)
+    XCTAssertEqual(size["width"] as? Int, 3)
+    XCTAssertEqual(size["height"] as? Int, 2)
+    // Not an image: zero, not an error.
+    let text = folder.appendingPathComponent("\(UUID().uuidString).txt")
+    try Data("plain words".utf8).write(to: text)
+    XCTAssertEqual(try files.imageSize(uri: text.absoluteString)["width"] as? Int, 0)
+    for uri in [
+      folder.deletingLastPathComponent().appendingPathComponent("x.png").absoluteString,
+      folder.appendingPathComponent("../x.png").absoluteString,
+      folder.appendingPathComponent("\(UUID().uuidString).enc").absoluteString,
+      "https://h.test/x.png",
+    ] {
+      XCTAssertThrowsError(try files.imageSize(uri: uri)) {
+        XCTAssertEqual($0 as? ConcordCryptoError, .invalidInput)
+      }
+      XCTAssertThrowsError(try files.delete(uri: uri))
+    }
+    try files.delete(uri: png.absoluteString)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: png.path))
   }
 
   // MARK: Download

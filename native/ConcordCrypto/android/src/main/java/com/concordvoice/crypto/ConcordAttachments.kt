@@ -162,6 +162,8 @@ class ConcordAttachmentFiles(
   val directory: File,
   private val connect: (URL) -> URLConnection = { it.openConnection() },
 ) {
+  @Volatile private var running: HttpURLConnection? = null
+
   /**
    * Downloads https [url] with [headers] into a new ciphertext file. Refuses redirects (the headers
    * carry the session), any status but 200, and more than [maxBytes].
@@ -186,6 +188,7 @@ class ConcordAttachmentFiles(
       } catch (_: IOException) {
         fail(Failure.NETWORK)
       }
+    running = connection
     try {
       connection.instanceFollowRedirects = false
       connection.useCaches = false
@@ -196,6 +199,8 @@ class ConcordAttachmentFiles(
       // Content-Length is only a hint (-1 when absent); the byte count below is the real cap.
       if (connection.contentLengthLong > maxBytes) fail(Failure.TOOLARGE)
       var written = 0L
+      // A server that trickles bytes cannot hold the attachment queue indefinitely.
+      val deadline = System.nanoTime() + DEADLINE_NANOS
       connection.inputStream.use { input ->
         FileOutputStream(file).use { output ->
           val buffer = ByteArray(64 * 1024)
@@ -204,6 +209,7 @@ class ConcordAttachmentFiles(
             if (read < 0) break
             written += read
             if (written > maxBytes) fail(Failure.TOOLARGE)
+            if (System.nanoTime() > deadline) fail(Failure.NETWORK)
             output.write(buffer, 0, read)
           }
         }
@@ -218,6 +224,7 @@ class ConcordAttachmentFiles(
     } catch (_: IOException) {
       fail(Failure.NETWORK)
     } finally {
+      running = null
       connection.disconnect()
       if (!finished) file.delete()
     }
@@ -243,6 +250,19 @@ class ConcordAttachmentFiles(
     directory.deleteRecursively()
   }
 
+  /**
+   * Stops the running download, if any; it then fails and leaves nothing behind. Callable from any
+   * thread, so sign-out need not wait for a large download before it clears the folder.
+   */
+  fun cancel() {
+    running?.disconnect()
+  }
+
+  /** Deletes one decrypted file. */
+  fun delete(uri: String) {
+    (fileFor(uri) ?: fail(Failure.INVALIDINPUT)).delete()
+  }
+
   /** The plaintext file behind a URI this class returned, or null for anything else. */
   fun fileFor(uri: String): File? {
     if (!uri.startsWith("file://")) return null
@@ -253,5 +273,6 @@ class ConcordAttachmentFiles(
   private companion object {
     val UUID_PATTERN = Regex("^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
     val EXTENSION = Regex("^[a-z0-9]{1,8}$")
+    const val DEADLINE_NANOS = 30L * 60 * 1_000_000_000
   }
 }

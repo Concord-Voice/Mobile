@@ -23,13 +23,11 @@ jest.mock('../ConcordCrypto', () => ({
   releaseKey: jest.fn(async () => {}),
   downloadAttachment: jest.fn(async () => ({
     id: 'F',
-    size: 40,
     mimeType: 'image/png',
     keyVersion: '1',
   })),
   decryptAttachment: jest.fn(async (id: string, key: string, ext: string) => ({
     uri: `file:///c/${id}.${ext}#${key}`,
-    size: 12,
   })),
 }));
 const crypto = jest.requireMock('../ConcordCrypto') as Record<
@@ -231,7 +229,6 @@ test('opens an attachment under the epoch the server names for it', async () => 
   // type is "bin", and the server's type stands in when the sender gave none.
   crypto.downloadAttachment.mockResolvedValue({
     id: 'F',
-    size: 40,
     mimeType: 'application/pdf',
     keyVersion: null,
   });
@@ -247,7 +244,6 @@ test('opens an attachment under the epoch the server names for it', async () => 
   for (const keyVersion of ['0', '01x', '9007199254740993']) {
     crypto.downloadAttachment.mockResolvedValueOnce({
       id: 'F',
-      size: 40,
       mimeType: null,
       keyVersion,
     });
@@ -256,6 +252,21 @@ test('opens an attachment under the epoch the server names for it', async () => 
     );
   }
   expect(crypto.decryptAttachment).not.toHaveBeenCalled();
+});
+
+test('a closed conversation downloads nothing', async () => {
+  const { api, conv } = setup();
+  await conv.start();
+  crypto.downloadAttachment.mockClear();
+  conv.close();
+  await expect(
+    conv.openAttachment(
+      { id: 'a1', fileType: 'photo', fileSize: 12, mimeType: 'image/png' },
+      99,
+    ),
+  ).rejects.toThrow('Conversation closed');
+  expect(api.attachmentRequest).not.toHaveBeenCalled();
+  expect(crypto.downloadAttachment).not.toHaveBeenCalled();
 });
 
 test('sends under the current epoch and shows the stored message once', async () => {

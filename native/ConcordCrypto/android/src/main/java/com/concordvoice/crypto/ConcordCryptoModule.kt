@@ -3,6 +3,8 @@ package com.concordvoice.crypto
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.webkit.MimeTypeMap
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
@@ -153,7 +155,6 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
       val result = attachments.download(url, named, maxBytes.toLong())
       Arguments.createMap().apply {
         putString("id", result["id"] as String)
-        putDouble("size", result["size"] as Double)
         putString("mimeType", result["mimeType"] as String?)
         putString("keyVersion", result["keyVersion"] as String?)
       }
@@ -163,35 +164,57 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   fun decryptAttachment(id: String, channelKeyHandle: String, fileExtension: String, promise: Promise) =
     run(promise, attachmentExecutor) {
       // A copy: a release on the crypto thread zeroes the stored key, which must not race this.
-      val key = service.store.symmetric(channelKeyHandle).copyOf()
+      val key = service.store.symmetricCopy(channelKeyHandle)
       try {
         val result = attachments.decrypt(id, key, fileExtension)
-        Arguments.createMap().apply {
-          putString("uri", result["uri"] as String)
-          putDouble("size", result["size"] as Double)
-        }
+        Arguments.createMap().apply { putString("uri", result["uri"] as String) }
       } finally {
         key.fill(0)
       }
     }
 
   @ReactMethod
-  fun clearAttachments(promise: Promise) =
+  fun clearAttachments(promise: Promise) {
+    // Cancelled first, off the thread: a running download would otherwise hold the clear back.
+    attachments.cancel()
     run(promise, attachmentExecutor) {
       attachments.clear()
+      null
+    }
+  }
+
+  /** A decrypted image's pixel size, read from its header without decoding it; zero otherwise. */
+  @ReactMethod
+  fun attachmentImageSize(uri: String, promise: Promise) =
+    run(promise, attachmentExecutor) {
+      val file = attachments.fileFor(uri) ?: fail(Failure.INVALIDINPUT)
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      BitmapFactory.decodeFile(file.path, bounds)
+      Arguments.createMap().apply {
+        putInt("width", maxOf(bounds.outWidth, 0))
+        putInt("height", maxOf(bounds.outHeight, 0))
+      }
+    }
+
+  @ReactMethod
+  fun deleteAttachment(uri: String, promise: Promise) =
+    run(promise, attachmentExecutor) {
+      attachments.delete(uri)
       null
     }
 
   /** Opens the share sheet for a decrypted attachment, at the user's request. */
   @ReactMethod
-  fun shareAttachment(uri: String, mimeType: String, promise: Promise) =
+  fun shareAttachment(uri: String, promise: Promise) =
     run(promise, attachmentExecutor) {
       val file = attachments.fileFor(uri) ?: fail(Failure.INVALIDINPUT)
       val activity = context.currentActivity ?: fail(Failure.INTERACTIONNOTALLOWED)
       val content = FileProvider.getUriForFile(context, "${context.packageName}.concordattachments", file)
+      // The type follows the app's own extension, as on iOS, not the sender's declared type.
+      val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension)
       val send =
         Intent(Intent.ACTION_SEND)
-          .setType(if (MIME.matches(mimeType)) mimeType else "application/octet-stream")
+          .setType(type ?: "application/octet-stream")
           .putExtra(Intent.EXTRA_STREAM, content)
           .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       // The chooser passes the read grant on only through ClipData.
@@ -261,6 +284,5 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
 
   private companion object {
     const val PROMPT_TIMEOUT_MINUTES = 5L
-    val MIME = Regex("^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$")
   }
 }

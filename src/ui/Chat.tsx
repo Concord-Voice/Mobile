@@ -21,7 +21,12 @@ import {
   View,
   type ListViewToken,
 } from 'react-native';
-import { nativeErrorCode, shareAttachment } from '../ConcordCrypto';
+import {
+  attachmentImageSize,
+  deleteAttachment,
+  nativeErrorCode,
+  shareAttachment,
+} from '../ConcordCrypto';
 import type {
   Attachment,
   ConcordApi,
@@ -104,37 +109,48 @@ function InlineImage({
 }>) {
   const [tapped, setTapped] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
-  const [failed, setFailed] = useState(false);
+  // Why it failed, shown under the label; a tap tries again.
+  const [failure, setFailure] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<{ width: number; height: number }>();
   const waiting = prompt !== null && !tapped;
   const load = active && !waiting;
   useEffect(() => {
     setSource(null);
-    setFailed(false);
+    setFailure(null);
     if (!load) return;
     let live = true;
     open().then(
       next => {
         if (!live) return;
         if (next) setSource(next);
-        else setFailed(true);
+        else setFailure(TRY_AGAIN);
       },
-      () => {
-        if (live) setFailed(true);
+      error => {
+        if (live) setFailure(openError(error));
       },
     );
     return () => {
       live = false;
     };
-  }, [open, load]);
+  }, [open, load, attempt]);
   if (waiting)
     return (
       <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
         <Text style={styles.attachment}>{prompt}</Text>
       </Pressable>
     );
-  if (failed || (!source && !frame))
-    return <Text style={styles.attachment}>{label}</Text>;
+  if (failure !== null)
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setAttempt(n => n + 1)}
+      >
+        <Text style={styles.attachment}>{label}</Text>
+        <Text style={styles.hint}>{failure}</Text>
+      </Pressable>
+    );
+  if (!source && !frame) return <Text style={styles.attachment}>{label}</Text>;
   if (!source)
     return <View style={[styles.gif, fit(frame?.width, frame?.height)]} />;
   const shape = source.width && source.height ? source : loaded;
@@ -147,7 +163,7 @@ function InlineImage({
         const { width, height } = e.nativeEvent.source ?? {};
         if (width > 0 && height > 0) setLoaded({ width, height });
       }}
-      onError={() => setFailed(true)}
+      onError={() => setFailure(TRY_AGAIN)}
     />
   );
 }
@@ -204,8 +220,16 @@ const AUTO_LIMIT = 64 * MIB;
 const OPEN_LIMIT = 256 * MIB;
 /** Ciphertext overhead above the plaintext size: a header and 28 bytes per 8 MiB chunk. */
 const OVERHEAD = 4096;
+/**
+ * Photos above this many pixels open from a card instead. ponytail: Android refuses to draw a
+ * bitmap over 100 MB, 4 bytes a pixel, and does not shrink a PNG or WebP while decoding it;
+ * per-format limits if larger JPEG photos need to show inline.
+ */
+const MAX_PIXELS = 24_000_000;
 
 type OpenFile = (a: Attachment, limit: number) => Promise<string>;
+
+const TRY_AGAIN = "Couldn't open. Tap to try again";
 
 /** What a failed open tells the user, by the native failure code. */
 function openError(error: unknown): string {
@@ -217,14 +241,14 @@ function openError(error: unknown): string {
     case 'E_CONCORD_CRYPTO_TOOLARGE':
       return 'Too large to open on this phone';
     default:
-      return "Couldn't open. Tap to try again";
+      return TRY_AGAIN;
   }
 }
 
 /**
- * An attachment, by Mark's display policy: photos and animated images show inline (up to
- * 64 MiB, animated ones by the GIF rules); anything else is a card that downloads only when
- * tapped, then opens the share sheet.
+ * An attachment, by the shared display policy: photos and animated images show inline (up to
+ * 64 MiB on their own, animated ones by the GIF rules); anything else is a card that downloads
+ * only when tapped, then opens the share sheet.
  */
 function AttachmentView({
   attachment,
@@ -241,16 +265,27 @@ function AttachmentView({
 }>) {
   const { fileType, fileSize } = attachment;
   const label = attachmentLabel(attachment);
+  // Too many pixels to draw: the file still opens from a card.
+  const [huge, setHuge] = useState(false);
   // A file sent as small is held to that: the auto-load cap applies to the actual bytes.
-  const open = useCallback(
-    () =>
-      openFile(
-        attachment,
-        (attachment.fileSize > AUTO_LIMIT ? OPEN_LIMIT : AUTO_LIMIT) + OVERHEAD,
-      ).then(uri => ({ uri })),
-    [openFile, attachment],
-  );
-  if (fileType === 'photo' || fileType === 'animated') {
+  const open = useCallback(async () => {
+    const uri = await openFile(
+      attachment,
+      (attachment.fileSize > AUTO_LIMIT ? OPEN_LIMIT : AUTO_LIMIT) + OVERHEAD,
+    );
+    const { width, height } = await attachmentImageSize(uri);
+    if (width * height > MAX_PIXELS) {
+      setHuge(true);
+      return null;
+    }
+    // The header's size ignores EXIF rotation, so the shape still comes from the loaded image.
+    return { uri };
+  }, [openFile, attachment]);
+  if (
+    (fileType === 'photo' || fileType === 'animated') &&
+    fileSize <= OPEN_LIMIT &&
+    !huge
+  ) {
     const animated = fileType === 'animated';
     let prompt: string | null = null;
     if (fileSize > AUTO_LIMIT) prompt = `${label}, tap to load`;
@@ -279,7 +314,7 @@ function FileCard({
     try {
       const uri = await openFile(attachment, OPEN_LIMIT + OVERHEAD);
       if (Platform.OS === 'ios') await Share.share({ url: uri });
-      else await shareAttachment(uri, attachment.mimeType);
+      else await shareAttachment(uri);
       setState(null);
     } catch (error) {
       setState(openError(error));
@@ -315,14 +350,18 @@ function attachmentLabel({ fileType, fileSize }: Attachment): string {
   return `${kind}, ${(fileSize / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// One attachment downloads at a time, each with fresh headers when its turn comes. An opened
-// file is kept for the app run (its plaintext lives in the app cache until sign-out or the
-// next launch), so scrolling back does not download it again.
+// One attachment downloads at a time, each with fresh headers when its turn comes. Opened
+// files are kept (in the app cache, emptied at sign-out and at the next launch) so scrolling
+// back does not download them again, up to KEEP_BYTES; past that the oldest are deleted.
 let attachmentQueue: Promise<unknown> = Promise.resolve();
-const openedFiles = new WeakMap<ConcordApi, Map<string, Promise<string>>>();
+type Opened = { open: Promise<string>; size: number };
+const openedFiles = new WeakMap<ConcordApi, Map<string, Opened>>();
+/** Decrypted bytes kept at once, as on desktop. Sizes are the server's, from the upload. */
+const KEEP_BYTES = 256 * MIB;
 
 function openCached(
   api: ConcordApi,
+  chat: string,
   conversation: Pick<Conversation, 'openAttachment'>,
   a: Attachment,
   limit: number,
@@ -332,15 +371,30 @@ function openCached(
     opened = new Map();
     openedFiles.set(api, opened);
   }
-  const known = opened.get(a.id);
-  if (known) return known;
+  const files = opened;
+  // Per conversation: a file id the server lists in another chat must decrypt again, under
+  // that chat's key, rather than show this chat's plaintext.
+  const key = `${chat}:${a.id}`;
+  const known = files.get(key);
+  if (known) return known.open;
   const open = attachmentQueue.then(() =>
     conversation.openAttachment(a, limit),
   );
   attachmentQueue = open.catch(() => {});
-  opened.set(a.id, open);
+  files.set(key, { open, size: a.fileSize });
+  let kept = 0;
+  for (const file of files.values()) kept += file.size;
+  // Map order is insertion order, so the first entries are the oldest; the new one stays.
+  for (const [old, file] of files) {
+    if (kept <= KEEP_BYTES || old === key) break;
+    files.delete(old);
+    kept -= file.size;
+    file.open.then(deleteAttachment).catch(() => {});
+  }
   // A failure is forgotten, so a tap tries again.
-  open.catch(() => opened.delete(a.id));
+  open.catch(() => {
+    if (files.get(key)?.open === open) files.delete(key);
+  });
   return open;
 }
 
@@ -439,9 +493,9 @@ export function Chat({
   const openFile = useCallback<OpenFile>(
     (a, limit) =>
       api && conversation
-        ? openCached(api, conversation, a, limit)
+        ? openCached(api, dm.id, conversation, a, limit)
         : Promise.reject(new Error('Not signed in')),
-    [api, conversation],
+    [api, dm.id, conversation],
   );
 
   const lines = conversation?.lines ?? [];

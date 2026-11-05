@@ -36,7 +36,7 @@ encrypted direct messages.
 ### Added
 
 - **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
-- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you tap them, then open in the share sheet. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion.
+- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you tap them, then open in the share sheet. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion. A photo with too many pixels to draw opens in the share sheet instead.
 
 ### Fixed
 

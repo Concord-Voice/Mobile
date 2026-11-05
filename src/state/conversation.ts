@@ -357,6 +357,8 @@ export class Conversation {
    * else the current one, as on desktop.
    */
   async openAttachment(a: Attachment, maxBytes: number): Promise<string> {
+    // Queued opens from a closed chat (or an expired session) never download.
+    if (!this.isCurrent()) throw new Error('Conversation closed');
     const { url, headers } = await this.api.attachmentRequest(a.id);
     const file = await downloadAttachment(url, headers, maxBytes);
     // ponytail: a failure before the decrypt leaves the ciphertext until sign-out or the next

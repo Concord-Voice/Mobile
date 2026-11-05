@@ -182,11 +182,11 @@ final class ConcordCryptoModule: NSObject {
     resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
   ) {
     run(resolve, reject, on: attachmentQueue) {
-      guard let headers = headers as? [String: String], maxBytes.isFinite, maxBytes >= 1,
-        maxBytes <= Double(Int64.max)
+      // Int64(exactly:) refuses fractions, infinities and 2^63, which Int64() would trap on.
+      guard let headers = headers as? [String: String], let cap = Int64(exactly: maxBytes),
+        cap >= 1
       else { throw ConcordCryptoError.invalidInput }
-      return try self.service.attachments.download(
-        url: url, headers: headers, maxBytes: Int64(maxBytes))
+      return try self.service.attachments.download(url: url, headers: headers, maxBytes: cap)
     }
   }
 
@@ -203,8 +203,27 @@ final class ConcordCryptoModule: NSObject {
   @objc func clearAttachments(
     _ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
   ) {
+    // Cancelled first, off the queue: a running download would otherwise hold the clear back.
+    service.attachments.cancel()
     run(resolve, reject, on: attachmentQueue) {
       self.service.attachments.clear()
+      return NSNull()
+    }
+  }
+
+  @objc func attachmentImageSize(
+    _ uri: String, resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject, on: attachmentQueue) { try self.service.attachments.imageSize(uri: uri) }
+  }
+
+  @objc func deleteAttachment(
+    _ uri: String, resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject, on: attachmentQueue) {
+      try self.service.attachments.delete(uri: uri)
       return NSNull()
     }
   }

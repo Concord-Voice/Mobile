@@ -95,13 +95,17 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   is memory only, so those credentialed requests never reach Cache.db. Attachments follow
   the shared display policy. Photos and animated images show inline once on screen, up to
   64 MiB (a larger photo waits for a tap). Animated ones also wait for a tap when GIFs
-  load on tap or the phone asks for reduced motion. Other files show their kind and size
-  and download only when tapped, up to 256 MiB, then open in the share sheet. The
-  ciphertext downloads natively (https only, no redirects, capped in bytes) and never
-  enters JavaScript. Attachments decrypt with the key epoch the server names in
+  load on tap or the phone asks for reduced motion. A photo over 24 megapixels opens from
+  a card instead, because Android cannot draw it. A failed photo says why and tries again
+  on a tap. Other files show their kind and size and download only when tapped, up to
+  256 MiB, then open in the share sheet, typed by the file's extension. The ciphertext
+  downloads natively (https only, no redirects, capped in bytes and at 30 minutes) and
+  never enters JavaScript. Attachments decrypt with the key epoch the server names in
   `X-File-Key-Version`, else the current one. Plaintext lands in the app's cache folder,
-  which is emptied at sign-out, at session expiry and at every launch; a failed decrypt
-  leaves none behind. Not yet: older pages, starting a new DM, starting a key rotation,
+  which is emptied at sign-out (cancelling a running download), at session expiry and at
+  every launch; a failed decrypt leaves none behind. The app keeps up to 256 MiB of
+  opened files and deletes the oldest past that. A file is reused only in the chat that
+  opened it. Not yet: older pages, starting a new DM, starting a key rotation,
   edits, reactions, text previews, video playback and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,

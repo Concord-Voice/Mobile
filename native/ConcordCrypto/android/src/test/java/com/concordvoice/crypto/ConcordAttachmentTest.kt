@@ -139,7 +139,12 @@ class ConcordAttachmentTest {
     assertEquals(File(folder, "$id.png").canonicalFile, files.fileFor("file://${folder.absolutePath}/$id.png"))
     for (uri in listOf("file://${folder.absolutePath}/$id.enc", "file://${folder.absolutePath}/../x", "https://h/a")) {
       assertEquals(null, files.fileFor(uri))
+      expect(Failure.INVALIDINPUT) { files.delete(uri) }
     }
+    // delete removes one plaintext file and leaves the rest.
+    files.delete("file://${folder.absolutePath}/$id.png")
+    assertFalse(File(folder, "$id.png").exists())
+    assertTrue(File(folder, "$id.enc").exists())
   }
 
   @Test fun legacyBlobsOverTheCapAreRefused() {

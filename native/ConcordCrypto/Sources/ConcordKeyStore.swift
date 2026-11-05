@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import Security
 
 /// In-memory key handles. JavaScript only ever holds an opaque handle string; key bytes stay
@@ -168,6 +169,8 @@ public struct ConcordCryptoService {
 public final class ConcordAttachmentFiles {
   public let directory: URL
   private let configuration: URLSessionConfiguration
+  private let lock = NSLock()
+  private var running: URLSessionTask?
 
   public init(
     directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -178,6 +181,8 @@ public final class ConcordAttachmentFiles {
     // Ephemeral: nothing about the request or the response is cached or kept.
     configuration.urlCache = nil
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    // A server that trickles bytes cannot hold the attachment queue for days.
+    configuration.timeoutIntervalForResource = 30 * 60
     self.configuration = configuration
   }
 
@@ -200,9 +205,16 @@ public final class ConcordAttachmentFiles {
     for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
     let download = Download(handle: try FileHandle(forWritingTo: file), limit: maxBytes)
     let session = URLSession(configuration: configuration, delegate: download, delegateQueue: nil)
-    session.dataTask(with: request).resume()
+    let task = session.dataTask(with: request)
+    lock.lock()
+    running = task
+    lock.unlock()
+    task.resume()
     session.finishTasksAndInvalidate()
     download.done.wait()
+    lock.lock()
+    running = nil
+    lock.unlock()
     try? download.handle.close()
     guard download.failure == nil, let response = download.response else {
       try? FileManager.default.removeItem(at: file)
@@ -220,7 +232,7 @@ public final class ConcordAttachmentFiles {
   public func decrypt(id: String, key: SymmetricKey, fileExtension: String) throws -> [String: Any] {
     // Both name files, so both are checked strictly: no path can be smuggled in.
     guard UUID(uuidString: id)?.uuidString == id,
-      fileExtension.range(of: "^[a-z0-9]{1,8}$", options: .regularExpression) != nil
+      fileExtension.range(of: "^[a-z0-9]{1,8}\\z", options: .regularExpression) != nil
     else { throw ConcordCryptoError.invalidInput }
     let input = directory.appendingPathComponent("\(id).enc")
     defer { try? FileManager.default.removeItem(at: input) }
@@ -236,6 +248,43 @@ public final class ConcordAttachmentFiles {
   /// Deletes every attachment file, ciphertext and plaintext.
   public func clear() {
     try? FileManager.default.removeItem(at: directory)
+  }
+
+  /// Stops the running download, if any; it then fails and leaves nothing behind. Callable from
+  /// any thread, so sign-out need not wait for a large download before it clears the folder.
+  public func cancel() {
+    lock.lock()
+    running?.cancel()
+    lock.unlock()
+  }
+
+  /// A decrypted image's pixel size, read from its header without decoding it; zero when the
+  /// file is not an image.
+  public func imageSize(uri: String) throws -> [String: Any] {
+    let source = CGImageSourceCreateWithURL(try plaintext(uri) as CFURL, nil)
+    let properties =
+      source.flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) } as? [CFString: Any]
+    return [
+      "width": properties?[kCGImagePropertyPixelWidth] as? Int ?? 0,
+      "height": properties?[kCGImagePropertyPixelHeight] as? Int ?? 0,
+    ]
+  }
+
+  /// Deletes one decrypted file.
+  public func delete(uri: String) throws {
+    try? FileManager.default.removeItem(at: try plaintext(uri))
+  }
+
+  /// The plaintext file behind a URI `decrypt` returned; anything else is refused.
+  private func plaintext(_ uri: String) throws -> URL {
+    guard let url = URL(string: uri), url.isFileURL, url.pathExtension != "enc" else {
+      throw ConcordCryptoError.invalidInput
+    }
+    let file = url.standardizedFileURL
+    guard file.deletingLastPathComponent().path == directory.standardizedFileURL.path else {
+      throw ConcordCryptoError.invalidInput
+    }
+    return file
   }
 
   private func prepare() throws {

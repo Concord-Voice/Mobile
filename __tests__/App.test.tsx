@@ -30,9 +30,23 @@ async function render() {
 
 const actions = useSession.getState();
 
+/** The native calls Chat makes itself. An image's pixel size comes from `pixels`, by URI. */
+const pixels = new Map<string, { width: number; height: number }>();
+const nativeFiles = {
+  attachmentImageSize: jest.fn(
+    async (uri: string) => pixels.get(uri) ?? { width: 0, height: 0 },
+  ),
+  deleteAttachment: jest.fn(async (_uri: string) => null),
+  shareAttachment: jest.fn(async (_uri: string) => null),
+};
+const modules = NativeModules as { ConcordCryptoModule?: object };
+
 afterEach(async () => {
   await ReactTestRenderer.act(() => mounted?.unmount());
   mounted = null;
+  delete modules.ConcordCryptoModule;
+  pixels.clear();
+  Object.values(nativeFiles).forEach(f => f.mockClear());
   useSession.setState({
     ...actions,
     stage: { kind: 'signed_out' },
@@ -519,6 +533,7 @@ async function chatWithFiles(
   auto: boolean | Error = true,
 ) {
   const { api, gif } = gifApi(auto);
+  modules.ConcordCryptoModule = nativeFiles;
   const fake = chatWith(
     [
       { id: 'm1', userId: 'peer', sender: 'Peer', text: '', attachments },
@@ -639,10 +654,93 @@ test('shows photos inline and opens other files only on a tap', async () => {
   }
 });
 
+test('explains a failed photo, retries it, and opens oversized ones from a card', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
+  pixels.set('file:///c/p3', { width: 10000, height: 10000 });
+  let photoTries = 0;
+  let finishFile!: () => void;
+  const openAttachment = jest.fn(async (a: Attachment, _limit: number) => {
+    if (a.id === 'p1' && ++photoTries === 1)
+      throw Object.assign(new Error('auth'), {
+        code: 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+      });
+    if (a.id === 'f1')
+      await new Promise<void>(resolve => {
+        finishFile = resolve;
+      });
+    return `file:///c/${a.id}`;
+  });
+  try {
+    const { tree, show } = await chatWithFiles(
+      [
+        file('p1', 'photo', 2048, 'image/png'),
+        file('p2', 'photo', 300 * MIB, 'image/png'),
+        file('p3', 'photo', MIB, 'image/png'),
+        file('f1', 'file', 10, 'application/zip'),
+      ],
+      openAttachment,
+    );
+    await show();
+    // A failed photo says why, and a tap tries again.
+    expect(text(tree)).toContain(
+      "Photo, 2.0 KB|Can't open: the file is damaged or was changed",
+    );
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 2.0 KB').props.onPress(),
+    );
+    expect(photoTries).toBe(2);
+    expect(imageOf(tree, 'Photo, 2.0 KB')).toBe('file:///c/p1');
+    // Too large to download, or too many pixels to draw: a card instead of an image.
+    expect(text(tree)).toContain(
+      'Photo, 300.0 MB|Too large to open on this phone',
+    );
+    expect(button(tree, 'Photo, 300.0 MB').props.disabled).toBe(true);
+    expect(imageOf(tree, 'Photo, 1.0 MB')).toBeUndefined();
+    expect(text(tree)).toContain('Photo, 1.0 MB|Tap to open');
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 1.0 MB').props.onPress(),
+    );
+    // Already downloaded, so the card shares the same file.
+    expect(share).toHaveBeenCalledWith({ url: 'file:///c/p3' });
+    expect(
+      openAttachment.mock.calls.filter(([a]) => a.id === 'p3'),
+    ).toHaveLength(1);
+    // A file being opened cannot be tapped again.
+    const zip = () => button(tree, 'File, 10 B');
+    await ReactTestRenderer.act(async () => {
+      zip().props.onPress();
+    });
+    expect(text(tree)).toContain('File, 10 B|Opening…');
+    expect(zip().props.disabled).toBe(true);
+    await ReactTestRenderer.act(async () => finishFile());
+    expect(text(tree)).toContain('File, 10 B|Tap to open');
+  } finally {
+    share.mockRestore();
+  }
+});
+
+test('keeps at most 256 MiB of opened files, deleting the oldest', async () => {
+  const openAttachment = jest.fn(async (a: Attachment) => `file:///c/${a.id}`);
+  const { tree, show } = await chatWithFiles(
+    ['q1', 'q2', 'q3'].map(id => file(id, 'photo', 100 * MIB, 'image/png')),
+    openAttachment,
+  );
+  await show();
+  for (let i = 0; i < 3; i++)
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 100.0 MB, tap to load').props.onPress(),
+    );
+  expect(openAttachment.mock.calls.map(([a]) => a.id)).toEqual([
+    'q1',
+    'q2',
+    'q3',
+  ]);
+  expect(nativeFiles.deleteAttachment.mock.calls).toEqual([['file:///c/q1']]);
+});
+
 test('opens files through the native share sheet on Android', async () => {
-  const modules = NativeModules as { ConcordCryptoModule?: object };
-  const shareAttachment = jest.fn(async () => null);
-  modules.ConcordCryptoModule = { shareAttachment };
   jest.replaceProperty(Platform, 'OS', 'android');
   const failures = [
     ['E_CONCORD_CRYPTO_UNSUPPORTEDFORMAT', 'Update the app to open this file'],
@@ -674,12 +772,9 @@ test('opens files through the native share sheet on Android', async () => {
     await ReactTestRenderer.act(async () =>
       button(tree, 'File, 10 B').props.onPress(),
     );
-    expect(shareAttachment).toHaveBeenCalledWith(
-      'file:///c/f1',
-      'application/zip',
-    );
+    // Native code types the share by the file's own extension, not the sender's type.
+    expect(nativeFiles.shareAttachment).toHaveBeenCalledWith('file:///c/f1');
   } finally {
-    delete modules.ConcordCryptoModule;
     jest.restoreAllMocks();
   }
 });
@@ -710,6 +805,10 @@ test('holds animation for a tap while the phone asks for reduced motion', async 
     ).toHaveLength(2);
     expect(gif).not.toHaveBeenCalled();
     expect(openAttachment).not.toHaveBeenCalled();
+    expect(AccessibilityInfo.addEventListener).toHaveBeenCalledWith(
+      'reduceMotionChanged',
+      expect.any(Function),
+    );
     // Turning the setting off lets them play.
     await ReactTestRenderer.act(async () => changed(false));
     expect(gif).toHaveBeenCalledWith('tiny');
