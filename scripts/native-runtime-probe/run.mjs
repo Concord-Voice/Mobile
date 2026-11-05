@@ -464,8 +464,10 @@ export async function observe(
   try {
     if (platform === 'ios') {
       if (!/^[0-9A-F-]{36}$/i.test(device)) refuse('invalid-simulator');
+      // A Release app install on a busy hosted macOS runner can take longer than 30 s;
+      // that ceiling failed three runs in a row as platform-command-failed.
       await runCommand('xcrun', ['simctl', 'install', device, app], {
-        timeout: 30000,
+        timeout: 120000,
       });
       collector = await startLogCollector('xcrun', [
         'simctl',
