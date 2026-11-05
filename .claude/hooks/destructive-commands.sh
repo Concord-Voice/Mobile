@@ -1,9 +1,9 @@
 #!/bin/bash
 # destructive-commands.sh — PreToolUse hook for Bash
 # Blocks destructive commands. It checks force-push, hard reset, git clean,
-# recursive rm and working-tree checkout/restore itself, so the guard does not
-# depend on a repo's .claude/settings.json deny list. It is a best-effort regex
-# guard, not a parser: keep the deny list too.
+# recursive rm and working-tree checkout/restore itself. It is a best-effort regex
+# guard, not a parser: it covers common forms, not every shell construct, so keep
+# the .claude/settings.json deny list too. Without perl it blocks every Bash command.
 #
 # Scoped bypass: the `commit-commands:clean_gone` skill needs to issue
 # `git branch -D` to clean up [gone] branches. A per-invocation env-var prefix
@@ -61,7 +61,7 @@ fi
 
 # Work-discarding and history-rewriting git/rm operations, best effort: a regex
 # over the command text, not a parser. Git patterns only match in command
-# position (start, or after ; & | or a subshell paren), so a commit message
+# position (see CMD_POS below), so a commit message
 # that mentions one is not blocked. Quoted strings are dropped before matching for
 # the same reason. --force-with-lease (with or without --force-if-includes) and
 # index-only `git restore --staged` stay allowed.
@@ -69,23 +69,40 @@ fi
 # Quoted spans are read left to right, so the first quote opens the span and an
 # apostrophe inside double quotes is inert. A quoted single word ("." or 'src') is an
 # argument, so it is kept. A double-quoted span holding $( or a backtick is executed
-# by the shell, so its text stays visible. Any other quoted span is prose and dropped.
-SCAN=$(printf '%s' "$COMMAND" | perl -0777 -pe 's/"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27/my $d = defined $1; my $t = $d ? $1 : $2; ($d && $t =~ m{\$\(|`}) ? " $t " : ($t =~ m{^\S*$} ? $t : " ")/ge') || {
+# by the shell, so its text stays visible. Any other quoted span is prose and becomes
+# the placeholder `_` with no padding, so a quoted value stays one word, whether it
+# stands alone (-C "/tmp/a b") or is glued to an option (-c user.name="A B").
+SCAN=$(printf '%s' "$COMMAND" | perl -0777 -pe 's/"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27/my $d = defined $1; my $t = $d ? $1 : $2; ($d && $t =~ m{\$\(|`}) ? " $t " : ($t =~ m{^\S*$} ? $t : "_")/ge') || {
     echo "BLOCKED: perl not available or failed — destructive-commands hook cannot evaluate command" >&2
     exit 2
 }
-INNER=$(printf '%s' "$COMMAND" | grep -oE "(sh|bash|zsh)[[:space:]]+-c[[:space:]]+(\"[^\"]*\"|'[^']*')|eval[[:space:]]+(\"[^\"]*\"|'[^']*')" \
-    | sed -E "s/^[^\"']*[\"']//; s/[\"']$//")
+# Quote-aware, so an escaped quote inside the script (bash -c "echo \"a\" && rm -rf x") does not end it.
+# Any shell -c or eval is scanned wherever it sits, so a wrapper (timeout, nice, find -exec)
+# cannot hide one. ponytail: prose naming `bash -c '...'` inside a quoted argument is
+# scanned too and may block; failing closed beats guessing which spans run.
+INNER=$(printf '%s' "$COMMAND" | perl -0777 -ne 'while (/(?:\b(?:sh|bash|zsh)(?:\s+-[a-zA-Z]+)*?\s+-[a-zA-Z]*c|\beval)\s+(?:"((?:[^"\\]|\\.)*)"|\x27([^\x27]*)\x27)/g) { my $t = defined $1 ? $1 : $2; $t =~ s/\\(.)/$1/g if defined $1; print "$t\n" }') || {
+    echo "BLOCKED: perl failed — destructive-commands hook cannot evaluate command" >&2
+    exit 2
+}
 [ -n "$INNER" ] && SCAN="$SCAN; $(printf '%s' "$INNER" | tr '\n' ';')"
-CMD_POS='(^|[;&|(])[[:space:]]*'
-# Global options such as -C <path>, -c <name>=<value> or --no-pager may sit before the subcommand.
-GIT='git(\s+(-[Cc]\s+[^[:space:];&|]+|--[a-z][a-z-]*(=[^[:space:];&|]*)?))*'
+# Command position: start, after ; & | ( { ! or a backtick, then any VAR=value
+# assignments and wrapper words (then/do/else, sudo, env, time, nohup, command,
+# exec, xargs and their flags) that run the next word as the command.
+CMD_POS='(^|[;&|({!`])[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|then|do|else|sudo|env|time|nohup|command|exec|xargs|-[a-zA-Z-]+)[[:space:]]+)*'
+# An absolute or relative path to git (/usr/bin/git) counts as git. Global options
+# such as -C <path>, --work-tree <path>, -c <name>=<value> or --no-pager may sit
+# before the subcommand.
+GIT='([^[:space:];&|]*/)?git(\s+(-[Cc]\s+[^[:space:];&|]+|--(git-dir|work-tree|namespace)\s+[^[:space:];&|]+|--[a-z][a-z-]*(=[^[:space:];&|]*)?))*'
 DESTRUCTIVE_RE="${CMD_POS}${GIT}\s+push\b[^;&|]*(\s--force(\s|$)|\s-[a-zA-Z]*f[a-zA-Z]*(\s|$)|\s\+[^[:space:]]+)"
 DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+reset\b[^;&|]*\s--hard"
 DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+clean\b[^;&|]*\s(-[a-zA-Z]*f|--force)"
 DESTRUCTIVE_RE+="|${CMD_POS}${GIT}\s+checkout\b[^;&|]*\s\.{1,2}/?(\s|$)"
 RESTORE_RE="${CMD_POS}${GIT}\s+restore\b[^;&|]*\s\.{1,2}/?(\s|$)"
-DESTRUCTIVE_RE+="|(^|[;&|([:space:]])rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)"
+# rm counts after any separator or whitespace, so a wrapper (timeout, nice, sudo -u,
+# xargs -I{}, if/while, find -exec/-ok) cannot hide it. Only `git rm` is exempt: it
+# touches tracked files git can restore, and is rewritten out of RM_SCAN first.
+RM_SCAN=$(printf '%s' "$SCAN" | perl -pe 's/\b(git(?:\s+(?:-[Cc]\s+\S+|--[a-z][a-z-]*(?:=\S*)?))*)\s+rm\b/$1 _gitrm/g')
+RM_RE='(^|[;&|(`[:space:]])([^[:space:];&|]*/)?rm(\s+[^;&|]*)?\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)'
 restore_hits_worktree() { # --staged alone only touches the index; judged per command segment
     local seg
     while IFS= read -r seg; do
@@ -95,7 +112,7 @@ restore_hits_worktree() { # --staged alone only touches the index; judged per co
     done < <(printf '%s\n' "$SCAN" | tr ';&|' '\n')
     return 1
 }
-if echo "$SCAN" | grep -qE "$DESTRUCTIVE_RE" || restore_hits_worktree; then
+if echo "$SCAN" | grep -qE "$DESTRUCTIVE_RE" || echo "$RM_SCAN" | grep -qE "$RM_RE" || restore_hits_worktree; then
     echo "BLOCKED: Potentially destructive command detected: $COMMAND" >&2
     exit 2
 fi

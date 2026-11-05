@@ -79,12 +79,12 @@ TODAY=$(date -u +%Y-%m-%d)
 
 ## Phase 1 — Catalog the public inbox (read-only)
 
-Pull **open** issues plus issues **closed in the last 2 days** (to reconcile in-flight reverse-sync). The GitHub author is the same feedback bot on every issue — **never key on author**; the real reporter is the non-reversible per-reporter correlation token in the body (`**Reported by:** report \`<token>\`` for bugs / `**Requested by:** report \`<token>\`` for features).
+Pull **open** issues plus issues **closed in the last 30 days** (to reconcile in-flight reverse-sync, and to feed the 30-day `Recently fixed` list in Phase 6.5). The GitHub author is the same feedback bot on every issue — **never key on author**; the real reporter is the non-reversible per-reporter correlation token in the body (`**Reported by:** report \`<token>\`` for bugs / `**Requested by:** report \`<token>\`` for features).
 
 ```bash
 gh issue list -R "$PUBLIC" --state open  --limit 200 \
   --json number,title,body,labels,createdAt,updatedAt,comments,reactionGroups,author > /tmp/ft-open.json
-gh issue list -R "$PUBLIC" --state closed --limit 60 --search "closed:>=$(date -u -v-2d +%Y-%m-%d 2>/dev/null || date -u -d '2 days ago' +%Y-%m-%d)" \
+gh issue list -R "$PUBLIC" --state closed --limit 300 --search "closed:>=$(date -u -v-30d +%Y-%m-%d 2>/dev/null || date -u -d '30 days ago' +%Y-%m-%d)" \
   --json number,title,body,labels,closedAt > /tmp/ft-closed-recent.json
 ```
 

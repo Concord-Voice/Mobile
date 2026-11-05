@@ -73,11 +73,12 @@ jobs:
           set -euo pipefail
           # Only the installer's own outputs may change. The check reads the applied index with
           # rename detection off, so a rename or copy lists its source as well as its
-          # destination, whatever header syntax the patch used. Symlinks are refused too.
+          # destination, whatever header syntax the patch used. Any symlink or submodule
+          # in the result (new, retargeted or mode-changed) is refused too.
           git apply --index "$PATCH"
           bad="$(git diff --cached --no-renames --name-only | grep -vE '^(\.claude/|scripts/repo-config\.sh$)' || true)"
           if [ -n "$bad" ]; then echo "::error::patch touches paths outside .claude/: $bad"; exit 1; fi
-          if git diff --cached --no-renames --summary | grep -q ' 120000 '; then echo "::error::patch adds a symlink"; exit 1; fi
+          if git diff --cached --no-renames --raw | awk '$2 ~ /^1[26]0000$/ {f=1} END {exit !f}'; then echo "::error::patch writes a symlink or submodule"; exit 1; fi
           git switch -c "$BRANCH"
           git -c user.name='github-actions[bot]' -c user.email='41898283+github-actions[bot]@users.noreply.github.com' \
             commit -qm "chore: sync agentic tooling to $SRC"

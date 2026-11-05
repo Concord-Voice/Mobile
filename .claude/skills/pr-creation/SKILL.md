@@ -57,7 +57,7 @@ CLOSES=$(parse_pr_closes "$PR_BODY")
 REFS=$(parse_pr_refs "$PR_BODY")
 ```
 
-If `$CLOSES` is empty: emit a warning and skip Phase 2 (no labels to inherit) AND skip Phase 3 (no Status change). Proceed to Phase 4 (assignee + invariant validation still apply).
+If `$CLOSES` and `$REFS` are both empty: emit a warning and skip Phase 2 (no labels to inherit). If `$CLOSES` is empty, also skip Phase 3 (no Status change); a Refs-only PR still inherits labels in Phase 2. Proceed to Phase 4 (assignee + invariant validation still apply).
 
 ### Phase 2 — Inherit labels from issue(s)
 

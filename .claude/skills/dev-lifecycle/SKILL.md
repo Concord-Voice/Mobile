@@ -57,7 +57,7 @@ gh issue view $0 --json body,title,state,labels --jq '{title: .title, state: .st
 Check for children: native sub-issues first (REST `/sub_issues`, per `.claude/rules/release-tracking-epics.md`), then legacy checkbox references only when there are none:
 
 ```bash
-CHILDREN=$(gh api "repos/{owner}/{repo}/issues/$0/sub_issues?per_page=100" --jq '.[].number')
+CHILDREN=$(gh api --paginate "repos/{owner}/{repo}/issues/$0/sub_issues?per_page=100" --jq '.[].number')
 [ -n "$CHILDREN" ] || CHILDREN=$(gh issue view $0 --json body --jq '.body' | grep -oE '\- \[[ x]\] #[0-9]+' | grep -oE '[0-9]+')
 ```
 
@@ -75,7 +75,7 @@ For each child issue number, fetch its state and look for associated branches/PR
 ```bash
 # For each child:
 gh issue view ${CHILD} --json number,title,state --jq '"\(.number) | \(.title) | \(.state)"'
-gh pr list --search "head:feature/${CHILD}" --json number,title,state,isDraft,merged --jq '.[0]'
+gh pr list --state all --search "head:feature/${CHILD}" --json number,title,state,isDraft,mergedAt --jq '.[0]'
 ```
 
 ### Dashboard Format
@@ -106,7 +106,7 @@ Detect the current phase by checking artifacts in order. The first matching cond
 
 ### Detection sequence
 
-Run these checks in order. Use the Glob tool (not `ls`) for file discovery, and gate each step on the previous result.
+Run these checks in order. Use the Glob tool (not `ls`) for file discovery, and gate each step on the previous result. A PR outranks missing artifacts: `/reproduce-then-fix` opens a draft PR with no spec or plan, so when Step 5 finds a PR, map the phase from the PR rows and ignore the spec and plan rows.
 
 **Step 1: Resolve repo identity**
 ```bash
@@ -117,10 +117,11 @@ REPO=$(echo $REPO_FULL | cut -d/ -f2)
 
 **Step 2: Does a feature branch exist?**
 ```bash
-BRANCH=$(git branch --list "feature/$0-*" --format='%(refname:short)' | head -1)
+# `feature/<N>` with no topic suffix counts too.
+BRANCH=$(git branch --list "feature/$0" "feature/$0-*" --format='%(refname:short)' | head -1)
 # Also check remote if no local branch (fresh clone / pruned locals)
 if [ -z "$BRANCH" ]; then
-  REMOTE=$(git branch -r --list "origin/feature/$0-*" --format='%(refname:short)' | head -1)
+  REMOTE=$(git branch -r --list "origin/feature/$0" "origin/feature/$0-*" --format='%(refname:short)' | head -1)
   # Strip origin/ prefix for use in gh commands (gh pr list --head expects bare branch name)
   BRANCH="${REMOTE#origin/}"
 fi
@@ -160,6 +161,7 @@ BOT_REVIEWS=$(gh api repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/reviews --jq '[.[
 | Condition | Phase |
 |---|---|
 | No branch | **Phase 1: UNDERSTAND** |
+| Draft or ready PR exists (any spec/plan state) | Skip the spec and plan rows; use the PR rows below |
 | Branch, no spec (`*-$0-*` in `SPEC_DIR`) | **Phase 2: PLAN** (brainstorming needed) |
 | Branch + spec, no plan (`*-$0-*` in `PLAN_DIR`) | **Phase 2: PLAN** (writing-plans needed) |
 | Branch + plan, no implementation commits | **Phase 3: EXECUTE** |
@@ -710,7 +712,7 @@ Three things follow, none optional:
 Before presenting the merge prompt, run the gate. It is a script, not a judgment call:
 
 ```bash
-.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$0"
+.claude/skills/enhanced-pr-review/check-review-dispositions.sh "$PR_NUMBER"   # the PR, not issue $0
 ```
 
 Branch on the exit code — and on nothing else:

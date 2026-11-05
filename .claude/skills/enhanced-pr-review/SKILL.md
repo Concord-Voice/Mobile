@@ -12,7 +12,7 @@ allowed-tools:
 
 # Enhanced PR Review
 
-> **Bot roster is config-driven.** This skill discovers reviewers structurally via the `user.type == "Bot"` filter (Phase 1), not from a hard-coded list — so any GitHub-app reviewer is picked up automatically with the fallback display name `Bot: {login}`. Pretty display names, CI-check names, and PR-body markers come from the OPTIONAL per-repo `.claude/repo-config.json` `.bots[]` array (read via `scripts/repo-config.sh` `rc_get`/`rc_has`). To register a bot for a nicer display name, add an entry to `.bots[]` — see the "Adding support for a new bot" section at the end. With `.bots == []` the generic fallback still works for every reviewer.
+> **Bot roster is config-driven.** This skill discovers reviewers structurally via the `user.type == "Bot"` filter (Phase 1), not from a hard-coded list — so any GitHub-app reviewer is picked up automatically with the fallback display name `Bot: {login}`. Pretty display names, CI-check names, and PR-body markers come from the OPTIONAL per-repo `.claude/repo-config.json` `.bots[]` array (read as data with `jq`, never by sourcing a script from the checkout). To register a bot for a nicer display name, add an entry to `.bots[]` — see the "Adding support for a new bot" section at the end. With `.bots == []` the generic fallback still works for every reviewer.
 >
 > **Three posting locations — the skill fetches all three.** Bot reviewers can post to ANY of three GitHub endpoints, and which one they use is reviewer-specific (no universal rule). `/pulls/{n}/comments` carries inline review comments (line-by-line); `/pulls/{n}/reviews` carries PR review summaries with a state (a bot's overall judgment); `/issues/{n}/comments` carries top-level conversation comments (verdict-only reviewers, Quality-Gate posters, and any `github-actions[bot]` workflow posting). PRs are issues under the hood — that's why the conversation endpoint is `/issues/...`. The skill polls all three in Phase 1 to avoid missing a reviewer (or a recommendation like a version bump) that only posts to the conversation endpoint.
 >
@@ -35,11 +35,14 @@ Store as `REPO` (e.g., `your-org/your-repo`).
 Load the OPTIONAL per-repo bot roster into a shell variable for the three fetches below. `.bots[]` (each `{match?, login?, marker?, name, ...}`) supplies display names, the shared-login markers, and CI-check names; an absent file or `.bots == []` yields `[]`, in which case every reviewer falls back to `Bot: {login}`:
 
 ```bash
-source "$(git rev-parse --show-toplevel)/scripts/repo-config.sh"   # path where the org tooling is installed/symlinked
-BOTS_JSON="$(rc_get '.bots' '[]')"   # JSON array; '[]' when unset → generic fallback naming
+# Read the roster as data with jq. Never `source scripts/repo-config.sh` here: on a
+# contributor's PR branch that file is the contributor's code, and sourcing it runs it.
+BOTS_JSON="$(jq -c '.bots // [] | if type == "array" then . else [] end' \
+  "$(git rev-parse --show-toplevel)/.claude/repo-config.json" 2>/dev/null || true)"
+[ -n "$BOTS_JSON" ] || BOTS_JSON='[]'   # absent or unreadable → generic fallback naming
 ```
 
-All three fetches pass `$BOTS_JSON` to jq via `--argjson bots "$BOTS_JSON"` and resolve a display name with one shared helper. The helper finds the FIRST `.bots[]` entry that matches the comment's author/body, else falls back to `Bot: {login}`:
+All three fetches page through the endpoint with `gh api --paginate`, pipe the pages into a separate `jq -s --argjson bots "$BOTS_JSON"` (`gh api --jq` takes no `--argjson`), and resolve a display name with one shared helper. The helper finds the FIRST `.bots[]` entry that matches the comment's author/body, else falls back to `Bot: {login}`:
 
 ```jq
 # $bots is the repo-config .bots array. $login is .user.login; $body is the comment body
@@ -67,11 +70,10 @@ A few properties of this resolution:
 **Step 2** — Fetch bot-authored inline comments:
 
 ```bash
-gh api repos/${REPO}/pulls/$0/comments \
-  --argjson bots "$BOTS_JSON" \
-  --jq '
+gh api --paginate repos/${REPO}/pulls/$0/comments \
+  | jq -s --argjson bots "$BOTS_JSON" '
     def botname($login; $body): ( [ $bots[] | . as $b | ($b.match // "") as $m | ($b.login // "") as $bl | ($b.marker // "") as $mk | select( ($m != "" and ($login | ascii_downcase | contains($m | ascii_downcase))) or ($bl == $login and $mk != "" and ($body | contains($mk))) ) | $b.name ] | first ) // ("Bot: " + $login);
-    [ .[]
+    [ (add // [])[]
       | select(.user.type == "Bot")
       | { id: .id,
           author: .user.login,
@@ -92,11 +94,10 @@ If no bot comments are found, note `"No bot inline comments for PR #$0"` and pro
 **Step 3** — Fetch bot review summaries:
 
 ```bash
-gh api repos/${REPO}/pulls/$0/reviews \
-  --argjson bots "$BOTS_JSON" \
-  --jq '
+gh api --paginate repos/${REPO}/pulls/$0/reviews \
+  | jq -s --argjson bots "$BOTS_JSON" '
     def botname($login; $body): ( [ $bots[] | . as $b | ($b.match // "") as $m | ($b.login // "") as $bl | ($b.marker // "") as $mk | select( ($m != "" and ($login | ascii_downcase | contains($m | ascii_downcase))) or ($bl == $login and $mk != "" and ($body | contains($mk))) ) | $b.name ] | first ) // ("Bot: " + $login);
-    [ .[]
+    [ (add // [])[]
       | select(.user.type == "Bot")
       | { author: .user.login,
           bot: botname(.user.login; ""),
@@ -110,11 +111,10 @@ Note: review-endpoint logins may differ from comment-endpoint logins for the sam
 **Step 4** — Fetch bot-authored TOP-LEVEL CONVERSATION comments:
 
 ```bash
-gh api repos/${REPO}/issues/$0/comments \
-  --argjson bots "$BOTS_JSON" \
-  --jq '
+gh api --paginate repos/${REPO}/issues/$0/comments \
+  | jq -s --argjson bots "$BOTS_JSON" '
     def botname($login; $body): ( [ $bots[] | . as $b | ($b.match // "") as $m | ($b.login // "") as $bl | ($b.marker // "") as $mk | select( ($m != "" and ($login | ascii_downcase | contains($m | ascii_downcase))) or ($bl == $login and $mk != "" and ($body | contains($mk))) ) | $b.name ] | first ) // ("Bot: " + $login);
-    [ .[]
+    [ (add // [])[]
       | select(.user.type == "Bot")
       | { author: .user.login,
           bot: botname(.user.login; (.body // "")),
@@ -566,8 +566,10 @@ Reviewer names must match the roster: either the literal login, or the `name` yo
 ### 3.5.2 — Post once, then edit in place
 
 ```bash
-EXISTING=$(gh api "repos/${REPO}/issues/$0/comments" \
-  --jq '[.[] | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .id] | first // empty')
+# --paginate + jq -s: a long PR spreads comments over several pages, and a first-page-only
+# lookup misses the existing post and creates a second one, which the gate then blocks.
+EXISTING=$(gh api --paginate "repos/${REPO}/issues/$0/comments" \
+  | jq -rs '[(add // [])[] | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .id] | first // empty')
 
 if [ -n "$EXISTING" ]; then
   gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH -F body=@reconciliation.md

@@ -230,8 +230,8 @@ if [ -n "$ROSTER_RAW" ]; then
            | (($e.match // "") | tostring) as $m
            | if ($n != "") and (($n | test("[\r\n]")) or (($n | gsub("\\s";"") | length) < 3))
              then "name=\"\($n)\" (must be >=3 non-space chars, no newlines)"
-             elif ($m != "") and (($m | gsub("\\s";"") | length) < 2)
-             then "match=\"\($m)\" (must be >=2 non-space chars)"
+             elif ($m != "") and (($m | gsub("\\s";"") | length) < 4)
+             then "match=\"\($m)\" (must be >=4 non-space chars; it is a substring test on logins)"
              else empty end)' 2>/dev/null)
     if [ -n "$ROSTER_BAD" ]; then
         echo "STOP: reviewer roster at ${ROSTER_SOURCE} has unusable entries:" >&2
@@ -239,21 +239,39 @@ if [ -n "$ROSTER_RAW" ]; then
         echo "      An over-broad alias satisfies coverage for reviewers it does not name." >&2
         exit 2
     fi
+    # Length alone does not stop a generic substring ("-bot", "review"): a `match`
+    # that hits two different logins on this PR would let one reviewer's name cover
+    # another's findings, so it stops here too.
+    ROSTER_AMBIG=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
+        ([.. | objects | .author? | objects | .login // empty] | map(ascii_downcase) | unique) as $logins
+        | $roster[] | ((.match // "") | tostring | ascii_downcase) as $m
+        | select($m != "")
+        | ([$logins[] | select(contains($m))]) as $hit
+        | select(($hit | length) > 1)
+        | "match=\"\($m)\" hits \($hit | join(", "))"' 2>/dev/null)
+    if [[ -n "$ROSTER_AMBIG" ]]; then
+        echo "STOP: reviewer roster at ${ROSTER_SOURCE} has a match that names more than one account on this PR:" >&2
+        printf '%s\n' "$ROSTER_AMBIG" | sed 's/^/      /' >&2
+        echo "      Narrow it to one login (or use \"login\")." >&2
+        exit 2
+    fi
 fi
 
 # --- Assertion 1 — thread coverage -------------------------------------------
-# A thread is IN SCOPE if it is unresolved or bot-authored. A human-authored
+# A thread is IN SCOPE if it is unresolved or reviewer-authored (a bot, or a rostered machine account). A human-authored
 # thread a human already resolved is self-evidently decided; requiring a marker
 # there would be ceremony, not coverage.
 # A rostered machine USER account is a reviewer too (see `rostered` below), so its
 # resolved threads stay in scope and its own comments never count as a disposition.
-THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
-  def rostered($login):
-      ($login // "" | ascii_downcase) as $l
-    | ($roster | map(. as $e | select(
-          ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) == $l)
+# Shared by Assertions 1 and 3 so the two cannot drift. A null login (a deleted
+# account) or an empty roster login never matches, so a ghost author is not a reviewer.
+JQ_ROSTERED='def rostered($login):
+      (($login // "") | ascii_downcase) as $l
+    | $l != "" and (($roster | map(. as $e | select(
+          ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) as $el | $el != "" and $el == $l)
           or ((($e.match // "") != "") and ($l | contains($e.match | ascii_downcase)))))
-       | length) > 0;
+       | length) > 0);'
+THREAD_ROWS=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
   def reviewer: .author.__typename == "Bot" or rostered(.author.login);
   .data.repository.pullRequest.reviewThreads.nodes[]
   | select(.isResolved == false or (.comments.nodes[0] | reviewer))
@@ -445,7 +463,7 @@ fi
 #
 # Resolution order per comment: roster entry whose login matches AND whose marker
 # appears in the body; else whose `match` matches the login; else the bare login.
-REQUIRED=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
+REQUIRED=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'
     # EVERY roster predicate binds the entry with `. as $e` first. Inside
     # contains(), `.` is the string being tested — so a bare `.marker`/`.match`
     # indexes a string and jq aborts the whole program. This exact mistake was
@@ -455,14 +473,9 @@ REQUIRED=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" '
     # so the type fence alone treated it as a person: its threads fell out of
     # scope, it owed no coverage row, and a PR reviewed only by it reported
     # "no reviewer posted".
-    def rostered($login):
-        ($login | ascii_downcase) as $l
-      | ($roster | map(. as $e | select(
-            ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) == $l)
-            or ((($e.match // "") != "") and ($l | contains($e.match | ascii_downcase)))))
-         | length) > 0;
+    # rostered() comes from $JQ_ROSTERED, defined above Assertion 1.
     def persona($login; $body):
-        ($login | ascii_downcase) as $l
+        (($login // "") | ascii_downcase) as $l
       | ($roster | map(. as $e | select(
             ((($e.login // "") | ascii_downcase | sub("\\[bot\\]$";"")) == $l)
             and (($e.marker // "") != "") and ($body | contains($e.marker))))) as $bymarker
@@ -499,8 +512,10 @@ fi
 # disposition must be: Assertion 1 fences `__typename != "Bot"` so an agent
 # cannot mint its own decision, and a bot-authored reconciliation post would
 # reopen that hole one level up. Codesmith is installed on this repo and posts.
-RECON_COUNT=$(echo "$RAW" | jq '[.data.repository.pullRequest.comments.nodes[]?
+# A rostered machine USER account is excluded too, exactly as in Assertion 1.
+RECON_COUNT=$(echo "$RAW" | jq --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'[.data.repository.pullRequest.comments.nodes[]?
     | select(.author.__typename != "Bot")
+    | select(rostered(.author.login) | not)
     | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
     | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->"))] | length' 2>/dev/null || echo "JQERR")
 if [ "$RECON_COUNT" = "JQERR" ]; then
@@ -522,8 +537,9 @@ elif [ "$RECON_COUNT" -gt 1 ]; then
     echo "          Phase 3.5 edits its post in place (gh api PATCH); it never re-posts."
     fail=1
 else
-    RECON_BODY=$(echo "$RAW" | jq -r '.data.repository.pullRequest.comments.nodes[]?
+    RECON_BODY=$(echo "$RAW" | jq -r --argjson roster "$ROSTER_JSON" "$JQ_ROSTERED"'.data.repository.pullRequest.comments.nodes[]?
         | select(.author.__typename != "Bot")
+        | select(rostered(.author.login) | not)
         | select((.authorAssociation // "NONE") | IN("OWNER","MEMBER"))
         | select(.body | test("<!--\\s*cv-review-reconciliation\\s*-->")) | .body')
     while IFS= read -r want; do
