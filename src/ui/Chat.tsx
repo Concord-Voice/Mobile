@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DmSummary } from '../core/ConcordApi';
 import { Conversation } from '../state/conversation';
 import { describeError, useSession } from '../state/session';
@@ -29,6 +30,7 @@ export function Chat({
   >;
 }) {
   const { api, identity, stage } = useSession();
+  const insets = useSafeAreaInsets();
   const me = stage.kind === 'signed_in' ? stage.userId : '';
   const conversation = useMemo(
     () => (api && identity ? open(api, identity, dm.id, me) : null),
@@ -90,7 +92,10 @@ export function Chat({
 
   const lines = conversation?.lines ?? [];
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.screen}>
+    <KeyboardAvoidingView
+      behavior="padding"
+      style={[styles.screen, { paddingTop: insets.top + 8 }]}
+    >
       <View style={styles.bar}>
         <Pressable accessibilityRole="button" onPress={onBack} hitSlop={12}>
           <Text style={styles.back}>‹ Back</Text>
@@ -130,7 +135,7 @@ export function Chat({
           </View>
         )}
       />
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: insets.bottom + 8 }]}>
         <TextInput
           accessibilityLabel="Message"
           style={styles.input}
@@ -155,7 +160,7 @@ export function Chat({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bgPrimary, paddingTop: 56 },
+  screen: { flex: 1, backgroundColor: colors.bgPrimary },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -186,7 +191,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: 8,
-    paddingBottom: 28,
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
     backgroundColor: colors.bgSecondary,
