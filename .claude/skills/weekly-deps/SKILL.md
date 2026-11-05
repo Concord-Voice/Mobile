@@ -549,12 +549,14 @@ Tier C deserves the most care. For each Tier C PR:
    # an un-ignored path of this checkout), named by its SHA so a re-run after a
    # force-push neither collides with a stale branch nor reuses an old worktree.
    git fetch origin "pull/$PR/head"
-   WT="$(mktemp -d)/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
+   ROOT=$(git rev-parse --show-toplevel)
+   TMP=$(mktemp -d)
+   WT="$TMP/weekly-deps-pr-$PR-$(git rev-parse --short FETCH_HEAD)"
    git worktree add --detach "$WT" FETCH_HEAD
    cd "$WT/$DIR"   # then install deps and run the commands below
    ```
 
-   After the tests, return to the primary checkout and drop the worktree: `cd - >/dev/null && git worktree remove --force "$WT"`.
+   After the tests, drop the worktree by absolute path (each agent command may run in a fresh shell, so substitute the printed values if `$ROOT`, `$WT` and `$TMP` are gone): `cd "$ROOT" && git worktree remove --force "$WT" && rmdir "$TMP"`.
 
    Use the repo's configured per-directory commands, read from `.weekly_deps.local_test_cmds` (a map of manifest-directory → command list). When unset for a directory, fall back to a sensible per-ecosystem default for that PR's detected ecosystem:
 
