@@ -60,6 +60,13 @@ type Persisted = Origin & SavedSession;
 
 const UNLOCK_REASON = 'Unlock your Concord messages';
 
+/** "https://h//" -> "https://h", without a regex that backtracks on many slashes. */
+function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === '/') end--;
+  return url.slice(0, end);
+}
+
 function account(p: { server: string; userId: string }): string {
   return `${p.userId}@${p.server}`;
 }
@@ -388,7 +395,7 @@ export function createSessionStore(
       signIn: (server, email, password) =>
         run(async () => {
           const api = connect({
-            server: server.trim().replace(/\/+$/, ''),
+            server: withoutTrailingSlashes(server.trim()),
             // One id per sign-in, persisted with the session it belongs to.
             machineId: await randomId(),
           });

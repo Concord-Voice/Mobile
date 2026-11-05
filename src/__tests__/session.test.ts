@@ -92,7 +92,7 @@ describe('session store', () => {
     const { useStore, makeApi } = store(api);
     await useStore
       .getState()
-      .signIn(' https://chat.example.test/ ', ' m@x.test ', 'pw');
+      .signIn(' https://chat.example.test// ', ' m@x.test ', 'pw');
     expect(makeApi).toHaveBeenCalledWith(
       'https://chat.example.test',
       expect.stringMatching(

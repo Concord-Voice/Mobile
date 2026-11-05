@@ -250,12 +250,9 @@ function AttachmentView({
   );
   if (fileType === 'photo' || fileType === 'animated') {
     const animated = fileType === 'animated';
-    const prompt =
-      fileSize > AUTO_LIMIT
-        ? `${label}, tap to load`
-        : animated
-        ? gifPrompt(auto, still)
-        : null;
+    let prompt: string | null = null;
+    if (fileSize > AUTO_LIMIT) prompt = `${label}, tap to load`;
+    else if (animated) prompt = gifPrompt(auto, still);
     return (
       <InlineImage
         label={label}

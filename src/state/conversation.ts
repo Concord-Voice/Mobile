@@ -58,7 +58,7 @@ function unwrap(plaintext: string): { text: string; gifSlug?: string } {
 /** desktop parseKeyVersionHeader: absent is null (current key); anything malformed fails. */
 function keyVersion(raw: string | null): number | null {
   if (raw === null) return null;
-  const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  const n = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!Number.isSafeInteger(n) || n < 1)
     throw new Error('Unreadable attachment key epoch');
   return n;
