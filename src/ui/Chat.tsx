@@ -2,7 +2,9 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -16,6 +18,7 @@ import type {
   DmSummary,
   Gif,
 } from '../core/ConcordApi';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Conversation } from '../state/conversation';
 import { describeError, useSession } from '../state/session';
 import { colors } from './theme';
@@ -168,6 +171,25 @@ export function Chat({
   >;
 }) {
   const { api, identity, stage } = useSession();
+  const insets = useSafeAreaInsets();
+  // The keyboard already covers the bottom bar, so drop that inset while it is open.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    // iOS fires Will events in step with the avoiding view's animation; Android has only Did.
+    const ios = Platform.OS === 'ios';
+    const show = Keyboard.addListener(
+      ios ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardOpen(true),
+    );
+    const hide = Keyboard.addListener(
+      ios ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardOpen(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const me = stage.kind === 'signed_in' ? stage.userId : '';
   const conversation = useMemo(
     () => (api && identity ? open(api, identity, dm.id, me) : null),
@@ -260,7 +282,10 @@ export function Chat({
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.screen}>
+    <KeyboardAvoidingView
+      behavior="padding"
+      style={[styles.screen, { paddingTop: insets.top + 8 }]}
+    >
       <View style={styles.bar}>
         <Pressable accessibilityRole="button" onPress={onBack} hitSlop={12}>
           <Text style={styles.back}>‹ Back</Text>
@@ -320,7 +345,12 @@ export function Chat({
           </View>
         )}
       />
-      <View style={styles.composer}>
+      <View
+        style={[
+          styles.composer,
+          { paddingBottom: (keyboardOpen ? 0 : insets.bottom) + 8 },
+        ]}
+      >
         <TextInput
           accessibilityLabel="Message"
           style={styles.input}
@@ -345,7 +375,7 @@ export function Chat({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bgPrimary, paddingTop: 56 },
+  screen: { flex: 1, backgroundColor: colors.bgPrimary },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -378,7 +408,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: 8,
-    paddingBottom: 28,
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
     backgroundColor: colors.bgSecondary,

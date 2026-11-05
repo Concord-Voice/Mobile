@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DmSummary } from '../core/ConcordApi';
 import { describeError, useSession } from '../state/session';
 import { Chat } from './Chat';
@@ -67,9 +68,11 @@ export function Home() {
   const [tab, setTab] = useState<Tab>('Messages');
   const [openDm, setOpenDm] = useState<DmSummary | null>(null);
   const notice = useSession(s => s.notice);
+  // Android draws edge to edge, so pad for the status and navigation bars ourselves.
+  const insets = useSafeAreaInsets();
   if (openDm) return <Chat dm={openDm} onBack={() => setOpenDm(null)} />;
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
       <Text style={styles.header}>{tab}</Text>
       {notice ? <Text style={styles.note}>{notice}</Text> : null}
       <View style={styles.pane}>
@@ -79,7 +82,10 @@ export function Home() {
           <Text style={styles.note}>Coming next.</Text>
         ) : null}
       </View>
-      <View style={styles.tabs} accessibilityRole="tablist">
+      <View
+        style={[styles.tabs, { paddingBottom: insets.bottom }]}
+        accessibilityRole="tablist"
+      >
         {TABS.map(t => (
           <Pressable
             key={t}
@@ -99,7 +105,7 @@ export function Home() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bgPrimary, paddingTop: 56 },
+  screen: { flex: 1, backgroundColor: colors.bgPrimary },
   header: {
     color: colors.text,
     fontSize: 22,
@@ -132,7 +138,6 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
     backgroundColor: colors.bgSecondary,
-    paddingBottom: 24,
   },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   tabText: { color: colors.textMuted, fontSize: 13 },
