@@ -272,7 +272,9 @@ public final class ConcordAttachmentFiles {
 
   /// Deletes one decrypted file.
   public func delete(uri: String) throws {
-    try? FileManager.default.removeItem(at: try plaintext(uri))
+    // Validate outside try?, which would swallow the refusal along with a missing file.
+    let file = try plaintext(uri)
+    try? FileManager.default.removeItem(at: file)
   }
 
   /// The plaintext file behind a URI `decrypt` returned; anything else is refused.
