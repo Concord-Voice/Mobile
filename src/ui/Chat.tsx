@@ -3,6 +3,7 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -35,11 +36,15 @@ export function Chat({
   // The keyboard already covers the bottom bar, so drop that inset while it is open.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () =>
-      setKeyboardOpen(true),
+    // iOS fires Will events in step with the avoiding view's animation; Android has only Did.
+    const ios = Platform.OS === 'ios';
+    const show = Keyboard.addListener(
+      ios ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardOpen(true),
     );
-    const hide = Keyboard.addListener('keyboardDidHide', () =>
-      setKeyboardOpen(false),
+    const hide = Keyboard.addListener(
+      ios ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardOpen(false),
     );
     return () => {
       show.remove();
