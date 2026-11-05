@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import type { MfaCodeMethod } from '../core/ConcordApi';
-import { useSession } from '../state/session';
+import { biometricName, useSession } from '../state/session';
 import { colors } from './theme';
 
 function Field(props: {
@@ -73,7 +73,7 @@ export function SignIn() {
       <Text style={styles.title}>Concord Voice</Text>
       {canResume ? (
         <Submit
-          title="Unlock with Face ID"
+          title={`Unlock with ${biometricName()}`}
           disabled={false}
           onPress={restore}
         />

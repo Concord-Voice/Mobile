@@ -153,7 +153,9 @@ describe('session store', () => {
 
   it('logs the server session out when the key will not unlock', async () => {
     crypto.unlockIdentity.mockRejectedValueOnce(
-      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_WRONGPASSWORD' }),
+      Object.assign(new Error('x'), {
+        code: 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+      }),
     );
     const api = fakeApi();
     const { useStore } = store(api);
@@ -162,7 +164,7 @@ describe('session store', () => {
     expect(useStore.getState()).toMatchObject({
       stage: { kind: 'signed_out' },
       api: null,
-      error: 'Your password could not unlock your encryption key.',
+      error: 'Encryption failed on this device. Try again.',
     });
   });
 
@@ -312,6 +314,28 @@ describe('session store', () => {
     await useStore.getState().signIn('https://c.test', 'm', 'pw');
     expect(crypto.saveSession).not.toHaveBeenCalled();
     expect(useStore.getState().stage.kind).toBe('signed_in');
+    expect(useStore.getState().notice).toMatch(/password next time/);
+  });
+
+  it('says when no fingerprint is enrolled, and clears the notice on sign-out', async () => {
+    crypto.persistIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { code: 'E_CONCORD_CRYPTO_NOBIOMETRICS' }),
+    );
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(useStore.getState().notice).toMatch(/no fingerprint set up/);
+    await useStore.getState().signOut();
+    expect(useStore.getState().notice).toBeNull();
+  });
+
+  it('clears an old notice when a later sign-in saves', async () => {
+    crypto.persistIdentity.mockRejectedValueOnce(new Error('cancelled'));
+    const { useStore } = store(fakeApi());
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(useStore.getState().notice).not.toBeNull();
+    useStore.setState({ stage: { kind: 'signed_out' }, api: null });
+    await useStore.getState().signIn('https://c.test', 'm', 'pw');
+    expect(useStore.getState().notice).toBeNull();
   });
 
   it('resumes a saved session with Face ID on launch', async () => {
@@ -611,5 +635,8 @@ describe('describeError', () => {
     expect(
       describeError(new Error('Unsupported key derivation: pbkdf2')),
     ).toMatch(/older key format/);
+    expect(
+      describeError(new Error('Concord native crypto is unavailable')),
+    ).toMatch(/no secure encryption module/);
   });
 });

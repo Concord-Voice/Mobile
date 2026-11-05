@@ -21,7 +21,8 @@ import {
 } from '../../src/ConcordCrypto';
 import manifest from './manifest.generated';
 
-const iosCases = [
+// iOS and Android run the same cases against the same production native module surface.
+const cases = [
   'layout',
   'nativeVersion',
   'hermesRuntime',
@@ -33,13 +34,6 @@ const iosCases = [
   'wrongKindRefusal',
   'releasedHandleRefusal',
   'cleanup',
-];
-const androidCases = [
-  'layout',
-  'nativeVersion',
-  'hermesRuntime',
-  'nativeUnavailable',
-  'missingModuleRefusal',
 ];
 type RuntimeGlobals = {
   HermesInternal?: { getRuntimeProperties?: () => Record<string, unknown> };
@@ -63,7 +57,7 @@ const tamper = (value: string) =>
   (value[0] === 'A' ? 'B' : 'A') + value.slice(1);
 
 async function exercise() {
-  const names = manifest.platform === 'ios' ? iosCases : androidCases;
+  const names = cases;
   const checks: Record<string, boolean> = Object.fromEntries(
     names.map(name => [name, false]),
   );
@@ -110,85 +104,65 @@ async function exercise() {
     nativeAvailable =
       (NativeModules as { ConcordCryptoModule?: unknown })
         .ConcordCryptoModule != null;
-    if (manifest.platform === 'android') {
-      current = 'nativeUnavailable';
-      requireTrue(!nativeAvailable);
-      mark(current);
-      current = 'missingModuleRefusal';
-      let refused = false;
-      try {
-        await generateChannelKey();
-      } catch (error) {
-        refused =
-          error instanceof Error &&
-          error.message === 'Concord native crypto is unavailable';
-      }
-      requireTrue(refused);
-      mark(current);
-    } else {
-      current = 'nativeAvailable';
-      requireTrue(nativeAvailable);
-      mark(current);
-      current = 'identityRoundTrip';
-      // Fresh per-run synthetic input, never a credential and never published.
-      const password = manifest.syntheticPassword;
-      requireTrue(password.length >= 32);
-      const identity = await createIdentity(password);
-      requireTrue(identity.keyDerivationAlg === 'argon2id');
-      const unlocked = await unlockIdentity(
-        password,
-        identity.keyDerivationSalt,
-        identity.wrappedPrivateKeyBase64,
-        identity.keyDerivationAlg,
-      );
-      mark(current);
-      current = 'channelRoundTrip';
-      const channel = await generateChannelKey();
-      const wrapped = await wrapChannelKey(
-        channel,
-        identity.publicKeySpkiBase64,
-      );
-      const unwrapped = await unwrapChannelKey(wrapped, unlocked);
-      const text = 'Synthetic runtime: Grüße, 漢字, 👋';
-      const encrypted = await encryptMessage(text, channel);
-      requireTrue((await decryptMessage(encrypted, unwrapped)) === text);
-      mark(current);
-      current = 'tamperRefusal';
-      await rejects(
-        () => decryptMessage(tamper(encrypted), unwrapped),
-        'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
-      );
-      mark(current);
-      current = 'wrongPasswordRefusal';
-      await rejects(
-        () =>
-          unlockIdentity(
-            `different-${password}`,
-            identity.keyDerivationSalt,
-            identity.wrappedPrivateKeyBase64,
-            identity.keyDerivationAlg,
-          ),
-        'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
-      );
-      mark(current);
-      current = 'wrongKindRefusal';
-      await rejects(
-        () => encryptMessage(text, identity.privateKeyHandle),
-        'E_CONCORD_CRYPTO_WRONGKEYKIND',
-      );
-      mark(current);
-      current = 'releasedHandleRefusal';
-      await releaseKey(channel);
-      await rejects(
-        () => decryptMessage(encrypted, channel),
-        'E_CONCORD_CRYPTO_UNKNOWNHANDLE',
-      );
-      mark(current);
-    }
+    current = 'nativeAvailable';
+    requireTrue(nativeAvailable);
+    mark(current);
+    current = 'identityRoundTrip';
+    // Fresh per-run synthetic input, never a credential and never published.
+    const password = manifest.syntheticPassword;
+    requireTrue(password.length >= 32);
+    const identity = await createIdentity(password);
+    requireTrue(identity.keyDerivationAlg === 'argon2id');
+    const unlocked = await unlockIdentity(
+      password,
+      identity.keyDerivationSalt,
+      identity.wrappedPrivateKeyBase64,
+      identity.keyDerivationAlg,
+    );
+    mark(current);
+    current = 'channelRoundTrip';
+    const channel = await generateChannelKey();
+    const wrapped = await wrapChannelKey(channel, identity.publicKeySpkiBase64);
+    const unwrapped = await unwrapChannelKey(wrapped, unlocked);
+    const text = 'Synthetic runtime: Grüße, 漢字, 👋';
+    const encrypted = await encryptMessage(text, channel);
+    requireTrue((await decryptMessage(encrypted, unwrapped)) === text);
+    mark(current);
+    current = 'tamperRefusal';
+    await rejects(
+      () => decryptMessage(tamper(encrypted), unwrapped),
+      'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+    );
+    mark(current);
+    current = 'wrongPasswordRefusal';
+    await rejects(
+      () =>
+        unlockIdentity(
+          `different-${password}`,
+          identity.keyDerivationSalt,
+          identity.wrappedPrivateKeyBase64,
+          identity.keyDerivationAlg,
+        ),
+      'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+    );
+    mark(current);
+    current = 'wrongKindRefusal';
+    await rejects(
+      () => encryptMessage(text, identity.privateKeyHandle),
+      'E_CONCORD_CRYPTO_WRONGKEYKIND',
+    );
+    mark(current);
+    current = 'releasedHandleRefusal';
+    await releaseKey(channel);
+    await rejects(
+      () => decryptMessage(encrypted, channel),
+      'E_CONCORD_CRYPTO_UNKNOWNHANDLE',
+    );
+    mark(current);
   } catch {
     failureCase = current;
   } finally {
-    if (manifest.platform === 'ios' && nativeAvailable) {
+    if (nativeAvailable) {
       try {
         await releaseAll();
         mark('cleanup');

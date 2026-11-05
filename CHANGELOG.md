@@ -29,6 +29,20 @@ belongs in it, and write it if the section has none. Do not edit the
 
 ## [Prerelease]
 
+Android now encrypts messages natively, so Android matches iOS: it signs you
+in, keeps your session behind your fingerprint, and reads and sends end-to-end
+encrypted direct messages.
+
+### Added
+
+- **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
+
+### Fixed
+
+- **Sign-in:** An encryption problem on the device no longer shows up as "Could not reach the server", and the unlock button names your phone's biometric feature.
+- **Messages:** Android no longer says "This version of the app is no longer supported". The app now tells the server it is the Android app and which version it is.
+- **Sign-in:** When fingerprint unlock can't be turned on, for example because no fingerprint is set up, the app now says why instead of silently signing you out next launch.
+
 ## [0.1.0] - 2026-11-05
 
 The first iOS build signs you in, keeps your session behind Face ID, and reads

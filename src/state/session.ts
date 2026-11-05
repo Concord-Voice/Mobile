@@ -14,6 +14,7 @@ import {
   unlockIdentity,
 } from '../ConcordCrypto';
 import { Platform } from 'react-native';
+import { version as appVersion } from '../../package.json';
 import { nativeAttester } from '../ConcordAttest';
 import {
   WsRateLimitedError,
@@ -39,6 +40,8 @@ export type SessionState = {
   stage: Stage;
   busy: boolean;
   error: string | null;
+  /** Shown while signed in: why biometric unlock did not turn on. */
+  notice: string | null;
   api: ConcordApi | null;
   identity: KeyHandle | null;
   /** A saved session exists that Face ID can reopen. */
@@ -81,6 +84,11 @@ function parsePersisted(raw: string): Persisted | null {
   }
 }
 
+/** What the platform's biometric unlock is called in user-facing copy. */
+export function biometricName(): string {
+  return Platform.OS === 'ios' ? 'Face ID' : 'Fingerprint or face unlock';
+}
+
 /** Writes the session record; best effort, since a lost write only costs a sign-in later. */
 function persist(at: Origin, saved: SavedSession | null): void {
   if (saved)
@@ -93,6 +101,21 @@ function persist(at: Origin, saved: SavedSession | null): void {
     ).catch(() => {});
 }
 
+/** Why the saved sign-in was not kept, in words; the password still works every launch. */
+export function persistNotice(code: string | null): string {
+  const next = 'You will sign in with your password next time.';
+  switch (code) {
+    case 'E_CONCORD_CRYPTO_NOBIOMETRICS':
+      return `Fingerprint unlock is off because this phone has no fingerprint set up. ${next}`;
+    case 'E_CONCORD_CRYPTO_NOSECUREHARDWARE':
+      return `This phone has no secure hardware for ${biometricName()}. ${next}`;
+    case 'E_CONCORD_CRYPTO_USERCANCELLED':
+      return `${biometricName()} was not turned on. ${next}`;
+    default:
+      return `${biometricName()} could not be turned on. ${next}`;
+  }
+}
+
 /** Maps HTTP failures without exposing server text or changing auth state. */
 function describeApiError(error: ApiError): string {
   if (error.status === 401) return 'Wrong email, password or code.';
@@ -103,8 +126,7 @@ function describeApiError(error: ApiError): string {
       error.code === 'CLIENT_VERSION_TOO_OLD')
   )
     return 'This version of the app is no longer supported. Update it to continue.';
-  if (error.status === 403)
-    return 'This server does not accept this app yet.';
+  if (error.status === 403) return 'This server does not accept this app yet.';
   return 'The server could not complete that. Try again.';
 }
 
@@ -115,8 +137,16 @@ export function describeError(error: unknown): string {
   if (error instanceof WsRateLimitedError)
     return 'The server is busy. Try again later.';
   if (error instanceof ApiError) return describeApiError(error);
-  if (nativeErrorCode(error) === 'E_CONCORD_CRYPTO_WRONGPASSWORD') {
-    return 'Your password could not unlock your encryption key.';
+  // No native code emits a password-specific case: a wrong password and a tampered key both
+  // fail AES-GCM authentication. Any native crypto failure is a device-side failure, not a network one.
+  if (nativeErrorCode(error) !== null) {
+    return 'Encryption failed on this device. Try again.';
+  }
+  if (
+    error instanceof Error &&
+    error.message === 'Concord native crypto is unavailable'
+  ) {
+    return 'This build of the app has no secure encryption module, so it cannot sign in.';
   }
   if (
     error instanceof Error &&
@@ -134,13 +164,18 @@ export function describeError(error: unknown): string {
 }
 
 /**
- * This build's platform and version, read from the bundle via the attest module.
+ * This build's platform and version: iOS reads the bundle via the attest module.
+ * Android has no attest module, so it reports package.json's version, which CI keeps
+ * equal to versionName (sync-native-version --check). Without a platform the server
+ * would judge the phone against the desktop minimum and refuse it as too old.
  * A failed lookup is not cached, so the next request retries it.
- * ponytail: Android has no native module yet, so it sends no version until one lands.
  */
 let client: Promise<ClientInfo | null> | null = null;
 export function appClient(): Promise<ClientInfo | null> {
-  client ??= (nativeAttester()?.info() ?? Promise.resolve(null)).then(
+  client ??= (
+    nativeAttester()?.info() ??
+    Promise.resolve(Platform.OS === 'android' ? { version: appVersion } : null)
+  ).then(
     info =>
       info
         ? { platform: Platform.OS, version: clientVersion(info.version) }
@@ -201,6 +236,7 @@ export function createSessionStore(
           api: null,
           identity: null,
           canResume: false,
+          notice: null,
           error: 'Your session ended. Log in again.',
         });
         releaseAll().catch(() => {});
@@ -208,7 +244,7 @@ export function createSessionStore(
         forget(userId ? { ...at, userId } : undefined).catch(() => {});
       };
       origin = at;
-      set({ api });
+      set({ api, notice: null });
       return api;
     };
 
@@ -231,9 +267,11 @@ export function createSessionStore(
           return;
         }
         if (get().api !== api) return;
-      } catch {
-        // No biometrics enrolled (native reports it as a Keychain failure, so the two look
-        // alike): sign in on every launch, and drop any older record so it is not offered.
+      } catch (error) {
+        // Sign in on every launch, drop any older record so it is not offered, and say why.
+        const code = nativeErrorCode(error);
+        console.warn(`Biometric unlock not saved: ${code ?? 'unknown'}`);
+        if (get().api === api) set({ notice: persistNotice(code) });
         await deleteSession().catch(() => {});
         return;
       }
@@ -275,6 +313,7 @@ export function createSessionStore(
       stage: { kind: 'starting' },
       busy: false,
       error: null,
+      notice: null,
       api: null,
       identity: null,
       canResume: false,
@@ -302,8 +341,7 @@ export function createSessionStore(
             if (code !== 'E_CONCORD_CRYPTO_NOTFOUND') {
               // Lockout or a Keychain fault: say so, and leave the password as the way in.
               set({
-                error:
-                  'Face ID could not unlock your saved sign-in. Try again, or log in with your password.',
+                error: `${biometricName()} could not unlock your saved sign-in. Try again, or log in with your password.`,
               });
               return;
             }
@@ -401,6 +439,7 @@ export function createSessionStore(
           identity: null,
           canResume: false,
           error: null,
+          notice: null,
         });
         // Local state is gone first; server revocation and key release are best effort.
         const [, , wiped] = await Promise.allSettled([
