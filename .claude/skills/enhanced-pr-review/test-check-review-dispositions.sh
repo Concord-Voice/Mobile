@@ -275,6 +275,15 @@ run "BLOCK: two markers in one comment require BOTH personas" 1 \
 run "ok: naming both personas of a two-marker comment passes" 0 \
     "$(doc "" "$(botsay github-actions '<!-- semgrep-results --> and <!-- classify-release --> in one body'),$(human '<!-- cv-review-reconciliation -->\n| Semgrep SAST | Release Classifier |')")"
 
+# A rostered machine account can hold OWNER/MEMBER (an org bot user). Its own
+# reconciliation post must not count, or it could sign off on its own review.
+machinemember() { printf '{"author":{"__typename":"User","login":"ci-machine"},"authorAssociation":"MEMBER","body":"%s"}' "$1"; }
+run "BLOCK: a rostered member account cannot post the reconciliation" 1 \
+    "$(doc "" "$(machinemember 'SECURITY: hardcoded key'),$(machinemember '<!-- cv-review-reconciliation -->\n| CI Machine |')")"
+
+run "ok: a human reconciliation still counts beside a machine one" 0 \
+    "$(doc "" "$(machinemember '<!-- cv-review-reconciliation -->\n| CI Machine |'),$(human '<!-- cv-review-reconciliation -->\n| CI Machine |')")"
+
 # --- Roster validation: an alias is a key, so it is validated before trust ---
 badroster() { # badroster <name> <expected-exit> <roster-json>
     printf '%s' "$3" > "$TMP/bad.json"
@@ -292,6 +301,16 @@ badroster "STOP: newline in name splits into a 1-char alias" 2 \
 
 badroster "STOP: single-char match donates its alias to the fleet" 2 \
     '{"bots":[{"match":"o","name":"Gitar","login":"x"}]}'
+
+badroster "STOP: a 3-char match is too broad for a substring test" 2 \
+    '{"bots":[{"match":"bot","name":"Gitar","login":"x"}]}'
+
+ambig_json=$(doc "" "$(botsay gitar-bot 'verdict'),$(botsay security-bot 'SECURITY: hardcoded key'),$(human '<!-- cv-review-reconciliation -->\n| Gitar |')")
+printf '%s' '{"bots":[{"match":"-bot","name":"Gitar","login":"x"}]}' > "$TMP/ambig.json"
+printf '%s' "$ambig_json" > "$TMP/ambig-f.json"
+CV_REVIEW_FIXTURE="$TMP/ambig-f.json" CV_REPO_CONFIG="$TMP/ambig.json" CV_SKIP_EXISTENCE_CHECKS=1 "$SCRIPT" 999 >/dev/null 2>&1; got=$?
+if [[ "$got" -eq 2 ]]; then printf '  ok   %-52s (exit %d)\n' "STOP: a match that hits two logins on the PR" "$got"; pass=$((pass+1))
+else printf '  FAIL %-52s (want 2, got %d)\n' "STOP: a match that hits two logins on the PR" "$got"; fail=$((fail+1)); fi
 
 badroster "STOP: malformed roster is loud, not silent login-only" 2 \
     '{"bots":[{"match":'
