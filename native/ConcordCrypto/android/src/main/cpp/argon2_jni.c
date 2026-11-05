@@ -5,8 +5,9 @@
 
 /* Argon2id raw hash for ConcordCrypto.deriveArgon2id. Returns NULL on any failure, so the
  * caller fails closed. Native copies of the password and output are wiped before return. */
-JNIEXPORT jbyteArray JNICALL
-Java_com_concordvoice_crypto_Argon2_hash(JNIEnv *env, jclass cls, jint t, jint m, jint p,
+/* No JNIEXPORT/JNICALL: on Android they are default visibility (the build's default) and
+ * nothing, and spelling them out stops the SAST scanners from parsing this file. */
+jbyteArray Java_com_concordvoice_crypto_Argon2_hash(JNIEnv *env, jclass cls, jint t, jint m, jint p,
                                          jbyteArray password, jbyteArray salt, jint outLen) {
   (void)cls;
   if (t <= 0 || m <= 0 || p <= 0 || outLen <= 0 || outLen > 64) return NULL;
