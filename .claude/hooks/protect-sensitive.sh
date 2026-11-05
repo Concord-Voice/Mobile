@@ -206,7 +206,9 @@ expand_embedded() {
   # nothing at all.
   local DOL='$'
   while [ "$i" -lt 8 ]; do
-    case "$txt" in *"$DOL"*) ;; *) break ;; esac
+    case "$txt" in
+        *"$DOL"*) ;; *) break ;;
+      esac
     pre="${txt%%$DOL*}"; post="${txt#*$DOL}"
     case "$post" in
       \{*) name="${post%%\}*}"; name="${name#\{}"; post="${post#*\}}" ;;
@@ -215,7 +217,9 @@ expand_embedded() {
     esac
     case "$name" in
       "" ) break ;;
-      [A-Za-z_]*) case "$name" in *[!A-Za-z0-9_]*) break ;; *) ;; esac ;;
+      [A-Za-z_]*) case "$name" in
+          *[!A-Za-z0-9_]*) break ;; *) ;;
+        esac ;;
       *) break ;;
     esac
     val=$(printf '%s\n' "$VARS" | awk -F= -v n="$name" 'index($0, n "=") == 1 { sub(/^[^=]*=/, ""); v = $0 } END { print v }')
@@ -239,7 +243,9 @@ expand_embedded() {
 # that is what the shell passes through too, with nullglob off.
 glob_expand() {
   local t="$1" b="$2" pat pfx m any=0
-  case "$t" in *[*?[]*) ;; *) printf '%s\n' "$t"; return 0 ;; esac
+  case "$t" in
+      *[*?[]*) ;; *) printf '%s\n' "$t"; return 0 ;;
+    esac
   case "$t" in
     /*) pat="$t"; pfx="" ;;
     *)  pfx="${REPO_ROOT:+${REPO_ROOT%/}/}${b:+${b%/}/}"; pat="${pfx}${t}" ;;
@@ -283,7 +289,9 @@ var_values() {
       # arbitrary string as a name, so anything that is not one is not an expansion
       # this hook can reason about — it is passed through as an opaque token.
       case "$vn" in
-        [A-Za-z_]*) case "$vn" in *[!A-Za-z0-9_]*) vn="" ;; *) ;; esac ;;
+        [A-Za-z_]*) case "$vn" in
+            *[!A-Za-z0-9_]*) vn="" ;; *) ;;
+          esac ;;
         *) vn="" ;;
       esac
       [ -n "$vn" ] || { printf '%s\n' "$t"; return 0; } ;;
@@ -395,7 +403,9 @@ matches_protected() {
   MATCHED_PATTERN=""
   [ -f "$RC_FILE" ] || return 1
   # Empty when the subject is already absolute, which is the flag the loop reads.
-  case "$subject" in /*) rooted="" ;; *) rooted="/$subject" ;; esac
+  case "$subject" in
+      /*) rooted="" ;; *) rooted="/$subject" ;;
+    esac
   while IFS= read -r pattern; do
     [ -z "$pattern" ] && continue
     [[ "$subject" =~ $pattern ]]; rc=$?
@@ -495,7 +505,9 @@ resolve_and_check() {
         case "$pcand" in
           "${REPO_ROOT%/}"/*) pcand="${pcand#"${REPO_ROOT%/}"/}" ;;
           *) if [ -n "$REPO_REAL" ]; then
-               case "$pcand" in "${REPO_REAL%/}"/*) pcand="${pcand#"${REPO_REAL%/}"/}" ;; *) ;; esac
+               case "$pcand" in
+                   "${REPO_REAL%/}"/*) pcand="${pcand#"${REPO_REAL%/}"/}" ;; *) ;;
+                 esac
              fi ;;
         esac
         if [ "$pcand" != "$eff" ]; then
@@ -1186,8 +1198,8 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
             cpd=$(printf '%s' "$cpline" | awk '{print $NF}')
             cpdisdir=1
             case "$cpd" in
-              (*/) cpd="${cpd%/}" ;;
-              (*)  # Only when the destination REALLY IS a directory. Composing
+              */) cpd="${cpd%/}" ;;
+              *)  # Only when the destination REALLY IS a directory. Composing
                   # unconditionally was wrong, and the comment that justified it was
                   # wrong in a specific way worth recording: it assumed a composed
                   # child can only match when the destination already does. That
@@ -1199,8 +1211,8 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
                   # mostly filename-shaped, and the test that missed it used /auth/.
                   cpabs="$cpd"
                   case "$cpabs" in
-                    (/*) ;;
-                    (*)  cpabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpd" ;;
+                    /*) ;;
+                    *)  cpabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpd" ;;
                   esac
                   [ -d "$cpabs" ] || cpdisdir=0 ;;
             esac
@@ -1215,14 +1227,14 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
             # neither `services` nor `services/tree` names. Bounded like every other
             # walk here, and only for sources that exist to be walked.
             case "$cpline" in
-              (*' -'[a-zA-Z]*[rR]*|*--recursive*|*' -a'*)
+              *' -'[a-zA-Z]*[rR]*|*--recursive*|*' -a'*)
                 printf '%s' "$cpline" | tr ' ' '\n' | awk 'NR > 1 && $0 !~ /^-/ && $0 != ""' \
                   | sed '$d' \
                   | while IFS= read -r cpsrc; do
                       cpsabs="$cpsrc"
                       case "$cpsabs" in
-                        (/*) ;;
-                        (*)  cpsabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpsrc" ;;
+                        /*) ;;
+                        *)  cpsabs="${REPO_ROOT:+${REPO_ROOT%/}/}${CWD:+${CWD%/}/}$cpsrc" ;;
                       esac
                       [ -d "$cpsabs" ] || continue
                       # Into `<dest>/<basename>/` when the destination exists as a
@@ -1445,7 +1457,7 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       # that may touch nothing protected. That is the same read-blocking friction
       # this rule was shaped to avoid, one level in.
       case "$raw" in
-        (*xargs*)
+        *xargs*)
           printf '%s' "$seg" | grep -qE "^[[:space:]]*(${MUTATING_VERBS}([[:space:]]|\$)|sed([[:space:]]+-[a-zA-Z]*)*[[:space:]]+-[a-zA-Z]*i)" \
             && printf '%s' "$COMMAND" | mask_quoted | tr '\004\005;&' '\n\n\n\n' \
                  | awk '{
@@ -1556,7 +1568,9 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
         *) ;;
       esac
       while IFS= read -r bframe; do
-      case "$bframe" in :*) cwd0="${bframe#:}" ;; *) continue ;; esac
+      case "$bframe" in
+          :*) cwd0="${bframe#:}" ;; *) continue ;;
+        esac
       case "$list" in
         T) base="$cwd0" ;;
         G) # A relative `-C` is resolved by git against the shell's directory, so
@@ -1572,14 +1586,16 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
       while IFS= read -r t; do
         [ -z "$t" ] && continue
         t="${t%\"}"; t="${t#\"}"; t="${t%\'}"; t="${t#\'}"
-        t="${t%)}"; t="${t%\}}"
+        t="${t%\)}"; t="${t%\}}"
         [ -z "$t" ] && continue
         # A literal assignment earlier in the command names the real path. EVERY value
         # it could hold is checked — the last unconditional one, plus any recorded
         # behind `&&`/`||`, where the tokenizer cannot know whether the branch ran.
         while IFS= read -r tv; do
           [ -z "$tv" ] && continue
-          case "$tv" in \$*) continue ;; *) ;; esac   # unresolved expansion: nothing to check
+          case "$tv" in
+              \$*) continue ;; *) ;;
+            esac   # unresolved expansion: nothing to check
           # A symlink DEREFERENCES, so a write through the alias reaches the protected
           # file: `ln -s <protected> a; echo x > a`.
           while IFS= read -r av; do
@@ -1645,15 +1661,21 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
         # variable reference until they are gone, so var_values returned it verbatim.
         draw="${draw%\"}"; draw="${draw#\"}"; draw="${draw%\'}"; draw="${draw#\'}"
         [ -z "$draw" ] && continue
-        case "$draw" in -*) continue ;; *) ;; esac
+        case "$draw" in
+            -*) continue ;; *) ;;
+          esac
         # The ordinary target pass expands variables; this one walked the literal
         # `$d`, found no such directory and enumerated nothing, so `d=services;
         # rm -rf "$d"` never saw services/auth/login.go.
         while IFS= read -r d; do
         [ -z "$d" ] && continue
-        case "$d" in \$*) continue ;; *) ;; esac
+        case "$d" in
+            \$*) continue ;; *) ;;
+          esac
         while IFS= read -r bframe; do
-        case "$bframe" in :*) cwd0="${bframe#:}" ;; *) continue ;; esac
+        case "$bframe" in
+            :*) cwd0="${bframe#:}" ;; *) continue ;;
+          esac
         case "$d" in
           /*) dd=$(norm_path "$d") ;;
           *)  dd=$(norm_path "${cwd0:+${cwd0%/}/}$d") ;;
@@ -1713,7 +1735,8 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
     # a root CWD pushed an empty line, the pop's own blank-line filter discarded it,
     # and the subshell's `cd` leaked into every later segment — which FALSE-BLOCKED
     # `( cd services/auth ); echo x > src/util.go`, a write nowhere near the pattern.
-    case "$raw" in *'('*)
+    case "$raw" in
+      *'('*)
       CWD_STACK=$(printf '%s\n:%s:%s' "$CWD_STACK" \
         "$(printf '%s\n' "$CWD_ALT" | grep -c '^:' || true)" "$CWD") ;;
       *) ;;
@@ -1884,7 +1907,9 @@ if [ -z "$FILE_PATH" ] && [ -n "$COMMAND" ]; then
     # path is caught.
     while IFS= read -r wp; do
       [ -z "$wp" ] && continue
-      case "$wp" in /*|\$*|-*) continue ;; *) ;; esac
+      case "$wp" in
+          /*|\$*|-*) continue ;; *) ;;
+        esac
       while IFS= read -r ib; do
         [ -z "$ib" ] && continue
         for v in "${ib%/}/$wp" "${ib%/}/${wp%/}/"; do
