@@ -445,7 +445,14 @@ describe('ConcordApi', () => {
         keyVersion: 4,
         createdAt: 't3',
         // Malformed summaries are dropped rather than failing the page.
-        attachments: [{ id: 'a1', fileType: 'photo', fileSize: 2048 }],
+        attachments: [
+          {
+            id: 'a1',
+            fileType: 'photo',
+            fileSize: 2048,
+            mimeType: 'image/png',
+          },
+        ],
       },
     ]);
     await api.markDmRead('c1');
@@ -516,6 +523,23 @@ describe('ConcordApi', () => {
     const before = calls.length;
     expect(await api.gif('../auth/logout')).toBeNull();
     expect(await api.gif('')).toBeNull();
+    expect(calls).toHaveLength(before);
+  });
+
+  it('hands out the attachment download with the session headers', async () => {
+    const { api, calls } = signedIn({});
+    await api.login('e', 'p');
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const { url, headers } = await api.attachmentRequest(id);
+    expect(url).toBe(`https://api.example.test/api/v1/media/attachments/${id}`);
+    expect(headers).toEqual(
+      expect.objectContaining({ Authorization: 'Bearer a1' }),
+    );
+    // Only a server-shaped id goes into the path.
+    const before = calls.length;
+    await expect(api.attachmentRequest('../auth/logout')).rejects.toThrow(
+      'Invalid attachment id',
+    );
     expect(calls).toHaveLength(before);
   });
 
@@ -1032,7 +1056,9 @@ describe('DmSocket', () => {
       userId: PEER,
       content: 'cipher',
       keyVersion: 1,
-      attachments: [{ id: 'a1', fileType: 'video', fileSize: 9 }],
+      attachments: [
+        { id: 'a1', fileType: 'video', fileSize: 9, mimeType: 'video/mp4' },
+      ],
     });
     // The live listener sees every valid frame; filtering is the caller's job.
     expect(live).toEqual(['spoof', 'm2']);

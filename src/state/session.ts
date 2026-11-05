@@ -9,6 +9,7 @@ import {
   persistIdentity,
   randomId,
   releaseAll,
+  clearAttachments,
   releaseKey,
   saveSession,
   unlockIdentity,
@@ -240,6 +241,7 @@ export function createSessionStore(
           error: 'Your session ended. Log in again.',
         });
         releaseAll().catch(() => {});
+        clearAttachments().catch(() => {});
         // A record that survives is refused again next launch, which retries this.
         forget(userId ? { ...at, userId } : undefined).catch(() => {});
       };
@@ -441,7 +443,8 @@ export function createSessionStore(
           error: null,
           notice: null,
         });
-        // Local state is gone first; server revocation and key release are best effort.
+        // Local state is gone first; server revocation, key release and deleting attachment
+        // files are best effort.
         const [, , wiped] = await Promise.allSettled([
           api?.logout(),
           releaseAll(),
@@ -450,6 +453,7 @@ export function createSessionStore(
               ? { ...at, userId: stage.userId }
               : undefined,
           ),
+          clearAttachments(),
         ]);
         // The saved sign-in survived: say so rather than reopen it silently next launch.
         if (wiped.status === 'rejected')

@@ -54,5 +54,17 @@ RCT_EXTERN_METHOD(deleteSession:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(randomId:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(downloadAttachment:(NSString *)url
+                  headers:(NSDictionary *)headers
+                  maxBytes:(double)maxBytes
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(decryptAttachment:(NSString *)fileId
+                  channelKeyHandle:(NSString *)channelKeyHandle
+                  fileExtension:(NSString *)fileExtension
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(clearAttachments:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 
 @end

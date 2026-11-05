@@ -485,10 +485,12 @@ are components of the same MIT-licensed React Native distribution.
 
 The React Native Gradle plugin maps the app declarations to
 `com.facebook.react:react-android:0.87.1` and
-`com.facebook.hermes:hermes-android:250829098.0.17`.
+`com.facebook.hermes:hermes-android:250829098.0.17`. The app also declares
+`com.facebook.fresco:animated-gif:3.7.0`, React Native's Fresco version, so GIFs
+animate.
 Hermes is enabled; the optional JSC branch is not part of this inventory.
 
-The table records 86 resolved runtime library components, including transitive
+The table records 98 resolved runtime library components, including transitive
 dependencies. Resolution used Gradle 9.4.1, the release/runtime Android JVM
 attributes and the app's Kotlin 2.2.0 declaration; dependency constraints resolve
 the Kotlin standard library to 2.2.10. The coroutines BOM is dependency metadata,
@@ -545,6 +547,10 @@ This metadata inventory does not claim a built or signed release artifact.
 | androidx.window:window-core | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.window:window | 1.5.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | com.facebook.fbjni:fbjni | 0.7.0 | [APACHE-2](https://github.com/facebookincubator/fbjni/blob/main/LICENSE) |
+| com.facebook.fresco:animated-base | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:animated-drawable | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:animated-gif-lite | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:animated-gif | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:drawee | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:fbcore | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:fresco | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
@@ -562,6 +568,14 @@ This metadata inventory does not claim a built or signed release artifact.
 | com.facebook.fresco:ui-common | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:ui-core | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:urimod | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-core-common-impl | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-core-impl | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-core-java-impl | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-core | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-drawee-support | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-options | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-provider | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
+| com.facebook.fresco:vito-renderer | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.fresco:vito-source | 3.7.0 | [MIT](https://github.com/facebook/fresco/blob/main/LICENSE) |
 | com.facebook.hermes:hermes-android | 250829098.0.17 | [MIT License](https://github.com/facebook/hermes/blob/HEAD/LICENSE) |
 | com.facebook.infer.annotation:infer-annotation | 0.18.0 | [MIT license](https://github.com/facebook/infer/blob/master/LICENSE) |

@@ -38,6 +38,12 @@ enum class Failure {
   NOSECUREHARDWARE,
   /** Android only: secure hardware is there but no strong biometric (fingerprint) is enrolled. */
   NOBIOMETRICS,
+  /** An attachment envelope this build cannot read (a newer version, flags or chunk size). */
+  UNSUPPORTEDFORMAT,
+  /** An attachment over the size the caller allowed. */
+  TOOLARGE,
+  /** An attachment download that failed, was refused, redirected or could not be saved. */
+  NETWORK,
 }
 
 /** Carries only the case: never a cause, key material or a system message. */

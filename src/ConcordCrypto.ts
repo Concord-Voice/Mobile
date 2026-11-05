@@ -46,6 +46,19 @@ type NativeCrypto = {
   loadSession(): Promise<unknown>;
   deleteSession(): Promise<unknown>;
   randomId(): Promise<unknown>;
+  downloadAttachment(
+    url: string,
+    headers: Record<string, string>,
+    maxBytes: number,
+  ): Promise<unknown>;
+  decryptAttachment(
+    id: string,
+    channelKeyHandle: string,
+    fileExtension: string,
+  ): Promise<unknown>;
+  clearAttachments(): Promise<unknown>;
+  /** Android only; iOS shares through React Native's Share. */
+  shareAttachment?(uri: string, mimeType: string): Promise<unknown>;
 };
 
 const HANDLE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
@@ -215,4 +228,76 @@ export async function releaseKey(key: KeyHandle): Promise<void> {
 
 export async function releaseAll(): Promise<void> {
   await native().releaseAll();
+}
+
+/** Downloaded ciphertext, kept natively; only its id and the response headers come back. */
+export type DownloadedAttachment = {
+  id: string;
+  size: number;
+  mimeType: string | null;
+  /** The raw X-File-Key-Version header, or null when the server sent none. */
+  keyVersion: string | null;
+};
+
+function optionalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string')
+    throw new Error('Invalid native crypto output');
+  return value;
+}
+
+function size(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
+    throw new Error('Invalid native crypto output');
+  return value;
+}
+
+/**
+ * Downloads an attachment's ciphertext natively (https only, no redirects, at most
+ * `maxBytes`). The bytes never enter JavaScript.
+ */
+export async function downloadAttachment(
+  url: string,
+  headers: Record<string, string>,
+  maxBytes: number,
+): Promise<DownloadedAttachment> {
+  const value = await native().downloadAttachment(url, headers, maxBytes);
+  const record = (value ?? {}) as Record<string, unknown>;
+  return {
+    id: handle(record.id),
+    size: size(record.size),
+    mimeType: optionalString(record.mimeType),
+    keyVersion: optionalString(record.keyVersion),
+  };
+}
+
+/**
+ * Decrypts a download to a private cache file and returns its file:// URI. The ciphertext is
+ * deleted either way; a failure leaves no plaintext behind.
+ */
+export async function decryptAttachment(
+  id: string,
+  channelKey: KeyHandle,
+  fileExtension: string,
+): Promise<{ uri: string; size: number }> {
+  const value = await native().decryptAttachment(id, channelKey, fileExtension);
+  const record = (value ?? {}) as Record<string, unknown>;
+  if (typeof record.uri !== 'string' || !record.uri.startsWith('file://'))
+    throw new Error('Invalid native crypto output');
+  return { uri: record.uri, size: size(record.size) };
+}
+
+/** Deletes every attachment file. Native code also does this at launch. */
+export async function clearAttachments(): Promise<void> {
+  await native().clearAttachments();
+}
+
+/** Android: the share sheet for a decrypted attachment file. */
+export async function shareAttachment(
+  uri: string,
+  mimeType: string,
+): Promise<void> {
+  const module = native();
+  if (!module.shareAttachment) throw new Error('Sharing is not available');
+  await module.shareAttachment(uri, mimeType);
 }

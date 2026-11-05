@@ -21,6 +21,16 @@ jest.mock('../ConcordCrypto', () => ({
     async (pt: string, key: string) => `${key.slice(2)}:${pt}`,
   ),
   releaseKey: jest.fn(async () => {}),
+  downloadAttachment: jest.fn(async () => ({
+    id: 'F',
+    size: 40,
+    mimeType: 'image/png',
+    keyVersion: '1',
+  })),
+  decryptAttachment: jest.fn(async (id: string, key: string, ext: string) => ({
+    uri: `file:///c/${id}.${ext}#${key}`,
+    size: 12,
+  })),
 }));
 const crypto = jest.requireMock('../ConcordCrypto') as Record<
   string,
@@ -72,6 +82,10 @@ function setup(history = [row('m1', '1:hi'), row('m2', '2:rotated', 2)]) {
       keyVersion: version ?? 2,
     })),
     markDmRead: jest.fn(async () => {}),
+    attachmentRequest: jest.fn(async (id: string) => ({
+      url: `https://x/media/attachments/${id}`,
+      headers: { Authorization: 'Bearer t' },
+    })),
     wsTicket: jest.fn(async () => 'tkt'),
     wsUrl: (t: string) => `wss://x/ws?ticket=${t}`,
   };
@@ -167,7 +181,7 @@ test('marks what it cannot decrypt and unwraps GIF envelopes', async () => {
 });
 
 test('keeps attachment details beside an empty text', async () => {
-  const photo = { id: 'a1', fileType: 'photo', fileSize: 2048 };
+  const photo = { id: 'a1', fileType: 'photo', fileSize: 2048, mimeType: '' };
   const { conv, socket } = setup([
     { ...row('m1', '2: ', 2), attachments: [photo] },
     { ...row('m2', '2:caption', 2), attachments: [] },
@@ -180,7 +194,7 @@ test('keeps attachment details beside an empty text', async () => {
     userId: PEER,
     content: '2: ',
     keyVersion: 2,
-    attachments: [{ id: 'a2', fileType: 'file', fileSize: 5 }],
+    attachments: [{ id: 'a2', fileType: 'file', fileSize: 5, mimeType: '' }],
   });
   await flush();
   expect(
@@ -190,8 +204,58 @@ test('keeps attachment details beside an empty text', async () => {
     ['caption', null, false],
     // The details are server metadata, so they show even when the text will not open.
     [expect.any(String), [photo], true],
-    ['', [{ id: 'a2', fileType: 'file', fileSize: 5 }], false],
+    ['', [{ id: 'a2', fileType: 'file', fileSize: 5, mimeType: '' }], false],
   ]);
+});
+
+test('opens an attachment under the epoch the server names for it', async () => {
+  const { api, conv } = setup();
+  await conv.start();
+  const file = (mimeType: string) => ({
+    id: 'a1',
+    fileType: 'file',
+    fileSize: 12,
+    mimeType,
+  });
+  // The epoch header picks the key; the sender's MIME type picks the extension.
+  expect(await conv.openAttachment(file('image/png'), 99)).toBe(
+    'file:///c/F.png#Kw1',
+  );
+  expect(api.attachmentRequest).toHaveBeenCalledWith('a1');
+  expect(crypto.downloadAttachment).toHaveBeenCalledWith(
+    'https://x/media/attachments/a1',
+    { Authorization: 'Bearer t' },
+    99,
+  );
+  // No epoch header: the current key. MIME parameters and case do not matter, an unknown
+  // type is "bin", and the server's type stands in when the sender gave none.
+  crypto.downloadAttachment.mockResolvedValue({
+    id: 'F',
+    size: 40,
+    mimeType: 'application/pdf',
+    keyVersion: null,
+  });
+  expect(await conv.openAttachment(file('Text/Plain; charset=utf-8'), 99)).toBe(
+    'file:///c/F.txt#Kw2',
+  );
+  expect(await conv.openAttachment(file('application/x-thing'), 99)).toBe(
+    'file:///c/F.bin#Kw2',
+  );
+  expect(await conv.openAttachment(file(''), 99)).toBe('file:///c/F.pdf#Kw2');
+  // A malformed epoch fails before anything is decrypted, as on desktop.
+  crypto.decryptAttachment.mockClear();
+  for (const keyVersion of ['0', '01x', '9007199254740993']) {
+    crypto.downloadAttachment.mockResolvedValueOnce({
+      id: 'F',
+      size: 40,
+      mimeType: null,
+      keyVersion,
+    });
+    await expect(conv.openAttachment(file(''), 99)).rejects.toThrow(
+      'Unreadable attachment key epoch',
+    );
+  }
+  expect(crypto.decryptAttachment).not.toHaveBeenCalled();
 });
 
 test('sends under the current epoch and shows the stored message once', async () => {

@@ -110,6 +110,9 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation(project(":concord-crypto"))
+    // GIFs and animated attachments animate on Android only with Fresco's GIF decoder.
+    // Keep it at React Native's Fresco version (react-native/gradle/libs.versions.toml).
+    implementation("com.facebook.fresco:animated-gif:3.7.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

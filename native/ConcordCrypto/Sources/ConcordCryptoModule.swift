@@ -8,14 +8,24 @@ final class ConcordCryptoModule: NSObject {
   private let service = ConcordCryptoService()
   // Argon2id holds 64 MiB for a few hundred milliseconds; keep it off the JS and main threads.
   private let queue = DispatchQueue(label: "com.concordvoice.mobile.crypto")
+  // Attachments get their own serial queue: one download or decrypt at a time, and a large
+  // file never holds up message crypto.
+  private let attachmentQueue = DispatchQueue(label: "com.concordvoice.mobile.attachments")
+
+  override init() {
+    super.init()
+    // Plaintext from an earlier run (a crash, a kill) never outlives a launch.
+    let attachments = service.attachments
+    attachmentQueue.async { attachments.clear() }
+  }
 
   @objc static func requiresMainQueueSetup() -> Bool { false }
 
   private func run(
     _ resolve: @escaping RCTPromiseResolveBlock, _ reject: @escaping RCTPromiseRejectBlock,
-    _ body: @escaping () throws -> Any
+    on queue: DispatchQueue? = nil, _ body: @escaping () throws -> Any
   ) {
-    queue.async {
+    (queue ?? self.queue).async {
       do {
         resolve(try body())
       } catch let error as ConcordCryptoError {
@@ -163,6 +173,38 @@ final class ConcordCryptoModule: NSObject {
   ) {
     run(resolve, reject) {
       try self.sessions.delete()
+      return NSNull()
+    }
+  }
+
+  @objc func downloadAttachment(
+    _ url: String, headers: NSDictionary, maxBytes: Double,
+    resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject, on: attachmentQueue) {
+      guard let headers = headers as? [String: String], maxBytes.isFinite, maxBytes >= 1,
+        maxBytes <= Double(Int64.max)
+      else { throw ConcordCryptoError.invalidInput }
+      return try self.service.attachments.download(
+        url: url, headers: headers, maxBytes: Int64(maxBytes))
+    }
+  }
+
+  @objc func decryptAttachment(
+    _ id: String, channelKeyHandle: String, fileExtension: String,
+    resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject, on: attachmentQueue) {
+      try self.service.decryptAttachment(
+        id: id, channelKeyHandle: channelKeyHandle, fileExtension: fileExtension)
+    }
+  }
+
+  @objc func clearAttachments(
+    _ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+  ) {
+    run(resolve, reject, on: attachmentQueue) {
+      self.service.attachments.clear()
       return NSNull()
     }
   }

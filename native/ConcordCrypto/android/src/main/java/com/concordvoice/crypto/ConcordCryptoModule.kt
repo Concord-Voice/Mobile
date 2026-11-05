@@ -1,20 +1,25 @@
 package com.concordvoice.crypto
 
+import android.content.ClipData
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableMap
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -35,18 +40,28 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
       context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE),
       ::authenticate)
   private val sessions = ConcordSessionVault(File(context.noBackupFilesDir, "concord-session.bin"))
+  private val attachments = ConcordAttachmentFiles(File(context.cacheDir, "concord-attachments"))
+  // Attachments get their own thread: one download or decrypt at a time, and a large file never
+  // holds up message crypto.
+  private val attachmentExecutor = Executors.newSingleThreadExecutor()
+
+  init {
+    // Plaintext from an earlier run (a crash, a kill) never outlives a launch.
+    attachmentExecutor.execute { attachments.clear() }
+  }
 
   override fun getName() = "ConcordCryptoModule"
 
   /** A JS reload or teardown drops every key handle and stops the crypto thread. */
   override fun invalidate() {
     executor.shutdownNow()
+    attachmentExecutor.shutdownNow()
     service.store.releaseAll()
     super.invalidate()
   }
 
-  private fun run(promise: Promise, body: () -> Any?) =
-    executor.execute {
+  private fun run(promise: Promise, on: ExecutorService = executor, body: () -> Any?) =
+    on.execute {
       try {
         promise.resolve(body())
       } catch (e: ConcordCryptoException) {
@@ -130,6 +145,61 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
       null
     }
 
+  @ReactMethod
+  fun downloadAttachment(url: String, headers: ReadableMap, maxBytes: Double, promise: Promise) =
+    run(promise, attachmentExecutor) {
+      val named = headers.toHashMap().mapValues { it.value as? String ?: fail(Failure.INVALIDINPUT) }
+      if (!maxBytes.isFinite() || maxBytes < 1) fail(Failure.INVALIDINPUT)
+      val result = attachments.download(url, named, maxBytes.toLong())
+      Arguments.createMap().apply {
+        putString("id", result["id"] as String)
+        putDouble("size", result["size"] as Double)
+        putString("mimeType", result["mimeType"] as String?)
+        putString("keyVersion", result["keyVersion"] as String?)
+      }
+    }
+
+  @ReactMethod
+  fun decryptAttachment(id: String, channelKeyHandle: String, fileExtension: String, promise: Promise) =
+    run(promise, attachmentExecutor) {
+      // A copy: a release on the crypto thread zeroes the stored key, which must not race this.
+      val key = service.store.symmetric(channelKeyHandle).copyOf()
+      try {
+        val result = attachments.decrypt(id, key, fileExtension)
+        Arguments.createMap().apply {
+          putString("uri", result["uri"] as String)
+          putDouble("size", result["size"] as Double)
+        }
+      } finally {
+        key.fill(0)
+      }
+    }
+
+  @ReactMethod
+  fun clearAttachments(promise: Promise) =
+    run(promise, attachmentExecutor) {
+      attachments.clear()
+      null
+    }
+
+  /** Opens the share sheet for a decrypted attachment, at the user's request. */
+  @ReactMethod
+  fun shareAttachment(uri: String, mimeType: String, promise: Promise) =
+    run(promise, attachmentExecutor) {
+      val file = attachments.fileFor(uri) ?: fail(Failure.INVALIDINPUT)
+      val activity = context.currentActivity ?: fail(Failure.INTERACTIONNOTALLOWED)
+      val content = FileProvider.getUriForFile(context, "${context.packageName}.concordattachments", file)
+      val send =
+        Intent(Intent.ACTION_SEND)
+          .setType(if (MIME.matches(mimeType)) mimeType else "application/octet-stream")
+          .putExtra(Intent.EXTRA_STREAM, content)
+          .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      // The chooser passes the read grant on only through ClipData.
+      send.clipData = ClipData.newRawUri(null, content)
+      activity.runOnUiThread { activity.startActivity(Intent.createChooser(send, null)) }
+      null
+    }
+
   /** UUID.randomUUID draws from SecureRandom. */
   @ReactMethod fun randomId(promise: Promise) = promise.resolve(UUID.randomUUID().toString())
 
@@ -191,5 +261,6 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
 
   private companion object {
     const val PROMPT_TIMEOUT_MINUTES = 5L
+    val MIME = Regex("^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$")
   }
 }

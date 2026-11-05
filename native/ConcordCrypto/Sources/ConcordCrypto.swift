@@ -13,6 +13,12 @@ public enum ConcordCryptoError: Error, Equatable {
   case userCancelled
   case interactionNotAllowed
   case keychainFailure
+  /// An attachment envelope this build cannot read (a newer version, flags or chunk size).
+  case unsupportedFormat
+  /// An attachment over the size the caller allowed.
+  case tooLarge
+  /// An attachment download that failed, was refused, redirected or could not be saved.
+  case network
 }
 
 /// Desktop-compatible message crypto, matching client/desktop/src/renderer/utils/crypto/crypto.ts.
@@ -213,6 +219,145 @@ public enum ConcordCrypto {
       throw ConcordCryptoError.invalidInput
     }
     return text
+  }
+}
+
+/// Desktop attachment files, matching client/desktop/src/renderer/utils/crypto/
+/// attachmentChunkedCrypto.ts (v2 and v3 chunked envelopes) and attachmentCrypto.ts (legacy
+/// single-shot blobs). Decrypts file to file, one chunk in memory at a time.
+public enum ConcordAttachment {
+  static let headerLength = 28
+  /// IV and tag around every chunk.
+  static let chunkOverhead = 28
+  static let chunkSize: Int64 = 8_388_608
+  /// A legacy blob is one AES-GCM message, so it decrypts in memory; refuse very large ones.
+  static let maxLegacyBytes: Int64 = 32 * 1024 * 1024
+
+  struct Header: Equatable {
+    let version: UInt8
+    let flags: UInt8
+    let chunkSize: UInt32
+    let totalChunks: UInt32
+    let nonce: Data
+  }
+
+  enum Kind: Equatable {
+    case legacy
+    case chunked(Header)
+    case unsupported
+  }
+
+  /// v3's chunk 0 gives up the header's 28 bytes; that is the whole difference from v2.
+  static func budget(version: UInt8, chunkSize: Int64, index: UInt32) -> Int64 {
+    chunkSize - (index == 0 && version == 3 ? Int64(headerLength) : 0)
+  }
+
+  static func chunkCount(version: UInt8, chunkSize: Int64, plaintext: Int64) -> Int64 {
+    let first = budget(version: version, chunkSize: chunkSize, index: 0)
+    if plaintext <= first { return 1 }
+    return 1 + (plaintext - first + chunkSize - 1) / chunkSize
+  }
+
+  /// classifyEnvelope: no trial decryption. The length arithmetic, not the "CV" magic, tells a
+  /// chunked envelope from a legacy blob whose random IV happens to start with "CV".
+  static func classify(head: Data, total: Int64) -> Kind {
+    let h = [UInt8](head.prefix(headerLength))
+    guard h.count == headerLength, h[0] == 0x43, h[1] == 0x56 else { return .legacy }
+    let size = be32(h, 4)
+    let chunks = be32(h, 8)
+    guard size >= 1, chunks >= 1 else { return .legacy }
+    let body = total - Int64(headerLength) - Int64(chunkOverhead) * Int64(chunks)
+    guard body >= 1 else { return .legacy }
+    let supported = h[2] == 2 || h[2] == 3
+    let families: [UInt8] = supported ? [h[2]] : [2, 3]
+    guard
+      families.contains(where: {
+        chunkCount(version: $0, chunkSize: Int64(size), plaintext: body) == Int64(chunks)
+      })
+    else { return .legacy }
+    guard supported, h[3] == 0, Int64(size) == chunkSize else { return .unsupported }
+    return .chunked(
+      Header(version: h[2], flags: h[3], chunkSize: size, totalChunks: chunks, nonce: Data(h[12..<28])))
+  }
+
+  /// buildChunkAad: "CVA2"/"CVA3", version, flags, nonce, chunk index, chunk count, chunk size.
+  static func aad(_ header: Header, index: UInt32) -> Data {
+    var out = Data([0x43, 0x56, 0x41, 0x30 + header.version, header.version, header.flags])
+    out += header.nonce
+    for value in [index, header.totalChunks, header.chunkSize] {
+      out += Data([UInt8(value >> 24), UInt8((value >> 16) & 0xff), UInt8((value >> 8) & 0xff), UInt8(value & 0xff)])
+    }
+    return out
+  }
+
+  private static func be32(_ bytes: [UInt8], _ at: Int) -> UInt32 {
+    bytes[at..<(at + 4)].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+  }
+
+  /// decryptAttachmentBlob, file to file. Fails closed: any failure removes the output, so no
+  /// unauthenticated plaintext is left behind. Tampering, truncation and a wrong key are all
+  /// authenticationFailed; a newer format is unsupportedFormat.
+  public static func decrypt(at input: URL, to output: URL, key: SymmetricKey) throws {
+    guard key.bitCount == ConcordCrypto.keyLength * 8 else { throw ConcordCryptoError.invalidInput }
+    let reader = try FileHandle(forReadingFrom: input)
+    defer { try? reader.close() }
+    let total = try Int64(reader.seekToEnd())
+    try reader.seek(toOffset: 0)
+    let head = try reader.read(upToCount: headerLength) ?? Data()
+    let kind = classify(head: head, total: total)
+    if kind == .unsupported { throw ConcordCryptoError.unsupportedFormat }
+    if kind == .legacy, total > maxLegacyBytes { throw ConcordCryptoError.tooLarge }
+
+    let files = FileManager.default
+    try? files.removeItem(at: output)
+    guard
+      files.createFile(
+        atPath: output.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete])
+    else { throw ConcordCryptoError.invalidInput }
+    var finished = false
+    defer { if !finished { try? files.removeItem(at: output) } }
+    let writer = try FileHandle(forWritingTo: output)
+    defer { try? writer.close() }
+
+    switch kind {
+    case .legacy:
+      try reader.seek(toOffset: 0)
+      let blob = try reader.readToEnd() ?? Data()
+      // A damaged chunked envelope also lands here; either way it fails authentication.
+      guard blob.count >= ConcordCrypto.ivLength + ConcordCrypto.tagLength else {
+        throw ConcordCryptoError.authenticationFailed
+      }
+      try writer.write(contentsOf: try ConcordCrypto.open(blob, key: key))
+    case .chunked(let header):
+      var offset = Int64(headerLength)
+      for index in 0..<header.totalChunks {
+        let sealedLength =
+          index == header.totalChunks - 1
+          ? total - offset - Int64(ConcordCrypto.ivLength)
+          : budget(version: header.version, chunkSize: Int64(header.chunkSize), index: index)
+            + Int64(ConcordCrypto.tagLength)
+        guard sealedLength >= Int64(ConcordCrypto.tagLength) else {
+          throw ConcordCryptoError.authenticationFailed
+        }
+        try reader.seek(toOffset: UInt64(offset))
+        let iv = try reader.read(upToCount: ConcordCrypto.ivLength) ?? Data()
+        let sealed = try reader.read(upToCount: Int(sealedLength)) ?? Data()
+        offset += Int64(ConcordCrypto.ivLength) + sealedLength
+        let plaintext: Data
+        do {
+          let box = try AES.GCM.SealedBox(
+            nonce: AES.GCM.Nonce(data: iv), ciphertext: sealed.dropLast(ConcordCrypto.tagLength),
+            tag: sealed.suffix(ConcordCrypto.tagLength))
+          plaintext = try AES.GCM.open(box, using: key, authenticating: aad(header, index: index))
+        } catch {
+          throw ConcordCryptoError.authenticationFailed
+        }
+        try writer.write(contentsOf: plaintext)
+      }
+    case .unsupported:
+      throw ConcordCryptoError.unsupportedFormat
+    }
+    finished = true
   }
 }
 

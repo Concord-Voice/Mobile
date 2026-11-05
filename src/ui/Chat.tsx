@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
+import {
+  AccessibilityInfo,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   View,
   type ListViewToken,
 } from 'react-native';
+import { nativeErrorCode, shareAttachment } from '../ConcordCrypto';
 import type {
   Attachment,
   ConcordApi,
@@ -63,76 +74,229 @@ function fit(width = 0, height = 0) {
   return { width: w * scale, height: h * scale };
 }
 
+type Source = {
+  uri: string;
+  headers?: Record<string, string>;
+  width?: number;
+  height?: number;
+};
+
 /**
- * A GIF message, through Concord's proxy. As on desktop, it loads once the message is
- * on screen, and only after a tap when the user turned automatic GIF loading off.
+ * An inline image: a GIF message, a photo or an animated attachment. It fetches once it is
+ * on screen (`active`), and not before a tap while it shows a `prompt`. Until then, or if it
+ * fails, it shows `label`.
  */
-function GifView({
-  api,
-  slug,
-  visible,
-  auto,
+function InlineImage({
+  label,
+  prompt,
+  active,
+  open,
+  frame,
 }: Readonly<{
-  api: ConcordApi;
-  slug: string;
-  visible: boolean;
-  auto: boolean | null;
+  label: string;
+  prompt: string | null;
+  active: boolean;
+  open: () => Promise<Source | null>;
+  /** A size to hold while loading, so the list does not jump. */
+  frame?: { width?: number; height?: number };
 }>) {
   const [tapped, setTapped] = useState(false);
-  const [source, setSource] = useState<
-    (Gif & { headers: Record<string, string> }) | null
-  >(null);
+  const [source, setSource] = useState<Source | null>(null);
   const [failed, setFailed] = useState(false);
-  const load = visible && (auto === true || tapped);
+  const [loaded, setLoaded] = useState<{ width: number; height: number }>();
+  const waiting = prompt !== null && !tapped;
+  const load = active && !waiting;
   useEffect(() => {
     setSource(null);
     setFailed(false);
     if (!load) return;
     let live = true;
-    // Headers are read after the lookup, so they carry a current access token.
-    lookupGif(api, slug)
-      .promise.then(gif =>
-        gif
-          ? api.mediaSource(gif.uri).then(media => ({ ...gif, ...media }))
-          : null,
-      )
-      .then(
-        next => {
-          if (!live) return;
-          if (next) setSource(next);
-          else setFailed(true);
-        },
-        () => {
-          if (live) setFailed(true);
-        },
-      );
+    open().then(
+      next => {
+        if (!live) return;
+        if (next) setSource(next);
+        else setFailed(true);
+      },
+      () => {
+        if (live) setFailed(true);
+      },
+    );
     return () => {
       live = false;
     };
-  }, [api, slug, load]);
-  if (auto === false && !tapped)
+  }, [open, load]);
+  if (waiting)
     return (
       <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
-        <Text style={styles.attachment}>GIF, tap to load</Text>
+        <Text style={styles.attachment}>{prompt}</Text>
       </Pressable>
     );
-  if (failed) return <Text style={styles.attachment}>GIF</Text>;
-  if (!source) {
-    // A GIF seen before keeps its size while it reloads, so the list does not jump.
-    const known = gifLookups.get(api)?.get(slug)?.gif;
-    return known ? (
-      <View style={[styles.gif, fit(known.width, known.height)]} />
-    ) : (
-      <Text style={styles.attachment}>GIF</Text>
-    );
-  }
+  if (failed || (!source && !frame))
+    return <Text style={styles.attachment}>{label}</Text>;
+  if (!source)
+    return <View style={[styles.gif, fit(frame?.width, frame?.height)]} />;
+  const shape = source.width && source.height ? source : loaded;
   return (
     <Image
-      accessibilityLabel="GIF"
+      accessibilityLabel={label}
       source={{ uri: source.uri, headers: source.headers }}
-      style={[styles.gif, fit(source.width, source.height)]}
+      style={[styles.gif, fit(shape?.width, shape?.height)]}
+      onLoad={e => {
+        const { width, height } = e.nativeEvent.source ?? {};
+        if (width > 0 && height > 0) setLoaded({ width, height });
+      }}
       onError={() => setFailed(true)}
     />
+  );
+}
+
+/**
+ * The tap an animated image waits for, as on desktop: when the user turned automatic GIF
+ * loading off, or the phone asks for reduced motion. Null while the setting is unknown.
+ */
+function gifPrompt(auto: boolean | null, still: boolean): string | null {
+  if (auto === false) return 'Tap to load GIF';
+  return still ? 'Tap to play GIF' : null;
+}
+
+/** A GIF message, through Concord's proxy. */
+function GifView({
+  api,
+  slug,
+  visible,
+  auto,
+  still,
+}: Readonly<{
+  api: ConcordApi;
+  slug: string;
+  visible: boolean;
+  auto: boolean | null;
+  still: boolean;
+}>) {
+  // Headers are read after the lookup, so they carry a current access token.
+  const open = useCallback(
+    () =>
+      lookupGif(api, slug).promise.then(gif =>
+        gif
+          ? api.mediaSource(gif.uri).then(media => ({ ...gif, ...media }))
+          : null,
+      ),
+    [api, slug],
+  );
+  return (
+    <InlineImage
+      label="GIF"
+      prompt={gifPrompt(auto, still)}
+      active={visible && auto !== null}
+      open={open}
+      // A GIF seen before keeps its size while it reloads.
+      frame={gifLookups.get(api)?.get(slug)?.gif ?? undefined}
+    />
+  );
+}
+
+const MIB = 1024 * 1024;
+/** Photos and animated images up to this load on their own (the policy's mobile limit). */
+const AUTO_LIMIT = 64 * MIB;
+/** The largest file the phone downloads at all, on a tap. */
+const OPEN_LIMIT = 256 * MIB;
+/** Ciphertext overhead above the plaintext size: a header and 28 bytes per 8 MiB chunk. */
+const OVERHEAD = 4096;
+
+type OpenFile = (a: Attachment, limit: number) => Promise<string>;
+
+/** What a failed open tells the user, by the native failure code. */
+function openError(error: unknown): string {
+  switch (nativeErrorCode(error)) {
+    case 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED':
+      return "Can't open: the file is damaged or was changed";
+    case 'E_CONCORD_CRYPTO_UNSUPPORTEDFORMAT':
+      return 'Update the app to open this file';
+    case 'E_CONCORD_CRYPTO_TOOLARGE':
+      return 'Too large to open on this phone';
+    default:
+      return "Couldn't open. Tap to try again";
+  }
+}
+
+/**
+ * An attachment, by Mark's display policy: photos and animated images show inline (up to
+ * 64 MiB, animated ones by the GIF rules); anything else is a card that downloads only when
+ * tapped, then opens the share sheet.
+ */
+function AttachmentView({
+  attachment,
+  openFile,
+  visible,
+  auto,
+  still,
+}: Readonly<{
+  attachment: Attachment;
+  openFile: OpenFile;
+  visible: boolean;
+  auto: boolean | null;
+  still: boolean;
+}>) {
+  const { fileType, fileSize } = attachment;
+  const label = attachmentLabel(attachment);
+  // A file sent as small is held to that: the auto-load cap applies to the actual bytes.
+  const open = useCallback(
+    () =>
+      openFile(
+        attachment,
+        (attachment.fileSize > AUTO_LIMIT ? OPEN_LIMIT : AUTO_LIMIT) + OVERHEAD,
+      ).then(uri => ({ uri })),
+    [openFile, attachment],
+  );
+  if (fileType === 'photo' || fileType === 'animated') {
+    const animated = fileType === 'animated';
+    const prompt =
+      fileSize > AUTO_LIMIT
+        ? `${label}, tap to load`
+        : animated
+        ? gifPrompt(auto, still)
+        : null;
+    return (
+      <InlineImage
+        label={label}
+        prompt={prompt}
+        active={visible && (!animated || auto !== null)}
+        open={open}
+      />
+    );
+  }
+  return <FileCard attachment={attachment} openFile={openFile} />;
+}
+
+/** A file that waits for a tap, then downloads, decrypts and opens the share sheet. */
+function FileCard({
+  attachment,
+  openFile,
+}: Readonly<{ attachment: Attachment; openFile: OpenFile }>) {
+  const [state, setState] = useState<string | null>(null);
+  const tooLarge = attachment.fileSize > OPEN_LIMIT;
+  const press = async () => {
+    setState('Opening…');
+    try {
+      const uri = await openFile(attachment, OPEN_LIMIT + OVERHEAD);
+      if (Platform.OS === 'ios') await Share.share({ url: uri });
+      else await shareAttachment(uri, attachment.mimeType);
+      setState(null);
+    } catch (error) {
+      setState(openError(error));
+    }
+  };
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={tooLarge || state === 'Opening…'}
+      onPress={press}
+    >
+      <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>
+      <Text style={styles.hint}>
+        {tooLarge ? 'Too large to open on this phone' : state ?? 'Tap to open'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -143,13 +307,65 @@ const KINDS = new Map([
   ['audio', 'Audio'],
 ]);
 
-/** "Photo, 2.0 KB": attachments are named until the app can decrypt and show them. */
+/** "Photo, 2.0 KB": what the attachment is, before anything is downloaded. */
 function attachmentLabel({ fileType, fileSize }: Attachment): string {
   const kind = KINDS.get(fileType) ?? 'File';
   if (fileSize < 1024) return `${kind}, ${fileSize} B`;
   if (fileSize < 1024 * 1024)
     return `${kind}, ${(fileSize / 1024).toFixed(1)} KB`;
   return `${kind}, ${(fileSize / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// One attachment downloads at a time, each with fresh headers when its turn comes. An opened
+// file is kept for the app run (its plaintext lives in the app cache until sign-out or the
+// next launch), so scrolling back does not download it again.
+let attachmentQueue: Promise<unknown> = Promise.resolve();
+const openedFiles = new WeakMap<ConcordApi, Map<string, Promise<string>>>();
+
+function openCached(
+  api: ConcordApi,
+  conversation: Pick<Conversation, 'openAttachment'>,
+  a: Attachment,
+  limit: number,
+): Promise<string> {
+  let opened = openedFiles.get(api);
+  if (!opened) {
+    opened = new Map();
+    openedFiles.set(api, opened);
+  }
+  const known = opened.get(a.id);
+  if (known) return known;
+  const open = attachmentQueue.then(() =>
+    conversation.openAttachment(a, limit),
+  );
+  attachmentQueue = open.catch(() => {});
+  opened.set(a.id, open);
+  // A failure is forgotten, so a tap tries again.
+  open.catch(() => opened.delete(a.id));
+  return open;
+}
+
+/** The phone's reduce-motion setting, live. */
+function useReduceMotion(): boolean {
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(
+      on => {
+        if (live) setStill(on);
+      },
+      () => {},
+    );
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setStill,
+    );
+    return () => {
+      live = false;
+      subscription.remove();
+    };
+  }, []);
+  return still;
 }
 
 /** One DM conversation: decrypted history, live messages and a composer. */
@@ -164,7 +380,13 @@ export function Chat({
     ...args: ConstructorParameters<typeof Conversation>
   ) => Pick<
     Conversation,
-    'lines' | 'dropped' | 'onChange' | 'start' | 'send' | 'close'
+    | 'lines'
+    | 'dropped'
+    | 'onChange'
+    | 'start'
+    | 'send'
+    | 'close'
+    | 'openAttachment'
   >;
 }) {
   const { api, identity, stage } = useSession();
@@ -191,10 +413,24 @@ export function Chat({
   const onViewable = useRef((info: { viewableItems: ListViewToken[] }) =>
     markSeen(info.viewableItems.map(v => v.key)),
   ).current;
-  const listState = useMemo(() => ({ seen, autoGifs }), [seen, autoGifs]);
+  const still = useReduceMotion();
+  const listState = useMemo(
+    () => ({ seen, autoGifs, still }),
+    [seen, autoGifs, still],
+  );
+  const openFile = useCallback<OpenFile>(
+    (a, limit) =>
+      api && conversation
+        ? openCached(api, conversation, a, limit)
+        : Promise.reject(new Error('Not signed in')),
+    [api, conversation],
+  );
 
   const lines = conversation?.lines ?? [];
-  const hasGifs = lines.some(l => l.gifSlug);
+  // Animated attachments follow the GIF setting too.
+  const hasGifs = lines.some(
+    l => l.gifSlug || l.attachments?.some(a => a.fileType === 'animated'),
+  );
 
   useEffect(() => {
     // Read only for a conversation that has GIFs.
@@ -307,12 +543,18 @@ export function Chat({
                 slug={item.gifSlug}
                 visible={seen.has(item.id)}
                 auto={autoGifs}
+                still={still}
               />
             ) : null}
             {item.attachments?.map(a => (
-              <Text key={a.id} style={styles.attachment}>
-                {attachmentLabel(a)}
-              </Text>
+              <AttachmentView
+                key={a.id}
+                attachment={a}
+                openFile={openFile}
+                visible={seen.has(item.id)}
+                auto={autoGifs}
+                still={still}
+              />
             ))}
             {item.text || item.gifSlug || item.attachments?.length ? null : (
               <Text style={styles.unreadable}>Empty message</Text>
@@ -373,6 +615,7 @@ const styles = StyleSheet.create({
   text: { color: colors.text, fontSize: 16 },
   unreadable: { color: colors.textMuted, fontSize: 15, fontStyle: 'italic' },
   attachment: { color: colors.textMuted, fontSize: 15 },
+  hint: { color: colors.accent, fontSize: 13, marginTop: 2 },
   gif: { borderRadius: 8, marginTop: 2 },
   composer: {
     flexDirection: 'row',

@@ -16,6 +16,7 @@ jest.mock('../ConcordCrypto', () => ({
   loadSession: jest.fn(async () => null),
   deleteSession: jest.fn(async () => {}),
   randomId: jest.fn(async () => '00000000-0000-4000-8000-000000000001'),
+  clearAttachments: jest.fn(async () => {}),
   nativeErrorCode: (e: unknown) =>
     (e as { code?: string } | null)?.code ?? null,
 }));
@@ -29,6 +30,7 @@ const crypto = jest.requireMock('../ConcordCrypto') as {
   saveSession: jest.Mock;
   loadSession: jest.Mock;
   deleteSession: jest.Mock;
+  clearAttachments: jest.Mock;
 };
 
 const SAVED = {
@@ -187,6 +189,8 @@ describe('session store', () => {
     await useStore.getState().signOut();
     expect(api.logout).toHaveBeenCalled();
     expect(crypto.releaseAll).toHaveBeenCalled();
+    // Decrypted attachment files go with the session.
+    expect(crypto.clearAttachments).toHaveBeenCalled();
     expect(useStore.getState()).toMatchObject({
       stage: { kind: 'signed_out' },
       api: null,
@@ -220,6 +224,7 @@ describe('session store', () => {
     await useStore.getState().signIn('https://c.test', 'm', 'pw');
     api.onExpired?.();
     expect(crypto.releaseAll).toHaveBeenCalled();
+    expect(crypto.clearAttachments).toHaveBeenCalled();
     expect(useStore.getState()).toMatchObject({
       stage: { kind: 'signed_out' },
       api: null,
