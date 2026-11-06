@@ -817,16 +817,26 @@ test('opens files through the native share sheet on Android', async () => {
 });
 
 test('plays videos inline up to 64 MiB and asks before larger ones', async () => {
+  let finishLarge!: () => void;
+  let tries = 0;
   const openAttachment = jest.fn<
     ReturnType<OpenAttachment>,
     Parameters<OpenAttachment>
-  >(async a => `file:///c/${a.id}`);
+  >(async a => {
+    if (a.id === 'v2')
+      await new Promise<void>(resolve => {
+        finishLarge = resolve;
+      });
+    if (a.id === 'v5' && tries++ === 0) throw new Error('offline');
+    return `file:///c/${a.id}`;
+  });
   const { tree, show } = await chatWithFiles(
     [
       file('v1', 'video', 5 * MIB, 'video/mp4'),
       file('v2', 'video', 70 * MIB, 'video/mp4'),
       file('v3', 'video', 300 * MIB, 'video/mp4'),
       file('v4', 'video', 1024, 'video/webm'),
+      file('v5', 'video', 2048, 'video/mp4'),
     ],
     openAttachment,
   );
@@ -840,11 +850,22 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
   expect(openAttachment.mock.calls.map(([a, limit]) => [a.id, limit])).toEqual([
     ['v1', 64 * MIB + 4096],
     ['v4', 64 * MIB + 4096],
+    ['v5', 64 * MIB + 4096],
   ]);
+  // Android buffers only seconds of each, and nothing goes to AirPlay.
   expect(video('Video, 5.0 MB')).toMatchObject({
-    source: { uri: 'file:///c/v1' },
+    source: { uri: 'file:///c/v1', bufferConfig: { maxBufferMs: 5000 } },
     controls: true,
     paused: true,
+    allowsExternalPlayback: false,
+  });
+  // A size the player cannot read keeps the default box.
+  await ReactTestRenderer.act(async () =>
+    video('Video, 1.0 KB').onLoad({ naturalSize: { width: 0, height: 0 } }),
+  );
+  expect(video('Video, 1.0 KB').style).toContainEqual({
+    width: 200,
+    height: 150,
   });
   await ReactTestRenderer.act(async () =>
     video('Video, 5.0 MB').onLoad({
@@ -866,10 +887,49 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
     expect.objectContaining({ id: 'v2' }),
     256 * MIB + 4096,
   );
-  expect(video('Video, 70.0 MB').source).toEqual({ uri: 'file:///c/v2' });
+  expect(text(tree)).toContain('Video, 70.0 MB|Downloading…');
+  await ReactTestRenderer.act(async () => finishLarge());
+  expect(video('Video, 70.0 MB').source).toMatchObject({
+    uri: 'file:///c/v2',
+  });
+  // One that failed to download says so, and a tap tries again.
+  expect(text(tree)).toContain("Video, 2.0 KB|Couldn't open. Tap to try again");
+  await ReactTestRenderer.act(async () =>
+    button(tree, 'Video, 2.0 KB').props.onPress(),
+  );
+  expect(video('Video, 2.0 KB').source).toMatchObject({
+    uri: 'file:///c/v5',
+  });
   // A video the phone cannot play becomes a card that can still share it.
   await ReactTestRenderer.act(async () => video('Video, 1.0 KB').onError());
   expect(text(tree)).toContain('Video, 1.0 KB|Tap to open');
+});
+
+test("keeps a video's file while it is on screen", async () => {
+  // Each file decrypts to 100 MiB, so the photos push the cache past its limit.
+  let release!: () => void;
+  const photos = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const openAttachment = jest.fn(async (a: Attachment) => {
+    if (a.fileType === 'photo') await photos;
+    return { uri: `file:///c/${a.id}`, size: 100 * MIB };
+  });
+  const { show } = await chatWithFiles(
+    [
+      file('v1', 'video', 1, 'video/mp4'),
+      ...['q1', 'q2', 'q3'].map(id => file(id, 'photo', 1, 'image/png')),
+    ],
+    openAttachment,
+  );
+  await show();
+  await ReactTestRenderer.act(async () => release());
+  expect(openAttachment).toHaveBeenCalledTimes(4);
+  // The oldest file is the video's, which a player still reads, so photos go instead.
+  expect(nativeFiles.deleteAttachment.mock.calls).toEqual([
+    ['file:///c/q1'],
+    ['file:///c/q2'],
+  ]);
 });
 
 test('previews text and Markdown files, collapsed, as plain text', async () => {
