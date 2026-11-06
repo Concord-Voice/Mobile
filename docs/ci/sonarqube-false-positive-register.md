@@ -15,7 +15,7 @@ here. `ACCEPTED` findings (real, not fixed yet) go in GitHub issues, not here.
 | Field | Value |
 |---|---|
 | First recorded | 2026-11-06 (default-profile sweep) |
-| Rationale | The value only pairs an outgoing send with its acknowledgement: `DmSocket` accepts an ack only when its nonce matches. It is never key material, a token, an encryption nonce or a session id. The ack arrives on the server's own WebSocket, which is `wss://` because it is derived from the HTTPS API base. Anyone able to inject frames there can already forge any frame, so predicting the value gives them nothing extra. |
+| Rationale | The value only pairs an outgoing send with its acknowledgement: `DmSocket` accepts an ack only when its nonce matches. It is never key material, a token, an encryption nonce or a session id. The ack arrives on the server's own WebSocket, derived from the API base. `checkBaseUrl` allows plain `http` only for `localhost` and `127.0.0.1`, so the socket is `wss://` for any network host and `ws://` only on loopback. Anyone able to inject frames there can already forge any frame, so predicting the value gives them nothing extra. |
 | Disposition | Per-instance `FALSE_POSITIVE` when the value has no security role. Any security-relevant random value must use the platform CSPRNG. Rule-level disable is prohibited by project SonarQube AI-Code Assurance policy. |
 
 ## Instance-Specific Entries
