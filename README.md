@@ -239,9 +239,10 @@ The Android crypto module is still absent: the real adapter must refuse it with
 A copy of the runtime APK is signed with an isolated disposable test key, which
 supplies no production signing or trusted-install evidence.
 
-The host runners bound device boot to 5 minutes, runtime observation to 3 minutes,
-native XCTest to 10 minutes and each runtime build to 20 minutes. Only the
-isolated XCTest action enables module testability for its Release product copy;
+The host runners bound simulator boot to 10 minutes, emulator boot to 5 minutes,
+runtime observation to 3 minutes, native XCTest to 10 minutes and each runtime
+build to 20 minutes. Only the isolated XCTest action enables module testability
+for its Release product copy;
 ordinary Release application builds keep their existing settings. They stop/delete
 only the simulator/emulator, AVD and test key they created. Uploaded artifacts are
 limited to version/digest/source metadata, fixed case booleans, sanitized test IDs

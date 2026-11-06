@@ -368,8 +368,9 @@ async function ios(output) {
     stage('ios-boot');
     await runCommand('xcrun', ['simctl', 'boot', device]);
     stage('ios-bootstatus');
+    // Hosted macOS runners took 2.7 to 4.7 minutes to boot in Nov 2026, so 5 minutes failed often.
     await runCommand('xcrun', ['simctl', 'bootstatus', device, '-b'], {
-      timeout: 300000,
+      timeout: 600000,
     });
     const project = 'ios/Pods/Pods.xcodeproj';
     const scheme = 'ConcordCrypto-Unit-Tests';
