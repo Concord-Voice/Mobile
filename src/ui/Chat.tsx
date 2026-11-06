@@ -361,10 +361,15 @@ function VideoView({
     setFailure(null);
     if (!load) return;
     let live = true;
+    let release: (() => void) | undefined;
     // A file sent as small is held to that, as for photos.
     openFile(attachment, (large ? OPEN_LIMIT : AUTO_LIMIT) + OVERHEAD).then(
       next => {
-        if (live) setUri(next);
+        if (!live) return;
+        // The player reads the file while mounted, so the cache must keep it. The hold starts
+        // here rather than after the render, before the next open can evict anything.
+        release = holdFile(next);
+        setUri(next);
       },
       error => {
         if (live) setFailure(openError(error));
@@ -372,10 +377,9 @@ function VideoView({
     );
     return () => {
       live = false;
+      release?.();
     };
   }, [openFile, attachment, large, load, attempt]);
-  // The player reads the file while it is mounted, so the cache must not delete it.
-  useEffect(() => (uri ? holdFile(uri) : undefined), [uri]);
   if (unplayable)
     return <FileCard attachment={attachment} openFile={openFile} />;
   if (large && !tapped)

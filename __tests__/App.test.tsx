@@ -906,15 +906,12 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
 });
 
 test("keeps a video's file while it is on screen", async () => {
-  // Each file decrypts to 100 MiB, so the photos push the cache past its limit.
-  let release!: () => void;
-  const photos = new Promise<void>(resolve => {
-    release = resolve;
-  });
-  const openAttachment = jest.fn(async (a: Attachment) => {
-    if (a.fileType === 'photo') await photos;
-    return { uri: `file:///c/${a.id}`, size: 100 * MIB };
-  });
+  // Each file decrypts to 100 MiB, so the photos push the cache past its limit. They open
+  // straight after the video, before React renders it, so the hold must not wait for a render.
+  const openAttachment = jest.fn(async (a: Attachment) => ({
+    uri: `file:///c/${a.id}`,
+    size: 100 * MIB,
+  }));
   const { show } = await chatWithFiles(
     [
       file('v1', 'video', 1, 'video/mp4'),
@@ -923,7 +920,6 @@ test("keeps a video's file while it is on screen", async () => {
     openAttachment,
   );
   await show();
-  await ReactTestRenderer.act(async () => release());
   expect(openAttachment).toHaveBeenCalledTimes(4);
   // The oldest file is the video's, which a player still reads, so photos go instead.
   expect(nativeFiles.deleteAttachment.mock.calls).toEqual([
