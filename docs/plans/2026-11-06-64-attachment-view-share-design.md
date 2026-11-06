@@ -1,7 +1,7 @@
 # Attachments: view in the app, hold to share or save (#64)
 
-Approved by Mark on 2026-11-06, as recommended in the design doc
-(https://claude.ai/artifact/5Vf7C6Lwr54vcFKMeeeJC2). The shared display policy is unchanged:
+Approved by Mark on 2026-11-06, as recommended. The review copy is the "Attachments: view in
+the app, hold to share or save" Claude Doc. The shared display policy is unchanged:
 nothing downloads until asked, except photos, GIFs, videos up to 64 MiB and text previews.
 
 ## Why
@@ -18,7 +18,7 @@ the player fails, and the iPhone player cannot read WebM on any iOS version.
 | D2 | WebM on iPhone | A small in-app web view for `video/webm` on iOS (PR 2) |
 | D3 | Tapping a document | iPhone: the system previewer inside the app. Android: "No preview on Android yet. Hold to share or save" |
 
-## Behaviour
+## Behavior
 
 A tap shows the attachment in the app or says why it can't. It never opens the share sheet.
 
@@ -34,19 +34,23 @@ A tap shows the attachment in the app or says why it can't. It never opens the s
 
 Holding any attachment for half a second (photos, GIF attachments, videos, text previews, file
 cards; not KLIPY GIFs) shares or saves it. This and the iPhone previewer's own share button are
-the only ways a file leaves the app.
+the only ways a file leaves the app. A loaded video is held by its name above the player, whose
+own controls take touches on the picture. A file over 256 MiB has no hold.
 
 - iPhone: the hold opens the system share sheet (Save Image, Save Video, Save to Files, AirDrop).
   `NSPhotoLibraryAddUsageDescription` is added, so saving to Photos no longer crashes the app.
 - Android: the hold opens a menu with "Share…" (today's chooser) and "Save to phone…" (the system
   "save as" picker, which needs no storage permission).
-- A file not yet downloaded is downloaded and decrypted first, up to 256 MiB.
+- A file not yet downloaded is downloaded and decrypted first, up to 256 MiB. On Android the
+  menu comes first, so dismissing it downloads nothing.
 - Each attachment has a "Share or save" screen-reader action. File cards show the hint
   "Hold to share or save".
 - A video the phone can't play says "This phone can't play this video (WEBM)", naming the
   file's format, plus the hold hint. It never turns into a share card.
 - The extension map gains `video/x-m4v` → `m4v`, `video/3gpp` → `3gp` and
-  `video/x-matroska` → `mkv`, so a playable file is not named `.bin`.
+  `video/x-matroska` → `mkv`, so a playable file is not named `.bin`. It also gains the Office
+  formats (`doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx`), `rtf` and `csv`, because the iPhone
+  previewer picks its viewer by extension.
 
 Both the iPhone previewer call and the Android save call accept only files in the app's
 attachment folder, through the same check that text reads and deletes use.

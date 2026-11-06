@@ -21,6 +21,8 @@ import {
   releaseKey,
   saveSession,
   shareAttachment,
+  previewAttachment,
+  saveAttachment,
   unlockIdentity,
   unwrapChannelKey,
   wrapChannelKey,
@@ -195,6 +197,8 @@ describe('ConcordCrypto', () => {
         .mockResolvedValue({ width: 640, height: 480 }),
       deleteAttachment: jest.fn().mockResolvedValue(null),
       shareAttachment: jest.fn().mockResolvedValue(null),
+      previewAttachment: jest.fn().mockResolvedValue(true),
+      saveAttachment: jest.fn().mockResolvedValue(false),
     });
     expect(await downloadAttachment('https://h/a', { A: 'b' }, 40)).toEqual(
       download,
@@ -261,6 +265,21 @@ describe('ConcordCrypto', () => {
     delete module.shareAttachment;
     await expect(shareAttachment('file:///c/a.png')).rejects.toThrow(
       'Sharing is not available',
+    );
+    // The previewer and the save picker answer with a boolean, and each exists on one platform.
+    expect(await previewAttachment('file:///c/a.pdf')).toBe(true);
+    expect(module.previewAttachment).toHaveBeenCalledWith('file:///c/a.pdf');
+    expect(await saveAttachment('file:///c/a.pdf')).toBe(false);
+    expect(module.saveAttachment).toHaveBeenCalledWith('file:///c/a.pdf');
+    module.previewAttachment.mockResolvedValueOnce('yes');
+    await expect(previewAttachment('file:///c/a.pdf')).rejects.toThrow();
+    delete module.previewAttachment;
+    delete module.saveAttachment;
+    await expect(previewAttachment('file:///c/a.pdf')).rejects.toThrow(
+      'Preview is not available',
+    );
+    await expect(saveAttachment('file:///c/a.pdf')).rejects.toThrow(
+      'Saving is not available',
     );
   });
 

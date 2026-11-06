@@ -96,36 +96,40 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   the shared display policy. Photos and animated images show inline once on screen, up
   to 64 MiB (a larger photo waits for a tap). Animated ones also wait for a tap when
   GIFs load on tap or the phone asks for reduced motion. A photo over 24 megapixels
-  opens from a card instead, because Android cannot draw it. A failed photo says why and
-  tries again on a tap. Other files show their kind and size and download only when
-  tapped, up to 256 MiB. On iOS a tap shows the file in the system previewer (QuickLook)
-  inside the app, and says so when it can't; Android has no previewer yet. `text/plain`
-  and `text/markdown` files up to 1 MiB preload into a nine-line preview under their
-  label, which expands it, to at most 64 KB; one that cannot be read shows only a file
-  card. Both show as plain text, never rendered as Markdown. Videos play inline through
-  `react-native-video`, paused until played: up to 64 MiB they preload once on screen,
-  and a larger one, up to 256 MiB, asks first ("Large video, {size}. Tap to play"). A
-  failed download says why and tries again on a tap; a video the phone cannot play says
-  so and names its format. The player has no AirPlay, buffers only seconds on Android,
-  and keeps its file from cache eviction while on screen. Android leaves out media3's
-  streaming formats, because the app plays only local files; media3 adds the
-  auto-granted `ACCESS_NETWORK_STATE` permission. A long press of half a second on any
-  attachment except a GIF message, or the screen-reader action "Share or save", is the
-  only way a file leaves the app (besides the iOS previewer's own share button). It
-  downloads the file first if needed, up to 256 MiB, then opens the share sheet on iOS,
-  typed by the file's extension, or on Android a menu of "Share…" and "Save to phone…",
-  the system save picker, which needs no storage permission. The iOS preview and the
-  Android save accept only files in the app's attachment folder, through the same check
-  as text reads and deletes. `NSPhotoLibraryAddUsageDescription` lets the iOS share
-  sheet save to Photos. The ciphertext downloads natively (https only, no redirects,
-  capped in bytes and at 30 minutes) and never enters JavaScript. Attachments decrypt
-  with the key epoch the server names in `X-File-Key-Version`, else the current one.
-  Plaintext lands in the app's cache folder, which is emptied at sign-out (cancelling a
-  running download), at session expiry and at every launch; a failed decrypt leaves none
-  behind. The app keeps up to 256 MiB of opened files, counted from the decrypted files
-  rather than the server's sizes, and deletes the oldest past that, except files that a
-  video on screen holds. A file is reused only in the chat that opened it. Not yet:
-  older pages, starting a new DM, starting a key rotation, edits, reactions and
+  shows as a file card instead, because Android cannot draw it. A failed photo says why
+  and tries again on a tap. Other files show their kind and size and download only when
+  asked, up to 256 MiB. On iOS a tap downloads the file and shows it in the system
+  previewer (QuickLook) inside the app, and says so when it can't; on Android a tap does
+  nothing, and the card says "No preview on Android yet. Hold to share or save".
+  `text/plain` and `text/markdown` files up to 1 MiB preload into a nine-line preview
+  under their label, which expands it, to at most 64 KB; one that cannot be read shows
+  only a file card. Both show as plain text, never rendered as Markdown. Videos play
+  inline through `react-native-video`, paused until played: up to 64 MiB they preload
+  once on screen, and a larger one, up to 256 MiB, asks first ("Large video, {size}. Tap
+  to play"). A failed download says why and tries again on a tap; a video the phone
+  cannot play says so and names its format. The player has no AirPlay, buffers only
+  seconds on Android, and keeps its file from cache eviction while on screen. Android
+  leaves out media3's streaming formats, because the app plays only local files; media3
+  adds the auto-granted `ACCESS_NETWORK_STATE` permission. A long press of half a second
+  on any attachment up to 256 MiB except a GIF message (on a loaded video, on its name
+  above the player), or the screen-reader action "Share or save", is the only way a file
+  leaves the app, besides the iOS previewer's own share button. On iOS it downloads the
+  file if needed, then opens the share sheet, typed by the file's extension. On Android
+  it first offers "Share…" and "Save to phone…" (the system save picker, which needs no
+  storage permission), then downloads; dismissing the menu downloads nothing. One hold
+  runs at a time. The iOS preview and the Android save accept only files in the app's
+  attachment folder, through the same check as text reads and deletes, and the save
+  writes only to a document the system picker returns. Sign-out closes an open
+  previewer. `NSPhotoLibraryAddUsageDescription` lets the iOS share sheet save to
+  Photos. The ciphertext downloads natively (https only, no redirects, capped in bytes
+  and at 30 minutes) and never enters JavaScript. Attachments decrypt with the key epoch
+  the server names in `X-File-Key-Version`, else the current one. Plaintext lands in the
+  app's cache folder, which is emptied at sign-out (cancelling a running download), at
+  session expiry and at every launch; a failed decrypt leaves none behind. The app keeps
+  up to 256 MiB of opened files, counted from the decrypted files rather than the
+  server's sizes, and deletes the oldest past that, except files that a video on screen,
+  or a running share or save, holds. A file is reused only in the chat that opened it.
+  Not yet: older pages, starting a new DM, starting a key rotation, edits, reactions and
   automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,

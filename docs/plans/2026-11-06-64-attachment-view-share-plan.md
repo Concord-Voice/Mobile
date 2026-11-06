@@ -1,7 +1,7 @@
 # Attachments: view in the app, hold to share or save — Implementation Plan (PR 1 of #64)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this
-> plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> plan task by task.
 
 **Goal:** a tap shows an attachment in the app, and a long press is the only way to share or save it.
 
@@ -45,19 +45,21 @@ the URI with the existing attachment-folder check.
 - Modify: `src/ConcordCrypto.ts`
 
 **Interfaces (produces):**
-- `previewAttachment(uri: string): Promise<boolean>` (iOS). True once the previewer shows; false
-  when the file can't be previewed or a previewer is already showing. It rejects
+- `previewAttachment(uri: string): Promise<boolean>` (iOS). False only when the file can't be
+  previewed; true once the previewer shows, or when none can show now (one is already open, or
+  the screen is changing). It rejects
   `E_CONCORD_CRYPTO_INVALIDINPUT` for a URI outside the folder.
-- `saveAttachment(uri: string): Promise<boolean>` (Android). True once written; false when cancelled.
+- `saveAttachment(uri: string): Promise<boolean>` (Android). True once written; false when cancelled
+  or while another save picker is open. A picker result that is not a document URI rejects.
 - Both are optional members of `NativeCrypto`, like `shareAttachment`. Each wrapper throws
   "… is not available" when its member is missing.
 
-- [ ] Add the two calls. The iOS previewer is presented from `RCTPresentedViewController()` on the
+- Add the two calls. The iOS previewer is presented from `RCTPresentedViewController()` on the
   main queue. A retained data source releases itself in `previewControllerDidDismiss`. Android
   uses `ACTION_CREATE_DOCUMENT` with `CATEGORY_OPENABLE`, the type taken from the file's extension,
   the title "Concord attachment.<ext>" and an `ActivityEventListener`. The copy runs on the
   attachment executor.
-- [ ] Run `npx tsc --noEmit`. Expected: no errors.
+- Run `npx tsc --noEmit`. Expected: no errors.
 
 ### Task 2: Chat attachment views
 
@@ -68,7 +70,7 @@ the URI with the existing attachment-folder check.
 **Interfaces (consumes):** Task 1's `previewAttachment` and `saveAttachment`; the existing
 `shareAttachment` and `Share.share`.
 
-- [ ] Rewrite the share-on-tap tests to the new behaviour. The tests:
+- Rewrite the share-on-tap tests to the new behavior. The tests:
   - "views files in the app on a tap and shares only on a hold": iOS, PDF tap →
     `previewAttachment('file:///c/f1')`, `Share.share` not called. Hold → `Share.share({ url })`.
     Previewer false → "Can't preview this file. Hold to share or save". 300 MiB card hold → no open.
@@ -81,25 +83,25 @@ the URI with the existing attachment-folder check.
     second open.
   - The screen-reader action `share` on a photo calls `Share.share`. A KLIPY GIF has no
     `onLongPress`.
-- [ ] Run `npx jest`. Expected: the new tests fail.
-- [ ] Implement them in `Chat.tsx`:
+- Run `npx jest`. Expected: the new tests fail.
+- Implement them in `Chat.tsx`:
   - a `holdProps(onHold?)` helper: `onLongPress`, `delayLongPress: 500`, `accessibilityActions` and
     `onAccessibilityAction`. It is spread on every attachment Pressable, and wraps the inline
     image and video;
-  - `useHold(attachment, openFile)`, which opens the file up to 256 MiB, holds it while sharing,
-    and on Android shows the two-item menu;
+  - `holdAction(attachment, openFile)`, which opens the file up to 256 MiB, holds it while
+    sharing, runs one hold at a time, and on Android shows the two-item menu first;
   - `FileCard`, which previews on iOS and shows the hint on Android;
   - `VideoView`'s new failure text and prompt copy;
   - a `TextPreview` label that expands on a tap.
-- [ ] Run `npx jest && npx tsc --noEmit && npx eslint src __tests__`. Expected: all pass, with no
+- Run `npx jest && npx tsc --noEmit && npx eslint src __tests__`. Expected: all pass, with no
   new lint findings.
 
 ### Task 3: iOS permission string, docs
 
 **Files:** `ios/ConcordVoice/Info.plist`, `README.md`, `CHANGELOG.md`
 
-- [ ] Add `NSPhotoLibraryAddUsageDescription` = "Saves the photos and videos you choose to your
+- Add `NSPhotoLibraryAddUsageDescription` = "Saves the photos and videos you choose to your
   library."
-- [ ] Update the README attachments paragraph and the CHANGELOG Unreleased entry to the spec's
-  behaviour.
-- [ ] Commit: `feat: view attachments in the app and share or save them with a long press`.
+- Update the README attachments paragraph and the CHANGELOG `[Prerelease]` entries to the spec's
+  behavior.
+- Commit: `feat: view attachments in the app and share or save them with a long press`.

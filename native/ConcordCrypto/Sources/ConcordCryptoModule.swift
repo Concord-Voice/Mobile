@@ -12,7 +12,8 @@ final class ConcordCryptoModule: NSObject {
   // Attachments get their own serial queue: one download or decrypt at a time, and a large
   // file never holds up message crypto.
   private let attachmentQueue = DispatchQueue(label: "com.concordvoice.mobile.attachments")
-  // The previewer's data source, kept alive while it shows; main queue only.
+  // The previewer on screen and its data source, kept alive while it shows; main queue only.
+  private weak var shown: QLPreviewController?
   private var preview: AttachmentPreview?
 
   override init() {
@@ -219,6 +220,8 @@ final class ConcordCryptoModule: NSObject {
   ) {
     // Cancelled first, off the queue: a running download would otherwise hold the clear back.
     service.attachments.cancel()
+    // At sign-out the previewer goes too, so no file it already loaded stays on screen.
+    DispatchQueue.main.async { self.shown?.dismiss(animated: false) }
     run(resolve, reject, on: attachmentQueue) {
       self.service.attachments.clear()
       return NSNull()
@@ -233,7 +236,9 @@ final class ConcordCryptoModule: NSObject {
   }
 
   /// Shows a decrypted attachment in the system previewer, inside the app, at the user's tap.
-  /// Resolves true once it is on screen; false when the file can't be previewed or one already is.
+  /// Resolves false only when the file can't be previewed. True otherwise: once it is on screen,
+  /// or when nothing can show it now (a previewer is already open, or the screen is changing),
+  /// so the card goes back to its hint and a later tap can try again.
   @objc func previewAttachment(
     _ uri: String, resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -243,9 +248,12 @@ final class ConcordCryptoModule: NSObject {
       return reject("E_CONCORD_CRYPTO_INVALIDINPUT", "Crypto operation failed", nil)
     }
     DispatchQueue.main.async {
-      guard QLPreviewController.canPreview(file as NSURL), let host = RCTPresentedViewController(),
-        !(host is QLPreviewController)
-      else { return resolve(false) }
+      guard QLPreviewController.canPreview(file as NSURL) else { return resolve(false) }
+      // UIKit drops a presentation from a controller that is leaving or already presenting,
+      // without calling back, so those cases resolve here instead.
+      guard self.shown == nil, let host = RCTPresentedViewController(),
+        host.viewIfLoaded?.window != nil, !host.isBeingDismissed, host.presentedViewController == nil
+      else { return resolve(true) }
       // ponytail: nothing holds the file in the app's cache while it shows; hold it from JS until
       // the previewer closes if 256 MiB of other opens behind it ever evict one.
       let preview = AttachmentPreview(file) { [weak self] in self?.preview = nil }
@@ -253,7 +261,9 @@ final class ConcordCryptoModule: NSObject {
       let controller = QLPreviewController()
       controller.dataSource = preview
       controller.delegate = preview
-      host.present(controller, animated: true) { resolve(true) }
+      self.shown = controller
+      host.present(controller, animated: true)
+      resolve(true)
     }
   }
 

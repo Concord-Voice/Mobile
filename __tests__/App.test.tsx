@@ -746,6 +746,52 @@ test('views files in the app on a tap and shares only on a hold', async () => {
   }
 });
 
+test('a hold while a file downloads shares that download, once', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
+  let finish!: () => void;
+  const openAttachment = jest.fn(async (a: Attachment) => {
+    await new Promise<void>(resolve => {
+      finish = resolve;
+    });
+    return `file:///c/${a.id}`;
+  });
+  try {
+    const { tree, show } = await chatWithFiles(
+      [file('p1', 'photo', 2048, 'image/png')],
+      openAttachment,
+    );
+    await show();
+    expect(openAttachment).toHaveBeenCalledTimes(1);
+    // Held while it loads, then held again: the second hold is ignored, and the share waits
+    // for the download already running rather than starting another.
+    await hold(tree, 'Photo, 2.0 KB');
+    await hold(tree, 'Photo, 2.0 KB');
+    expect(share).not.toHaveBeenCalled();
+    await ReactTestRenderer.act(async () => finish());
+    await ReactTestRenderer.act(
+      async () => new Promise<void>(resolve => setImmediate(resolve)),
+    );
+    expect(openAttachment).toHaveBeenCalledTimes(1);
+    expect(share).toHaveBeenCalledTimes(1);
+    expect(share).toHaveBeenCalledWith({ url: 'file:///c/p1' });
+    // Once that share ends, a hold on the photo itself works again.
+    const photo = tree.root.findAll(
+      n =>
+        n.props.accessibilityLabel === 'Photo, 2.0 KB' && !!n.props.onLongPress,
+    )[0];
+    expect(photo.props.accessibilityRole).toBe('image');
+    await ReactTestRenderer.act(async () => {
+      photo.props.onLongPress();
+      await new Promise<void>(resolve => setImmediate(resolve));
+    });
+    expect(share).toHaveBeenCalledTimes(2);
+  } finally {
+    share.mockRestore();
+  }
+});
+
 test('explains a failed photo, retries it, and opens oversized ones from a card', async () => {
   const share = jest
     .spyOn(Share, 'share')
@@ -851,18 +897,23 @@ test("counts opened files by their decrypted size, not the server's", async () =
 test('offers share and save on a hold on Android', async () => {
   jest.replaceProperty(Platform, 'OS', 'android');
   type Button = { text: string; onPress?: () => void };
-  const menus: Button[][] = [];
+  type Menu = { buttons: Button[]; dismiss?: () => void };
+  const menus: Menu[] = [];
   const alert = jest
     .spyOn(Alert, 'alert')
-    .mockImplementation((_title, _message, buttons) => {
-      if (buttons) menus.push(buttons as Button[]);
+    .mockImplementation((_title, _message, buttons, options) => {
+      if (buttons)
+        menus.push({
+          buttons: buttons as Button[],
+          dismiss: options?.onDismiss,
+        });
     });
+  // Back or a tap outside dismisses the menu.
   const pick = async (choice: string) =>
     ReactTestRenderer.act(async () => {
-      menus
-        .pop()
-        ?.find(b => b.text === choice)
-        ?.onPress?.();
+      const menu = menus.pop();
+      if (choice === 'dismiss') menu?.dismiss?.();
+      else menu?.buttons.find(b => b.text === choice)?.onPress?.();
       await new Promise<void>(resolve => setImmediate(resolve));
     });
   const failures = ['E_CONCORD_CRYPTO_UNSUPPORTEDFORMAT', undefined];
@@ -884,12 +935,11 @@ test('offers share and save on a hold on Android', async () => {
     expect(button(tree, 'File, 10 B')).toBeUndefined();
     // The menu comes first; a cancel downloads nothing.
     await hold(tree, 'File, 10 B');
-    expect(menus[0].map(b => b.text)).toEqual([
+    expect(menus[0].buttons.map(b => b.text)).toEqual([
       'Share…',
       'Save to phone…',
-      'Cancel',
     ]);
-    await pick('Cancel');
+    await pick('dismiss');
     expect(openAttachment).not.toHaveBeenCalled();
     // A failed open says why.
     await hold(tree, 'File, 10 B');
@@ -947,6 +997,7 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
       file('v3', 'video', 300 * MIB, 'video/mp4'),
       file('v4', 'video', 1024, 'video/webm'),
       file('v5', 'video', 2048, 'video/mp4'),
+      file('v6', 'video', 4096, 'video/x-flv'),
     ],
     openAttachment,
   );
@@ -961,6 +1012,7 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
     ['v1', 64 * MIB + 4096],
     ['v4', 64 * MIB + 4096],
     ['v5', 64 * MIB + 4096],
+    ['v6', 64 * MIB + 4096],
   ]);
   // Android buffers only seconds of each, and nothing goes to AirPlay.
   expect(video('Video, 5.0 MB')).toMatchObject({
@@ -1017,6 +1069,9 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
   );
   await hold(tree, 'Video, 1.0 KB');
   expect(share).toHaveBeenLastCalledWith({ url: 'file:///c/v4' });
+  // A type with no known extension is named by its MIME subtype.
+  await ReactTestRenderer.act(async () => video('Video, 4.0 KB').onError());
+  expect(text(tree)).toContain("This phone can't play this video (X-FLV)");
   // A playing video is held by its label, and shares the file it plays.
   await hold(tree, 'Video, 5.0 MB');
   expect(share).toHaveBeenLastCalledWith({ url: 'file:///c/v1' });

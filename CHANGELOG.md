@@ -36,11 +36,10 @@ encrypted direct messages.
 ### Added
 
 - **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
-- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you tap them, then open in a preview inside the app on iPhone. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion. A photo with too many pixels to draw shows as a file card instead.
+- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you ask. On iPhone a tap opens them in a preview inside the app. On Android a hold shares or saves them, because there is no preview yet. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion. A photo with too many pixels to draw shows as a file card instead.
 - **Messages:** Text and Markdown files up to 1 MiB load once on screen into a short preview under the file, which you can expand with a tap. Markdown shows as written.
 - **Messages:** Videos in direct messages play inline. Videos up to 64 MiB load once on screen and wait for you to press play. Larger ones, up to 256 MiB, wait for a tap to play. A video that fails to download says why and tries again on a tap, and one your phone can't play says so and names its format.
-
-- **Messages:** Hold any attachment for half a second to share or save it. On iPhone this opens the share sheet. On Android it offers "Share…" and "Save to phone…". A tap never opens the share sheet.
+- **Messages:** Hold any attachment up to 256 MiB for half a second to share or save it. For a video, hold its name above the player. On iPhone this opens the share sheet. On Android it offers "Share…" and "Save to phone…". A tap never opens the share sheet.
 
 ### Fixed
 

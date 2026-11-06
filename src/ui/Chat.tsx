@@ -164,7 +164,12 @@ function InlineImage({
         <Text style={styles.hint}>{failure}</Text>
       </Pressable>
     );
-  if (!source && !frame) return <Text style={styles.attachment}>{label}</Text>;
+  if (!source && !frame)
+    return (
+      <Pressable {...holdProps(onHold)}>
+        <Text style={styles.attachment}>{label}</Text>
+      </Pressable>
+    );
   if (!source)
     return <View style={[styles.gif, fit(frame?.width, frame?.height)]} />;
   const shape = source.width && source.height ? source : loaded;
@@ -182,7 +187,11 @@ function InlineImage({
   );
   if (!onHold) return image;
   return (
-    <Pressable accessibilityLabel={label} {...holdProps(onHold)}>
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="image"
+      {...holdProps(onHold)}
+    >
       {image}
     </Pressable>
   );
@@ -292,17 +301,23 @@ function shareOrSaveMenu(label: string): Promise<'share' | 'save' | null> {
       [
         { text: 'Share…', onPress: () => resolve('share') },
         { text: 'Save to phone…', onPress: () => resolve('save') },
-        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
       ],
+      // No Cancel button: Android would put it in the primary place. Back or a tap outside
+      // cancels instead.
       { cancelable: true, onDismiss: () => resolve(null) },
     ),
   );
 }
 
+/** True from a hold until its share or save ends, so a second hold can't stack a sheet. */
+let holding = false;
+
 /**
  * The hold action for an attachment, or none past what the phone opens. It downloads and
  * decrypts the file if it is not open yet, then shares it: the share sheet on iOS, a menu of
- * share or save on Android (asked first, so a cancel downloads nothing).
+ * share or save on Android (asked first, so a cancel downloads nothing). Holds while one is
+ * running are ignored. ponytail: nothing shows while a large file downloads for a hold; show
+ * "Opening…" on the held view if that wait confuses people.
  */
 function holdAction(
   attachment: Attachment,
@@ -311,6 +326,8 @@ function holdAction(
   if (attachment.fileSize > OPEN_LIMIT) return undefined;
   const label = attachmentLabel(attachment);
   return () => {
+    if (holding) return;
+    holding = true;
     (async () => {
       const choice =
         Platform.OS === 'ios' ? 'share' : await shareOrSaveMenu(label);
@@ -325,13 +342,17 @@ function holdAction(
       } finally {
         release();
       }
-    })().catch(error => {
-      const message = openError(error);
-      Alert.alert(
-        label,
-        message === TRY_AGAIN ? "Couldn't open. Hold to try again" : message,
-      );
-    });
+    })()
+      .catch(error => {
+        const message = openError(error);
+        Alert.alert(
+          label,
+          message === TRY_AGAIN ? "Couldn't open. Hold to try again" : message,
+        );
+      })
+      .finally(() => {
+        holding = false;
+      });
   };
 }
 
@@ -473,9 +494,9 @@ function VideoView({
       <Pressable {...hold}>
         <Text style={styles.attachment}>{label}</Text>
         <Text style={styles.hint}>
-          {`This phone can't play this video (${extension(
+          {`This phone can't play this video (${videoFormat(
             attachment.mimeType,
-          ).toUpperCase()})`}
+          )})`}
         </Text>
         <Text style={styles.hint}>{HOLD_HINT}</Text>
       </Pressable>
@@ -537,6 +558,14 @@ function VideoView({
   );
 }
 
+/** "WEBM": a video's format by its file extension, else its MIME subtype. */
+function videoFormat(mimeType: string): string {
+  const known = extension(mimeType);
+  if (known !== 'bin') return known.toUpperCase();
+  const subtype = mimeType.split(';')[0].split('/')[1]?.trim();
+  return subtype ? subtype.toUpperCase() : 'UNKNOWN';
+}
+
 /**
  * Whether text may need more than the collapsed lines. ponytail: a guess from line lengths that
  * errs towards showing Expand; measure the laid-out text if a needless Expand bothers anyone.
@@ -589,16 +618,22 @@ function TextPreview({
     };
   }, [visible, openFile, attachment]);
   if (failed) return <FileCard attachment={attachment} openFile={openFile} />;
+  const hold = holdProps(holdAction(attachment, openFile));
   if (preview === null)
-    return <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>;
+    return (
+      <Pressable {...hold}>
+        <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>
+      </Pressable>
+    );
   const { text, long } = preview;
   const toggle = () => setExpanded(open => !open);
   return (
     <View>
       <Pressable
         accessibilityRole={long ? 'button' : undefined}
+        accessibilityState={long ? { expanded } : undefined}
         onPress={long ? toggle : undefined}
-        {...holdProps(holdAction(attachment, openFile))}
+        {...hold}
       >
         <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>
         <Text style={styles.hint}>{HOLD_HINT}</Text>

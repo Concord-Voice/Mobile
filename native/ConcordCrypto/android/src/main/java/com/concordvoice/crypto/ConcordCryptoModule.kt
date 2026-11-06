@@ -1,10 +1,12 @@
 package com.concordvoice.crypto
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
@@ -68,6 +70,11 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
           saving = null
           val target = data?.data
           if (resultCode != Activity.RESULT_OK || target == null) return promise.resolve(false)
+          // Only a document a documents provider made: never a file:// path, nor this app's own
+          // FileProvider, which an app answering the picker intent could name.
+          if (!DocumentsContract.isDocumentUri(context, target)) {
+            return promise.reject("E_CONCORD_CRYPTO_INVALIDINPUT", "Crypto operation failed")
+          }
           run(promise, attachmentExecutor) {
             val output = context.contentResolver.openOutputStream(target) ?: fail(Failure.NOTFOUND)
             output.use { out -> file.inputStream().use { it.copyTo(out) } }
@@ -275,10 +282,16 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
         .setType(MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension) ?: "application/octet-stream")
         .putExtra(Intent.EXTRA_TITLE, "Concord attachment.${file.extension}")
     activity.runOnUiThread {
-      // A second picker replaces the first, which then counts as cancelled.
-      saving?.second?.resolve(false)
+      // One picker at a time, as iOS shows one previewer: a second save is refused.
+      if (saving != null) return@runOnUiThread promise.resolve(false)
       saving = file to promise
-      activity.startActivityForResult(pick, SAVE_REQUEST)
+      try {
+        activity.startActivityForResult(pick, SAVE_REQUEST)
+      } catch (_: ActivityNotFoundException) {
+        // No documents app on this phone, e.g. one a device manager disabled.
+        saving = null
+        promise.reject("E_CONCORD_CRYPTO_INTERACTIONNOTALLOWED", "Crypto operation failed")
+      }
     }
   }
 
