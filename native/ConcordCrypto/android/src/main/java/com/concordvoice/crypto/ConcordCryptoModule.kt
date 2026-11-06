@@ -21,6 +21,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.UiThreadUtil
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -88,11 +89,14 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
 
   /**
    * A JS reload or teardown drops every key handle and stops the crypto thread. A save still
-   * waiting on the picker settles as cancelled, since its result would reach no one.
+   * waiting on the picker settles as cancelled, since its result would reach no one; on the
+   * main thread, like every other use of `saving`.
    */
   override fun invalidate() {
-    saving?.second?.resolve(false)
-    saving = null
+    UiThreadUtil.runOnUiThread {
+      saving?.second?.resolve(false)
+      saving = null
+    }
     executor.shutdownNow()
     attachmentExecutor.shutdownNow()
     service.store.releaseAll()
