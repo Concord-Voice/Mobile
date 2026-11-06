@@ -366,6 +366,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | react-devtools-core | 6.1.5 | MIT | https://github.com/facebook/react |
 | react-is | 18.3.1 | MIT | https://github.com/facebook/react |
 | react-native-safe-area-context | 5.10.1 | MIT | https://github.com/appandflow/react-native-safe-area-context |
+| react-native-video | 6.19.3 | MIT | https://github.com/TheWidlarzGroup/react-native-video |
 | react-native | 0.88.0 | MIT | https://github.com/react/react-native |
 | react-refresh | 0.14.2 | MIT | https://github.com/facebook/react |
 | react | 19.3.1 | MIT | https://github.com/react/react |
@@ -481,6 +482,8 @@ are components of the same MIT-licensed React Native distribution.
 | RCT-Folly | 2024.11.18.00 | Apache-2.0 | https://github.com/facebook/folly |
 | SocketRocket | 0.7.1 | BSD-3-Clause | https://github.com/facebookincubator/SocketRocket |
 | Yoga | 0.0.0 pod version, React Native 0.88.0 source | MIT | https://github.com/facebook/yoga |
+| react-native-safe-area-context | 5.10.1 | MIT | https://github.com/appandflow/react-native-safe-area-context |
+| react-native-video | 6.19.3 | MIT | https://github.com/TheWidlarzGroup/react-native-video |
 
 ## Android runtime dependencies
 
@@ -488,14 +491,15 @@ The React Native Gradle plugin maps the app declarations to
 `com.facebook.react:react-android:0.88.0` and
 `com.facebook.hermes:hermes-android:260318099.0.4`. The app also declares
 `com.facebook.fresco:animated-gif:3.7.0`, React Native's Fresco version, so GIFs
-animate.
+animate. `react-native-video` 6.19.3 brings media3 1.8.0 for video playback, with
+its DASH, HLS and SmoothStreaming modules turned off in `android/build.gradle`.
 Hermes is enabled; the optional JSC branch is not part of this inventory.
 
-The table records 98 resolved runtime library components, including transitive
+The table records 119 resolved runtime library components, including transitive
 dependencies. They are what Gradle 9.8.2 resolves for the app's
 `releaseRuntimeClasspath`, with the app's Kotlin 2.4.21 declaration. The
-coroutines BOM is dependency metadata, so it is omitted from the code attribution
-table. License names and links come from the resolved upstream POMs;
+coroutines and Kotlin BOMs are dependency metadata, so they are omitted from the
+code attribution table. License names and links come from the resolved upstream POMs;
 `javax.inject:1` has no POM license declaration, so its Apache-2.0 attribution was
 verified in the published source JAR.
 This metadata inventory does not claim a built or signed release artifact.
@@ -504,7 +508,8 @@ This metadata inventory does not claim a built or signed release artifact.
 
 | Maven library | Resolved version | Upstream license |
 | --- | --- | --- |
-| androidx.activity:activity | 1.7.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.activity:activity-ktx | 1.9.3 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.activity:activity | 1.9.3 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.annotation:annotation-experimental | 1.4.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.annotation:annotation-jvm | 1.9.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.annotation:annotation | 1.9.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
@@ -520,22 +525,39 @@ This metadata inventory does not claim a built or signed release artifact.
 | androidx.core:core-ktx | 1.13.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.core:core | 1.13.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.cursoradapter:cursoradapter | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.customview:customview-poolingcontainer | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.customview:customview | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.drawerlayout:drawerlayout | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.emoji2:emoji2-views-helper | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.emoji2:emoji2 | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.exifinterface:exifinterface | 1.3.6 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.fragment:fragment | 1.5.4 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.interpolator:interpolator | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-common | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-livedata-core | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-livedata | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-process | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-runtime-ktx | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-runtime | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.lifecycle:lifecycle-viewmodel-ktx | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-viewmodel-savedstate | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.lifecycle:lifecycle-viewmodel | 2.6.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.loader:loader | 1.0.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-common | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-container | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-database | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-datasource-okhttp | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-datasource | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-decoder | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-exoplayer | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-extractor | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-session | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media3:media3-ui | 1.8.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.media:media | 1.7.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.profileinstaller:profileinstaller | 1.3.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.recyclerview:recyclerview | 1.3.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.resourceinspection:resourceinspection-annotation | 1.0.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| androidx.savedstate:savedstate-ktx | 1.2.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.savedstate:savedstate | 1.2.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.startup:startup-runtime | 1.1.1 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | androidx.swiperefreshlayout:swiperefreshlayout | 1.1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
@@ -586,16 +608,19 @@ This metadata inventory does not claim a built or signed release artifact.
 | com.facebook.soloader:soloader | 0.12.1 | [Apache-2](https://github.com/facebook/soloader/blob/main/LICENSE) |
 | com.facebook.yoga:proguard-annotations | 1.19.0 | [MIT License](https://github.com/facebook/yoga/blob/master/LICENSE) |
 | com.google.code.findbugs:jsr305 | 3.0.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| com.google.guava:listenablefuture | 1.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.google.guava:failureaccess | 1.0.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.google.guava:guava | 33.3.1-android | [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.google.guava:listenablefuture | 9999.0-empty-to-avoid-conflict-with-guava | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | com.parse.bolts:bolts-tasks | 1.4.0 | [BSD License](https://github.com/BoltsFramework/Bolts-Android/blob/master/LICENSE) |
 | com.squareup.okhttp3:okhttp-urlconnection | 4.9.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| com.squareup.okhttp3:okhttp | 4.9.2 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| com.squareup.okio:okio | 2.9.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.squareup.okhttp3:okhttp | 4.12.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.squareup.okio:okio-jvm | 3.6.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| com.squareup.okio:okio | 3.6.0 | [The Apache Software License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | javax.inject:javax.inject | 1 | [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | org.jetbrains.kotlin:kotlin-annotations-jvm | 1.3.72 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-stdlib-common | 2.4.21 | [Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| org.jetbrains.kotlin:kotlin-stdlib-jdk7 | 1.8.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
-| org.jetbrains.kotlin:kotlin-stdlib-jdk8 | 1.8.0 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib-jdk7 | 1.9.10 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
+| org.jetbrains.kotlin:kotlin-stdlib-jdk8 | 1.9.10 | [The Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlin:kotlin-stdlib | 2.4.21 | [Apache-2.0](http://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlinx:kotlinx-coroutines-android | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |
 | org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm | 1.8.1 | [The Apache Software License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt) |

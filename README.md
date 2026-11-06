@@ -102,15 +102,23 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   `text/plain` and `text/markdown` files up to 1 MiB, which preload into a nine-line
   preview under their file card. The preview expands to at most 64 KB, and the card
   opens the whole file; one that cannot be read shows only the card. Both show as plain
-  text, never rendered as Markdown. The ciphertext downloads natively (https only, no
-  redirects, capped in bytes and at 30 minutes) and never enters JavaScript. Attachments
-  decrypt with the key epoch the server names in `X-File-Key-Version`, else the current
-  one. Plaintext lands in the app's cache folder, which is emptied at sign-out
-  (cancelling a running download), at session expiry and at every launch; a failed
-  decrypt leaves none behind. The app keeps up to 256 MiB of opened files, counted from
-  the decrypted files rather than the server's sizes, and deletes the oldest past that.
-  A file is reused only in the chat that opened it. Not yet: older pages, starting a new
-  DM, starting a key rotation, edits, reactions, video playback and automatic reconnect.
+  text, never rendered as Markdown. Videos play inline through `react-native-video`,
+  paused until played: up to 64 MiB they preload once on screen, and a larger one, up
+  to 256 MiB, asks first ("Large video — download {size}?"). A failed download says
+  why and tries again on a tap; a video the phone cannot play becomes its file card.
+  The player has no AirPlay, buffers only seconds on Android, and keeps its file from
+  cache eviction while on screen. Android leaves out media3's streaming formats,
+  because the app plays only local files; media3 adds the auto-granted
+  `ACCESS_NETWORK_STATE` permission. The ciphertext downloads natively (https only, no
+  redirects, capped in bytes and at 30 minutes) and never enters JavaScript.
+  Attachments decrypt with the key epoch the server names in `X-File-Key-Version`,
+  else the current one. Plaintext lands in the app's cache folder, which is emptied at
+  sign-out (cancelling a running download), at session expiry and at every launch; a
+  failed decrypt leaves none behind. The app keeps up to 256 MiB of opened files,
+  counted from the decrypted files rather than the server's sizes, and deletes the
+  oldest past that, except files that a video on screen holds. A file is reused only
+  in the chat that opened it. Not yet: older pages, starting a new DM, starting a key
+  rotation, edits, reactions and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token, session id, user id) in a device-only Keychain item readable after

@@ -61,6 +61,17 @@
       "kind": "exact-pin",
       "ecosystem": "npm",
       "workspace": ".",
+      "package": "react-native-video",
+      "pinned": "6.19.3",
+      "reason": "Native module for video attachments: each version changes iOS and Android native code, the committed Podfile.lock and the NOTICE native tables, so a bump must arrive as a reviewable PR. Dependabot may propose version updates; this is not a hold against newer versions.",
+      "authority": "Mobile attachment display design (video playback PR)",
+      "recorded": "2026-11-05",
+      "review_by": "2027-05-05"
+    },
+    {
+      "kind": "exact-pin",
+      "ecosystem": "npm",
+      "workspace": ".",
       "package": "@react-native-community/cli",
       "pinned": "20.2.0",
       "reason": "Exact pin inherited from the React Native app template, which versions react/react-test-renderer, react-native/@react-native/* and the RN CLI packages in lockstep. Dependabot proposes bumps as one react-native group; this is not a hold against newer versions.",

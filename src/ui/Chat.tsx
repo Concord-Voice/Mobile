@@ -21,6 +21,7 @@ import {
   View,
   type ListViewToken,
 } from 'react-native';
+import Video from 'react-native-video';
 import {
   attachmentImageSize,
   deleteAttachment,
@@ -75,7 +76,7 @@ function lookupGif(api: ConcordApi, slug: string): Lookup {
   return lookup;
 }
 
-/** Fits a GIF inside 240 x 320 points, keeping its shape. */
+/** Fits a GIF, photo or video inside 240 x 320 points, keeping its shape. */
 function fit(width = 0, height = 0) {
   const [w, h] = width > 0 && height > 0 ? [width, height] : [200, 150];
   const scale = Math.min(1, 240 / w, 320 / h);
@@ -215,12 +216,19 @@ function GifView({
 }
 
 const MIB = 1024 * 1024;
-/** Photos and animated images up to this load on their own (the policy's mobile limit). */
+/** Photos, animated images and videos up to this load on their own (the policy's mobile limit). */
 const AUTO_LIMIT = 64 * MIB;
 /** The largest file the phone downloads at all, on a tap. */
 const OPEN_LIMIT = 256 * MIB;
 /** Ciphertext overhead above the plaintext size: a header and 28 bytes per 8 MiB chunk. */
 const OVERHEAD = 4096;
+/** Android's player buffers, in milliseconds: enough for local reads, not the whole clip. */
+const VIDEO_BUFFER = {
+  minBufferMs: 2500,
+  maxBufferMs: 5000,
+  bufferForPlaybackMs: 1000,
+  bufferForPlaybackAfterRebufferMs: 1500,
+};
 /**
  * Photos above this many pixels open from a card instead. ponytail: Android refuses to draw a
  * bitmap over 100 MB, 4 bytes a pixel, and does not shrink a PNG or WebP while decoding it;
@@ -257,9 +265,9 @@ function openError(error: unknown): string {
 }
 
 /**
- * An attachment, by the shared display policy: photos and animated images show inline (up to
- * 64 MiB on their own, animated ones by the GIF rules); anything else is a card that downloads
- * only when tapped, then opens the share sheet.
+ * An attachment, by the shared display policy: photos, animated images and videos show inline
+ * (up to 64 MiB on their own, animated ones by the GIF rules); text previews; anything else is
+ * a card that downloads only when tapped, then opens the share sheet.
  */
 function AttachmentView({
   attachment,
@@ -319,7 +327,106 @@ function AttachmentView({
       />
     );
   }
+  if (fileType === 'video' && fileSize <= OPEN_LIMIT)
+    return (
+      <VideoView attachment={attachment} openFile={openFile} active={visible} />
+    );
   return <FileCard attachment={attachment} openFile={openFile} />;
+}
+
+/**
+ * A video, inline and paused until played. It preloads once on screen up to 64 MiB; a larger
+ * one asks first, as on desktop. One that cannot be fetched says why and retries on a tap, as
+ * photos do; one the phone cannot play becomes a file card, which can still share it.
+ */
+function VideoView({
+  attachment,
+  openFile,
+  active,
+}: Readonly<{
+  attachment: Attachment;
+  openFile: OpenFile;
+  active: boolean;
+}>) {
+  const label = attachmentLabel(attachment);
+  const large = attachment.fileSize > AUTO_LIMIT;
+  const [tapped, setTapped] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [uri, setUri] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [unplayable, setUnplayable] = useState(false);
+  const [shape, setShape] = useState<{ width: number; height: number }>();
+  const load = active && (!large || tapped);
+  useEffect(() => {
+    setFailure(null);
+    if (!load) return;
+    let live = true;
+    let release: (() => void) | undefined;
+    // A file sent as small is held to that, as for photos.
+    openFile(attachment, (large ? OPEN_LIMIT : AUTO_LIMIT) + OVERHEAD).then(
+      next => {
+        if (!live) return;
+        // The player reads the file while mounted, so the cache must keep it. The hold starts
+        // here rather than after the render, before the next open can evict anything.
+        release = holdFile(next);
+        setUri(next);
+      },
+      error => {
+        if (live) setFailure(openError(error));
+      },
+    );
+    return () => {
+      live = false;
+      release?.();
+    };
+  }, [openFile, attachment, large, load, attempt]);
+  if (unplayable)
+    return <FileCard attachment={attachment} openFile={openFile} />;
+  if (large && !tapped)
+    return (
+      <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
+        <Text style={styles.attachment}>{label}</Text>
+        <Text style={styles.hint}>
+          {`Large video — download ${formatSize(attachment.fileSize)}?`}
+        </Text>
+      </Pressable>
+    );
+  if (failure !== null)
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setAttempt(n => n + 1)}
+      >
+        <Text style={styles.attachment}>{label}</Text>
+        <Text style={styles.hint}>{failure}</Text>
+      </Pressable>
+    );
+  if (!uri)
+    return (
+      <View>
+        <Text style={styles.attachment}>{label}</Text>
+        {load && <Text style={styles.hint}>Downloading…</Text>}
+      </View>
+    );
+  // ponytail: the player sets the iOS audio session for playback; pass
+  // disableAudioSessionManagement once calls share that session.
+  return (
+    <Video
+      accessibilityLabel={label}
+      // Android buffers even a paused player, so each keeps only seconds of a local file.
+      source={{ uri, bufferConfig: VIDEO_BUFFER }}
+      controls
+      paused
+      // Decrypted video stays on this phone, so no AirPlay; the file card shares it instead.
+      allowsExternalPlayback={false}
+      resizeMode="contain"
+      style={[styles.gif, fit(shape?.width, shape?.height)]}
+      onLoad={({ naturalSize: { width, height } }) => {
+        if (width > 0 && height > 0) setShape({ width, height });
+      }}
+      onError={() => setUnplayable(true)}
+    />
+  );
 }
 
 /**
@@ -463,10 +570,22 @@ function attachmentLabel({ fileType, fileSize }: Attachment): string {
 // files are kept (in the app cache, emptied at sign-out and at the next launch) so scrolling
 // back does not download them again, up to KEEP_BYTES; past that the oldest are deleted.
 let attachmentQueue: Promise<unknown> = Promise.resolve();
-type Opened = { open: Promise<string>; size: number };
+type Opened = { open: Promise<string>; size: number; uri?: string };
 const openedFiles = new WeakMap<ConcordApi, Map<string, Opened>>();
 /** Decrypted bytes kept at once, as on desktop, counted from the files rather than the server. */
 const KEEP_BYTES = 256 * MIB;
+/** How many players on screen read each decrypted file; eviction skips these. */
+const heldFiles = new Map<string, number>();
+
+/** Keeps the cache from deleting a file until the returned release is called. */
+function holdFile(uri: string): () => void {
+  heldFiles.set(uri, (heldFiles.get(uri) ?? 0) + 1);
+  return () => {
+    const left = (heldFiles.get(uri) ?? 1) - 1;
+    if (left > 0) heldFiles.set(uri, left);
+    else heldFiles.delete(uri);
+  };
+}
 
 function openCached(
   api: ConcordApi,
@@ -493,14 +612,17 @@ function openCached(
   const entry: Opened = { open: file.then(f => f.uri), size: 0 };
   files.set(key, entry);
   file.then(
-    ({ size }) => {
+    ({ size, uri }) => {
       // Opens finish in queue order, so every earlier entry already has its size.
       entry.size = size;
+      entry.uri = uri;
       let kept = 0;
       for (const other of files.values()) kept += other.size;
       // Map order is insertion order, so the first entries are the oldest; this one stays.
       for (const [old, other] of files) {
         if (kept <= KEEP_BYTES || other === entry) break;
+        // ponytail: held files stay even past KEEP_BYTES; they go once released and over again.
+        if (other.uri && heldFiles.has(other.uri)) continue;
         files.delete(old);
         kept -= other.size;
         other.open.then(deleteAttachment).catch(() => {});
