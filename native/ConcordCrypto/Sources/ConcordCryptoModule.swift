@@ -1,4 +1,5 @@
 import Foundation
+import QuickLook
 import React
 
 /// React Native bridge for ConcordCryptoService. Errors reject with a stable code only, never
@@ -11,6 +12,8 @@ final class ConcordCryptoModule: NSObject {
   // Attachments get their own serial queue: one download or decrypt at a time, and a large
   // file never holds up message crypto.
   private let attachmentQueue = DispatchQueue(label: "com.concordvoice.mobile.attachments")
+  // The previewer's data source, kept alive while it shows; main queue only.
+  private var preview: AttachmentPreview?
 
   override init() {
     super.init()
@@ -229,6 +232,31 @@ final class ConcordCryptoModule: NSObject {
     run(resolve, reject, on: attachmentQueue) { try self.service.attachments.imageSize(uri: uri) }
   }
 
+  /// Shows a decrypted attachment in the system previewer, inside the app, at the user's tap.
+  /// Resolves true once it is on screen; false when the file can't be previewed or one already is.
+  @objc func previewAttachment(
+    _ uri: String, resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    // The same check as reads and deletes: only a file this module decrypted.
+    guard let file = try? service.attachments.plaintext(uri) else {
+      return reject("E_CONCORD_CRYPTO_INVALIDINPUT", "Crypto operation failed", nil)
+    }
+    DispatchQueue.main.async {
+      guard QLPreviewController.canPreview(file as NSURL), let host = RCTPresentedViewController(),
+        !(host is QLPreviewController)
+      else { return resolve(false) }
+      // ponytail: nothing holds the file in the app's cache while it shows; hold it from JS until
+      // the previewer closes if 256 MiB of other opens behind it ever evict one.
+      let preview = AttachmentPreview(file) { [weak self] in self?.preview = nil }
+      self.preview = preview
+      let controller = QLPreviewController()
+      controller.dataSource = preview
+      controller.delegate = preview
+      host.present(controller, animated: true) { resolve(true) }
+    }
+  }
+
   @objc func deleteAttachment(
     _ uri: String, resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -245,4 +273,25 @@ final class ConcordCryptoModule: NSObject {
   ) {
     resolve(UUID().uuidString.lowercased())
   }
+}
+
+/// The previewer's one item. It drops itself once the previewer closes.
+private final class AttachmentPreview: NSObject, QLPreviewControllerDataSource,
+  QLPreviewControllerDelegate
+{
+  private let file: URL
+  private let closed: () -> Void
+
+  init(_ file: URL, closed: @escaping () -> Void) {
+    self.file = file
+    self.closed = closed
+  }
+
+  func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+
+  func previewController(_ controller: QLPreviewController, previewItemAt index: Int)
+    -> QLPreviewItem
+  { file as NSURL }
+
+  func previewControllerDidDismiss(_ controller: QLPreviewController) { closed() }
 }

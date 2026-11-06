@@ -36,9 +36,11 @@ encrypted direct messages.
 ### Added
 
 - **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
-- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you tap them, then open in the share sheet. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion. A photo with too many pixels to draw opens in the share sheet instead.
-- **Messages:** Text and Markdown files up to 1 MiB load once on screen into a short preview under the file, which you can expand or open in full. Markdown shows as written.
-- **Messages:** Videos in direct messages play inline. Videos up to 64 MiB load once on screen and wait for you to press play. Larger ones, up to 256 MiB, ask before they download. A video that fails to download says why and tries again on a tap, and one your phone can't play opens from its file card.
+- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you tap them, then open in a preview inside the app on iPhone. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion. A photo with too many pixels to draw shows as a file card instead.
+- **Messages:** Text and Markdown files up to 1 MiB load once on screen into a short preview under the file, which you can expand with a tap. Markdown shows as written.
+- **Messages:** Videos in direct messages play inline. Videos up to 64 MiB load once on screen and wait for you to press play. Larger ones, up to 256 MiB, wait for a tap to play. A video that fails to download says why and tries again on a tap, and one your phone can't play says so and names its format.
+
+- **Messages:** Hold any attachment for half a second to share or save it. On iPhone this opens the share sheet. On Android it offers "Share…" and "Save to phone…". A tap never opens the share sheet.
 
 ### Fixed
 
@@ -47,6 +49,7 @@ encrypted direct messages.
 - **Sign-in:** When fingerprint unlock can't be turned on, for example because no fingerprint is set up, the app now says why instead of silently signing you out next launch.
 - **Layout:** On Android, the tabs and the message box no longer sit under the navigation bar. Screens now pad for the phone's real status and navigation bars.
 - **Messages:** GIF messages and messages with attachments no longer show as empty bubbles. GIFs play through Concord's GIF proxy once their message is on screen. As on desktop, they wait for a tap when "Load GIFs automatically" is off in your privacy settings. Each attachment is named with its size, such as "Photo, 2.0 KB".
+- **Messages:** On iPhone, saving a photo or video to Photos from the share sheet no longer closes the app.
 
 ## [0.1.0] - 2026-11-05
 

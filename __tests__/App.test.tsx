@@ -1,5 +1,6 @@
 import {
   AccessibilityInfo,
+  Alert,
   FlatList,
   NativeModules,
   Platform,
@@ -50,6 +51,8 @@ const nativeFiles = {
   ),
   deleteAttachment: jest.fn(async (_uri: string) => null),
   shareAttachment: jest.fn(async (_uri: string) => null),
+  previewAttachment: jest.fn(async (_uri: string) => true),
+  saveAttachment: jest.fn(async (_uri: string) => true),
 };
 const modules = NativeModules as { ConcordCryptoModule?: object };
 
@@ -60,6 +63,8 @@ afterEach(async () => {
   pixels.clear();
   texts.clear();
   Object.values(nativeFiles).forEach(f => f.mockClear());
+  nativeFiles.previewAttachment.mockImplementation(async () => true);
+  nativeFiles.saveAttachment.mockImplementation(async () => true);
   useSession.setState({
     ...actions,
     stage: { kind: 'signed_out' },
@@ -591,7 +596,35 @@ const button = (tree: ReactTestRenderer.ReactTestRenderer, label: string) =>
       n.findAllByType('Text' as never).some(t => t.props.children === label),
   )[0];
 
-test('shows photos inline and opens other files only on a tap', async () => {
+/** The element that a long press on the text `label` reaches, if any. */
+const holdTarget = (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  label: string,
+) => {
+  let node = tree.root
+    .findAllByType('Text' as never)
+    .find(t => t.props.children === label) as
+    | ReactTestRenderer.ReactTestInstance
+    | null
+    | undefined;
+  while (node && !node.props.onLongPress) node = node.parent;
+  return node ?? undefined;
+};
+
+/** Long-presses `label` and lets the share or save it starts finish. */
+const hold = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  label: string,
+) => {
+  const target = holdTarget(tree, label);
+  expect(target?.props.delayLongPress).toBe(500);
+  await ReactTestRenderer.act(async () => {
+    target?.props.onLongPress();
+    await new Promise<void>(resolve => setImmediate(resolve));
+  });
+};
+
+test('views files in the app on a tap and shares only on a hold', async () => {
   const share = jest
     .spyOn(Share, 'share')
     .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
@@ -645,9 +678,34 @@ test('shows photos inline and opens other files only on a tap', async () => {
     // A large photo and every other file wait for a tap.
     const shown = text(tree);
     expect(shown).toContain('Photo, 70.0 MB, tap to load');
-    expect(shown).toContain('File, 3.0 MB|Tap to open');
+    expect(shown).toContain('File, 3.0 MB|Hold to share or save');
     expect(shown).toContain('File, 300.0 MB|Too large to open on this phone');
     expect(button(tree, 'File, 300.0 MB').props.disabled).toBe(true);
+    // Past what the phone opens there is nothing to hold, so nothing downloads.
+    expect(holdTarget(tree, 'File, 300.0 MB')).toBeUndefined();
+    // A GIF message has no hold; a photo is held, or shared through the screen reader.
+    const gif = tree.root.findAll(
+      n => n.props.accessibilityLabel === 'GIF' && !!n.props.onError,
+    )[0];
+    let up: ReactTestRenderer.ReactTestInstance | null = gif;
+    while (up && !up.props.onLongPress) up = up.parent;
+    expect(up).toBeNull();
+    const held = tree.root.findAll(
+      n =>
+        n.props.accessibilityLabel === 'Photo, 2.0 KB' &&
+        !!n.props.onAccessibilityAction,
+    )[0];
+    expect(held.props.accessibilityActions).toEqual([
+      { name: 'share', label: 'Share or save' },
+    ]);
+    await ReactTestRenderer.act(async () => {
+      held.props.onAccessibilityAction({
+        nativeEvent: { actionName: 'share' },
+      });
+      await new Promise<void>(resolve => setImmediate(resolve));
+    });
+    expect(share).toHaveBeenLastCalledWith({ url: 'file:///c/p1' });
+    share.mockClear();
     await ReactTestRenderer.act(async () =>
       button(tree, 'Photo, 70.0 MB, tap to load').props.onPress(),
     );
@@ -657,20 +715,32 @@ test('shows photos inline and opens other files only on a tap', async () => {
     );
     expect(imageOf(tree, 'Photo, 70.0 MB')).toBe('file:///c/p2');
 
-    // A failed open says why and tries again on the next tap; an opened file is not
-    // downloaded twice.
+    // A failed open says why and tries again on the next tap; a tap shows the file in the
+    // previewer, never the share sheet, and an opened file is not downloaded twice.
     const pdf = () => button(tree, 'File, 3.0 MB');
     await ReactTestRenderer.act(async () => pdf().props.onPress());
     expect(text(tree)).toContain(
       "File, 3.0 MB|Can't open: the file is damaged or was changed",
     );
+    await ReactTestRenderer.act(async () => pdf().props.onPress());
+    await ReactTestRenderer.act(async () => pdf().props.onPress());
+    expect(nativeFiles.previewAttachment.mock.calls).toEqual([
+      ['file:///c/f1'],
+      ['file:///c/f1'],
+    ]);
     expect(share).not.toHaveBeenCalled();
-    await ReactTestRenderer.act(async () => pdf().props.onPress());
-    await ReactTestRenderer.act(async () => pdf().props.onPress());
-    expect(share).toHaveBeenCalledTimes(2);
+    expect(pdfTries).toBe(2);
+    expect(text(tree)).toContain('File, 3.0 MB|Hold to share or save');
+    // Only a hold shares it.
+    await hold(tree, 'File, 3.0 MB');
     expect(share).toHaveBeenCalledWith({ url: 'file:///c/f1' });
     expect(pdfTries).toBe(2);
-    expect(text(tree)).toContain('File, 3.0 MB|Tap to open');
+    // A file the previewer cannot show says so.
+    nativeFiles.previewAttachment.mockResolvedValueOnce(false);
+    await ReactTestRenderer.act(async () => pdf().props.onPress());
+    expect(text(tree)).toContain(
+      "File, 3.0 MB|Can't preview this file. Hold to share or save",
+    );
   } finally {
     share.mockRestore();
   }
@@ -720,12 +790,13 @@ test('explains a failed photo, retries it, and opens oversized ones from a card'
     );
     expect(button(tree, 'Photo, 300.0 MB').props.disabled).toBe(true);
     expect(imageOf(tree, 'Photo, 1.0 MB')).toBeUndefined();
-    expect(text(tree)).toContain('Photo, 1.0 MB|Tap to open');
+    expect(text(tree)).toContain('Photo, 1.0 MB|Hold to share or save');
     await ReactTestRenderer.act(async () =>
       button(tree, 'Photo, 1.0 MB').props.onPress(),
     );
-    // Already downloaded, so the card shares the same file.
-    expect(share).toHaveBeenCalledWith({ url: 'file:///c/p3' });
+    // Already downloaded, so the card previews the same file.
+    expect(nativeFiles.previewAttachment).toHaveBeenCalledWith('file:///c/p3');
+    expect(share).not.toHaveBeenCalled();
     expect(
       openAttachment.mock.calls.filter(([a]) => a.id === 'p3'),
     ).toHaveLength(1);
@@ -737,7 +808,7 @@ test('explains a failed photo, retries it, and opens oversized ones from a card'
     expect(text(tree)).toContain('File, 10 B|Opening…');
     expect(zip().props.disabled).toBe(true);
     await ReactTestRenderer.act(async () => finishFile());
-    expect(text(tree)).toContain('File, 10 B|Tap to open');
+    expect(text(tree)).toContain('File, 10 B|Hold to share or save');
   } finally {
     share.mockRestore();
   }
@@ -777,16 +848,27 @@ test("counts opened files by their decrypted size, not the server's", async () =
   expect(nativeFiles.deleteAttachment.mock.calls).toEqual([['file:///c/q1']]);
 });
 
-test('opens files through the native share sheet on Android', async () => {
+test('offers share and save on a hold on Android', async () => {
   jest.replaceProperty(Platform, 'OS', 'android');
-  const failures = [
-    ['E_CONCORD_CRYPTO_UNSUPPORTEDFORMAT', 'Update the app to open this file'],
-    ['E_CONCORD_CRYPTO_TOOLARGE', 'Too large to open on this phone'],
-    [undefined, "Couldn't open. Tap to try again"],
-  ];
+  type Button = { text: string; onPress?: () => void };
+  const menus: Button[][] = [];
+  const alert = jest
+    .spyOn(Alert, 'alert')
+    .mockImplementation((_title, _message, buttons) => {
+      if (buttons) menus.push(buttons as Button[]);
+    });
+  const pick = async (choice: string) =>
+    ReactTestRenderer.act(async () => {
+      menus
+        .pop()
+        ?.find(b => b.text === choice)
+        ?.onPress?.();
+      await new Promise<void>(resolve => setImmediate(resolve));
+    });
+  const failures = ['E_CONCORD_CRYPTO_UNSUPPORTEDFORMAT', undefined];
   const openAttachment = jest.fn(async () => {
-    const failure = failures.shift();
-    if (failure) throw Object.assign(new Error('failed'), { code: failure[0] });
+    if (failures.length)
+      throw Object.assign(new Error('failed'), { code: failures.shift() });
     return 'file:///c/f1';
   });
   try {
@@ -795,28 +877,56 @@ test('opens files through the native share sheet on Android', async () => {
       openAttachment,
     );
     await show();
-    const messages = [
+    // No previewer yet, so a tap does nothing.
+    expect(text(tree)).toContain(
+      'File, 10 B|No preview on Android yet. Hold to share or save',
+    );
+    expect(button(tree, 'File, 10 B')).toBeUndefined();
+    // The menu comes first; a cancel downloads nothing.
+    await hold(tree, 'File, 10 B');
+    expect(menus[0].map(b => b.text)).toEqual([
+      'Share…',
+      'Save to phone…',
+      'Cancel',
+    ]);
+    await pick('Cancel');
+    expect(openAttachment).not.toHaveBeenCalled();
+    // A failed open says why.
+    await hold(tree, 'File, 10 B');
+    await pick('Share…');
+    expect(alert).toHaveBeenLastCalledWith(
+      'File, 10 B',
       'Update the app to open this file',
-      'Too large to open on this phone',
-      "Couldn't open. Tap to try again",
-    ];
-    for (const message of messages) {
-      await ReactTestRenderer.act(async () =>
-        button(tree, 'File, 10 B').props.onPress(),
-      );
-      expect(text(tree)).toContain(`File, 10 B|${message}`);
-    }
-    await ReactTestRenderer.act(async () =>
-      button(tree, 'File, 10 B').props.onPress(),
+    );
+    await hold(tree, 'File, 10 B');
+    await pick('Share…');
+    expect(alert).toHaveBeenLastCalledWith(
+      'File, 10 B',
+      "Couldn't open. Hold to try again",
     );
     // Native code types the share by the file's own extension, not the sender's type.
+    await hold(tree, 'File, 10 B');
+    await pick('Share…');
     expect(nativeFiles.shareAttachment).toHaveBeenCalledWith('file:///c/f1');
+    await hold(tree, 'File, 10 B');
+    await pick('Save to phone…');
+    expect(nativeFiles.saveAttachment).toHaveBeenCalledWith('file:///c/f1');
+    // Cancelling the save picker shows nothing.
+    nativeFiles.saveAttachment.mockResolvedValueOnce(false);
+    const alerts = alert.mock.calls.length;
+    await hold(tree, 'File, 10 B');
+    await pick('Save to phone…');
+    expect(alert).toHaveBeenCalledTimes(alerts + 1);
+    expect(nativeFiles.previewAttachment).not.toHaveBeenCalled();
   } finally {
     jest.restoreAllMocks();
   }
 });
 
 test('plays videos inline up to 64 MiB and asks before larger ones', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
   let finishLarge!: () => void;
   let tries = 0;
   const openAttachment = jest.fn<
@@ -878,10 +988,10 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
   });
   // A large video asks first; one past the phone's limit is a card.
   const shown = text(tree);
-  expect(shown).toContain('Video, 70.0 MB|Large video — download 70.0 MB?');
+  expect(shown).toContain('Large video, 70.0 MB. Tap to play');
   expect(shown).toContain('Video, 300.0 MB|Too large to open on this phone');
   await ReactTestRenderer.act(async () =>
-    button(tree, 'Video, 70.0 MB').props.onPress(),
+    button(tree, 'Large video, 70.0 MB. Tap to play').props.onPress(),
   );
   expect(openAttachment).toHaveBeenLastCalledWith(
     expect.objectContaining({ id: 'v2' }),
@@ -900,9 +1010,20 @@ test('plays videos inline up to 64 MiB and asks before larger ones', async () =>
   expect(video('Video, 2.0 KB').source).toMatchObject({
     uri: 'file:///c/v5',
   });
-  // A video the phone cannot play becomes a card that can still share it.
+  // A video the phone cannot play says so, naming its format, and never becomes a card.
   await ReactTestRenderer.act(async () => video('Video, 1.0 KB').onError());
-  expect(text(tree)).toContain('Video, 1.0 KB|Tap to open');
+  expect(text(tree)).toContain(
+    "Video, 1.0 KB|This phone can't play this video (WEBM)|Hold to share or save",
+  );
+  await hold(tree, 'Video, 1.0 KB');
+  expect(share).toHaveBeenLastCalledWith({ url: 'file:///c/v4' });
+  // A playing video is held by its label, and shares the file it plays.
+  await hold(tree, 'Video, 5.0 MB');
+  expect(share).toHaveBeenLastCalledWith({ url: 'file:///c/v1' });
+  expect(openAttachment.mock.calls.filter(([a]) => a.id === 'v1')).toHaveLength(
+    1,
+  );
+  share.mockRestore();
 });
 
 test("keeps a video's file while it is on screen", async () => {
@@ -979,9 +1100,9 @@ test('previews text and Markdown files, collapsed, as plain text', async () => {
       tree.root
         .findAllByType('Text' as never)
         .find(n => n.props.children === shown);
-    // Markdown shows as written, collapsed to nine lines, under the file's own card.
+    // Markdown shows as written, collapsed to nine lines, under the file's label.
     expect(preview(long)?.props.numberOfLines).toBe(9);
-    expect(text(tree)).toContain(`File, 2.0 KB|Tap to open|${long}`);
+    expect(text(tree)).toContain(`File, 2.0 KB|Hold to share or save|${long}`);
     await ReactTestRenderer.act(async () =>
       button(tree, 'Expand (2.0 KB)').props.onPress(),
     );
@@ -990,21 +1111,25 @@ test('previews text and Markdown files, collapsed, as plain text', async () => {
       button(tree, 'Collapse').props.onPress(),
     );
     expect(preview(long)?.props.numberOfLines).toBe(9);
-    // The card opens the whole file from the copy already decrypted.
+    // A tap on the label expands it too.
     await ReactTestRenderer.act(async () =>
       button(tree, 'File, 2.0 KB').props.onPress(),
     );
+    expect(preview(long)?.props.numberOfLines).toBeUndefined();
+    // A hold shares the whole file from the copy already decrypted.
+    await hold(tree, 'File, 2.0 KB');
     expect(share).toHaveBeenCalledWith({ url: 'file:///c/long' });
     expect(
       openAttachment.mock.calls.filter(([a]) => a.id === 'long'),
     ).toHaveLength(1);
     const shown = text(tree);
     // Short text needs no toggle; an unreadable or undownloadable one is only a card.
-    expect(shown).toContain('File, 2 B|Tap to open|hi');
+    expect(shown).toContain('File, 2 B|Hold to share or save|hi');
     expect(shown).not.toContain('Expand (2 B)');
-    expect(shown).toContain('File, 3 B|Tap to open');
-    expect(shown).toContain('File, 4 B|Tap to open');
-    expect(shown).toContain('File, 2.0 MB|Tap to open');
+    expect(button(tree, 'File, 2 B')).toBeUndefined();
+    expect(shown).toContain('File, 3 B|Hold to share or save');
+    expect(shown).toContain('File, 4 B|Hold to share or save');
+    expect(shown).toContain('File, 2.0 MB|Hold to share or save');
     // One line that wraps still gets a toggle.
     expect(shown).toContain('Expand (300 B)');
     // A long file hands layout only a bounded slice, collapsed or expanded.
@@ -1014,7 +1139,7 @@ test('previews text and Markdown files, collapsed, as plain text', async () => {
     );
     expect(preview(huge.slice(0, 64 * 1024))).toBeDefined();
     expect(text(tree)).toContain(
-      'Showing the first 64 KB. Open the file for the rest.',
+      'Showing the first 64 KB. Hold to share or save the whole file.',
     );
   } finally {
     share.mockRestore();

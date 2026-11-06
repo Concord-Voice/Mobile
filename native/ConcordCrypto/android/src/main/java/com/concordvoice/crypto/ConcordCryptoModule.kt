@@ -1,5 +1,6 @@
 package com.concordvoice.crypto
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -47,9 +49,32 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   // holds up message crypto.
   private val attachmentExecutor = Executors.newSingleThreadExecutor()
 
+  // The file a "save as" picker is open for, and the call waiting on it; main thread only.
+  private var saving: Pair<File, Promise>? = null
+
   init {
     // Plaintext from an earlier run (a crash, a kill) never outlives a launch.
     attachmentExecutor.execute { attachments.clear() }
+    context.addActivityEventListener(
+      object : BaseActivityEventListener() {
+        override fun onActivityResult(
+          activity: Activity,
+          requestCode: Int,
+          resultCode: Int,
+          data: Intent?,
+        ) {
+          if (requestCode != SAVE_REQUEST) return
+          val (file, promise) = saving ?: return
+          saving = null
+          val target = data?.data
+          if (resultCode != Activity.RESULT_OK || target == null) return promise.resolve(false)
+          run(promise, attachmentExecutor) {
+            val output = context.contentResolver.openOutputStream(target) ?: fail(Failure.NOTFOUND)
+            output.use { out -> file.inputStream().use { it.copyTo(out) } }
+            true
+          }
+        }
+      })
   }
 
   override fun getName() = "ConcordCryptoModule"
@@ -231,6 +256,32 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
       null
     }
 
+  /**
+   * Opens the system "save as" picker for a decrypted attachment, at the user's request, and
+   * copies the file to where they choose. Resolves true once written, false when cancelled.
+   */
+  @ReactMethod
+  fun saveAttachment(uri: String, promise: Promise) {
+    // The same check as reads and deletes: only a file this module decrypted.
+    val file =
+      attachments.fileFor(uri)
+        ?: return promise.reject("E_CONCORD_CRYPTO_INVALIDINPUT", "Crypto operation failed")
+    val activity =
+      context.currentActivity
+        ?: return promise.reject("E_CONCORD_CRYPTO_INTERACTIONNOTALLOWED", "Crypto operation failed")
+    val pick =
+      Intent(Intent.ACTION_CREATE_DOCUMENT)
+        .addCategory(Intent.CATEGORY_OPENABLE)
+        .setType(MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension) ?: "application/octet-stream")
+        .putExtra(Intent.EXTRA_TITLE, "Concord attachment.${file.extension}")
+    activity.runOnUiThread {
+      // A second picker replaces the first, which then counts as cancelled.
+      saving?.second?.resolve(false)
+      saving = file to promise
+      activity.startActivityForResult(pick, SAVE_REQUEST)
+    }
+  }
+
   /** UUID.randomUUID draws from SecureRandom. */
   @ReactMethod fun randomId(promise: Promise) = promise.resolve(UUID.randomUUID().toString())
 
@@ -292,5 +343,7 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
 
   private companion object {
     const val PROMPT_TIMEOUT_MINUTES = 5L
+    /** Marks the "save as" picker's result among the activity's results. */
+    const val SAVE_REQUEST = 0x5A7E
   }
 }

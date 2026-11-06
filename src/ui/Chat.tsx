@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   AccessibilityInfo,
+  Alert,
   FlatList,
   Image,
   Keyboard,
@@ -19,6 +20,7 @@ import {
   Text,
   TextInput,
   View,
+  type AccessibilityActionEvent,
   type ListViewToken,
 } from 'react-native';
 import Video from 'react-native-video';
@@ -26,7 +28,9 @@ import {
   attachmentImageSize,
   deleteAttachment,
   nativeErrorCode,
+  previewAttachment,
   readAttachmentText,
+  saveAttachment,
   shareAttachment,
 } from '../ConcordCrypto';
 import type {
@@ -36,7 +40,7 @@ import type {
   Gif,
 } from '../core/ConcordApi';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Conversation } from '../state/conversation';
+import { Conversation, extension } from '../state/conversation';
 import { describeError, useSession } from '../state/session';
 import { colors } from './theme';
 
@@ -101,6 +105,7 @@ function InlineImage({
   active,
   open,
   frame,
+  onHold,
 }: Readonly<{
   label: string;
   prompt: string | null;
@@ -108,6 +113,8 @@ function InlineImage({
   open: () => Promise<Source | null>;
   /** A size to hold while loading, so the list does not jump. */
   frame?: { width?: number; height?: number };
+  /** Shares or saves it on a long press; GIF messages have none. */
+  onHold?: () => void;
 }>) {
   const [tapped, setTapped] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
@@ -138,7 +145,11 @@ function InlineImage({
   }, [open, load, attempt]);
   if (waiting)
     return (
-      <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setTapped(true)}
+        {...holdProps(onHold)}
+      >
         <Text style={styles.attachment}>{prompt}</Text>
       </Pressable>
     );
@@ -147,6 +158,7 @@ function InlineImage({
       <Pressable
         accessibilityRole="button"
         onPress={() => setAttempt(n => n + 1)}
+        {...holdProps(onHold)}
       >
         <Text style={styles.attachment}>{label}</Text>
         <Text style={styles.hint}>{failure}</Text>
@@ -156,7 +168,7 @@ function InlineImage({
   if (!source)
     return <View style={[styles.gif, fit(frame?.width, frame?.height)]} />;
   const shape = source.width && source.height ? source : loaded;
-  return (
+  const image = (
     <Image
       accessibilityLabel={label}
       source={{ uri: source.uri, headers: source.headers }}
@@ -167,6 +179,12 @@ function InlineImage({
       }}
       onError={() => setFailure(TRY_AGAIN)}
     />
+  );
+  if (!onHold) return image;
+  return (
+    <Pressable accessibilityLabel={label} {...holdProps(onHold)}>
+      {image}
+    </Pressable>
   );
 }
 
@@ -249,6 +267,73 @@ const LINE_CHARS = 25;
 type OpenFile = (a: Attachment, limit: number) => Promise<string>;
 
 const TRY_AGAIN = "Couldn't open. Tap to try again";
+const HOLD_HINT = 'Hold to share or save';
+const CANT_PREVIEW = "Can't preview this file. Hold to share or save";
+
+/** The long press, and the matching screen-reader action, that share or save an attachment. */
+function holdProps(onHold?: () => void) {
+  if (!onHold) return {};
+  return {
+    onLongPress: onHold,
+    delayLongPress: 500,
+    accessibilityActions: [{ name: 'share', label: 'Share or save' }],
+    onAccessibilityAction: (e: AccessibilityActionEvent) => {
+      if (e.nativeEvent.actionName === 'share') onHold();
+    },
+  };
+}
+
+/** Asks Android's question: share the file, or save it where the person picks. */
+function shareOrSaveMenu(label: string): Promise<'share' | 'save' | null> {
+  return new Promise(resolve =>
+    Alert.alert(
+      label,
+      undefined,
+      [
+        { text: 'Share…', onPress: () => resolve('share') },
+        { text: 'Save to phone…', onPress: () => resolve('save') },
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) },
+    ),
+  );
+}
+
+/**
+ * The hold action for an attachment, or none past what the phone opens. It downloads and
+ * decrypts the file if it is not open yet, then shares it: the share sheet on iOS, a menu of
+ * share or save on Android (asked first, so a cancel downloads nothing).
+ */
+function holdAction(
+  attachment: Attachment,
+  openFile: OpenFile,
+): (() => void) | undefined {
+  if (attachment.fileSize > OPEN_LIMIT) return undefined;
+  const label = attachmentLabel(attachment);
+  return () => {
+    (async () => {
+      const choice =
+        Platform.OS === 'ios' ? 'share' : await shareOrSaveMenu(label);
+      if (!choice) return;
+      const uri = await openFile(attachment, OPEN_LIMIT + OVERHEAD);
+      // The cache keeps the file while the share sheet or the save reads it.
+      const release = holdFile(uri);
+      try {
+        if (Platform.OS === 'ios') await Share.share({ url: uri });
+        else if (choice === 'share') await shareAttachment(uri);
+        else await saveAttachment(uri);
+      } finally {
+        release();
+      }
+    })().catch(error => {
+      const message = openError(error);
+      Alert.alert(
+        label,
+        message === TRY_AGAIN ? "Couldn't open. Hold to try again" : message,
+      );
+    });
+  };
+}
 
 /** What a failed open tells the user, by the native failure code. */
 function openError(error: unknown): string {
@@ -267,7 +352,8 @@ function openError(error: unknown): string {
 /**
  * An attachment, by the shared display policy: photos, animated images and videos show inline
  * (up to 64 MiB on their own, animated ones by the GIF rules); text previews; anything else is
- * a card that downloads only when tapped, then opens the share sheet.
+ * a card that downloads only when tapped, then opens in the iOS previewer. A long press on any
+ * of them is the only way to share or save it.
  */
 function AttachmentView({
   attachment,
@@ -324,6 +410,7 @@ function AttachmentView({
         prompt={prompt}
         active={visible && (!animated || auto !== null)}
         open={open}
+        onHold={holdAction(attachment, openFile)}
       />
     );
   }
@@ -337,7 +424,7 @@ function AttachmentView({
 /**
  * A video, inline and paused until played. It preloads once on screen up to 64 MiB; a larger
  * one asks first, as on desktop. One that cannot be fetched says why and retries on a tap, as
- * photos do; one the phone cannot play becomes a file card, which can still share it.
+ * photos do; one the phone cannot play says so, naming its format. A hold shares or saves it.
  */
 function VideoView({
   attachment,
@@ -350,6 +437,7 @@ function VideoView({
 }>) {
   const label = attachmentLabel(attachment);
   const large = attachment.fileSize > AUTO_LIMIT;
+  const hold = holdProps(holdAction(attachment, openFile));
   const [tapped, setTapped] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [uri, setUri] = useState<string | null>(null);
@@ -381,13 +469,26 @@ function VideoView({
     };
   }, [openFile, attachment, large, load, attempt]);
   if (unplayable)
-    return <FileCard attachment={attachment} openFile={openFile} />;
-  if (large && !tapped)
     return (
-      <Pressable accessibilityRole="button" onPress={() => setTapped(true)}>
+      <Pressable {...hold}>
         <Text style={styles.attachment}>{label}</Text>
         <Text style={styles.hint}>
-          {`Large video — download ${formatSize(attachment.fileSize)}?`}
+          {`This phone can't play this video (${extension(
+            attachment.mimeType,
+          ).toUpperCase()})`}
+        </Text>
+        <Text style={styles.hint}>{HOLD_HINT}</Text>
+      </Pressable>
+    );
+  if (large && !tapped)
+    return (
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setTapped(true)}
+        {...hold}
+      >
+        <Text style={styles.attachment}>
+          {`Large video, ${formatSize(attachment.fileSize)}. Tap to play`}
         </Text>
       </Pressable>
     );
@@ -396,6 +497,7 @@ function VideoView({
       <Pressable
         accessibilityRole="button"
         onPress={() => setAttempt(n => n + 1)}
+        {...hold}
       >
         <Text style={styles.attachment}>{label}</Text>
         <Text style={styles.hint}>{failure}</Text>
@@ -403,29 +505,35 @@ function VideoView({
     );
   if (!uri)
     return (
-      <View>
+      <Pressable {...hold}>
         <Text style={styles.attachment}>{label}</Text>
         {load && <Text style={styles.hint}>Downloading…</Text>}
-      </View>
+      </Pressable>
     );
   // ponytail: the player sets the iOS audio session for playback; pass
   // disableAudioSessionManagement once calls share that session.
   return (
-    <Video
-      accessibilityLabel={label}
-      // Android buffers even a paused player, so each keeps only seconds of a local file.
-      source={{ uri, bufferConfig: VIDEO_BUFFER }}
-      controls
-      paused
-      // Decrypted video stays on this phone, so no AirPlay; the file card shares it instead.
-      allowsExternalPlayback={false}
-      resizeMode="contain"
-      style={[styles.gif, fit(shape?.width, shape?.height)]}
-      onLoad={({ naturalSize: { width, height } }) => {
-        if (width > 0 && height > 0) setShape({ width, height });
-      }}
-      onError={() => setUnplayable(true)}
-    />
+    <View>
+      {/* The player's controls take touches on the picture, so the hold is on this label. */}
+      <Pressable {...hold}>
+        <Text style={styles.hint}>{label}</Text>
+      </Pressable>
+      <Video
+        accessibilityLabel={label}
+        // Android buffers even a paused player, so each keeps only seconds of a local file.
+        source={{ uri, bufferConfig: VIDEO_BUFFER }}
+        controls
+        paused
+        // Decrypted video stays on this phone, so no AirPlay; a hold shares it instead.
+        allowsExternalPlayback={false}
+        resizeMode="contain"
+        style={[styles.gif, fit(shape?.width, shape?.height)]}
+        onLoad={({ naturalSize: { width, height } }) => {
+          if (width > 0 && height > 0) setShape({ width, height });
+        }}
+        onError={() => setUnplayable(true)}
+      />
+    </View>
   );
 }
 
@@ -444,9 +552,9 @@ function overflows(text: string): boolean {
 }
 
 /**
- * A text or Markdown file, preloaded once on screen into a collapsed preview under its file card,
- * which opens the whole file. Both show as plain text, and an expanded preview stops at 64 KB.
- * If it cannot be read, only the card shows.
+ * A text or Markdown file, preloaded once on screen into a collapsed preview under its label,
+ * which expands it on a tap and shares the whole file on a hold. Both show as plain text, and an
+ * expanded preview stops at 64 KB. If it cannot be read, only a file card shows.
  */
 function TextPreview({
   attachment,
@@ -484,9 +592,17 @@ function TextPreview({
   if (preview === null)
     return <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>;
   const { text, long } = preview;
+  const toggle = () => setExpanded(open => !open);
   return (
     <View>
-      <FileCard attachment={attachment} openFile={openFile} />
+      <Pressable
+        accessibilityRole={long ? 'button' : undefined}
+        onPress={long ? toggle : undefined}
+        {...holdProps(holdAction(attachment, openFile))}
+      >
+        <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>
+        <Text style={styles.hint}>{HOLD_HINT}</Text>
+      </Pressable>
       <Text
         style={styles.text}
         selectable
@@ -496,14 +612,11 @@ function TextPreview({
       </Text>
       {expanded && text.length > EXPANDED_CHARS ? (
         <Text style={styles.hint}>
-          Showing the first 64 KB. Open the file for the rest.
+          Showing the first 64 KB. Hold to share or save the whole file.
         </Text>
       ) : null}
       {long ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setExpanded(open => !open)}
-        >
+        <Pressable accessibilityRole="button" onPress={toggle}>
           <Text style={styles.hint}>
             {expanded
               ? 'Collapse'
@@ -515,34 +628,38 @@ function TextPreview({
   );
 }
 
-/** A file that waits for a tap, then downloads, decrypts and opens the share sheet. */
+/**
+ * A file that waits for a tap, then downloads, decrypts and shows in the iOS previewer, inside
+ * the app. Android has no previewer yet, so there only a hold opens it.
+ */
 function FileCard({
   attachment,
   openFile,
 }: Readonly<{ attachment: Attachment; openFile: OpenFile }>) {
   const [state, setState] = useState<string | null>(null);
   const tooLarge = attachment.fileSize > OPEN_LIMIT;
+  const ios = Platform.OS === 'ios';
   const press = async () => {
     setState('Opening…');
     try {
       const uri = await openFile(attachment, OPEN_LIMIT + OVERHEAD);
-      if (Platform.OS === 'ios') await Share.share({ url: uri });
-      else await shareAttachment(uri);
-      setState(null);
+      setState((await previewAttachment(uri)) ? null : CANT_PREVIEW);
     } catch (error) {
       setState(openError(error));
     }
   };
+  let hint =
+    state ?? (ios ? HOLD_HINT : `No preview on Android yet. ${HOLD_HINT}`);
+  if (tooLarge) hint = 'Too large to open on this phone';
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={ios ? 'button' : undefined}
       disabled={tooLarge || state === 'Opening…'}
-      onPress={press}
+      onPress={ios ? press : undefined}
+      {...holdProps(holdAction(attachment, openFile))}
     >
       <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>
-      <Text style={styles.hint}>
-        {tooLarge ? 'Too large to open on this phone' : state ?? 'Tap to open'}
-      </Text>
+      <Text style={styles.hint}>{hint}</Text>
     </Pressable>
   );
 }
