@@ -78,9 +78,18 @@ type KlipyItem = {
 
 /** The server's slug rule (internal/klipy/validate.go): letters, digits and dashes. */
 const GIF_SLUG = /^[A-Za-z0-9-]{1,100}$/;
+/** A server-issued id, as it may appear in a request path. */
+const UUID =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /** File details the server sends beside a message. The file itself stays encrypted. */
-export type Attachment = { id: string; fileType: string; fileSize: number };
+export type Attachment = {
+  id: string;
+  fileType: string;
+  fileSize: number;
+  /** The sender's declared type; empty when the server sent none. */
+  mimeType: string;
+};
 
 /** The attachment summaries on a history row or live frame; malformed entries are dropped. */
 export function attachments(value: unknown): Attachment[] {
@@ -94,7 +103,14 @@ export function attachments(value: unknown): Attachment[] {
       typeof v.file_type === 'string' &&
       Number.isSafeInteger(v.file_size) &&
       (v.file_size as number) >= 0
-      ? [{ id: v.id, fileType: v.file_type, fileSize: v.file_size as number }]
+      ? [
+          {
+            id: v.id,
+            fileType: v.file_type,
+            fileSize: v.file_size as number,
+            mimeType: typeof v.mime_type === 'string' ? v.mime_type : '',
+          },
+        ]
       : [];
   });
 }
@@ -358,6 +374,22 @@ export class ConcordApi {
       throw new Error('Not a Concord media URL');
     await this.fresh();
     return { uri, headers: await this.headers() };
+  }
+
+  /**
+   * Where to download an attachment's ciphertext, with the session headers it needs. The
+   * download itself runs natively, so the bytes never pass through JavaScript.
+   */
+  async attachmentRequest(
+    fileId: string,
+  ): Promise<{ url: string; headers: Record<string, string> }> {
+    // The id goes into the path, so it must be the server's shape: a UUID.
+    if (!UUID.test(fileId)) throw new Error('Invalid attachment id');
+    await this.fresh();
+    return {
+      url: `${this.base}/media/attachments/${fileId}`,
+      headers: await this.headers(),
+    };
   }
 
   /** The user's "load GIFs automatically" privacy setting, shared with desktop. */

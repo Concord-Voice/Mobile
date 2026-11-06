@@ -31,7 +31,7 @@ This repository holds the mobile app. It is in early development, so it is not i
 iOS comes first, and Android follows.
 
 The app keeps the same promise as the desktop app: your phone encrypts your messages, and the server never sees them in plain text.
-On iOS, the encryption code runs natively and private keys stay in the Keychain. Android support for this is not built yet.
+The encryption code runs natively on both platforms, and private keys stay in the iOS Keychain or Android Keystore.
 
 For guides and background, see the [Mobile wiki](https://github.com/Concord-Voice/Mobile/wiki).
 
@@ -49,7 +49,11 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   AES-256-GCM, Security.framework RSA-OAEP-4096, vendored reference Argon2id, and a
   biometry-bound Keychain. Keys stay native, and JS holds only opaque handles. JS can
   still ask for a channel key to be wrapped to any public key it passes, so the JS
-  bundle is inside the trust boundary.
+  bundle is inside the trust boundary. It also downloads and decrypts attachments
+  (desktop's chunked v2/v3 envelopes and legacy single-shot blobs), file to file, one
+  8 MiB chunk in memory at a time. `Tests/attachment-vectors.json` holds desktop's own
+  outcomes for those formats (`scripts/generate-attachment-vectors.mjs`), and the iOS and
+  Android tests both check against it.
 - `src/ConcordCrypto.ts`: the typed JS bridge to that module.
 - `native/ConcordCrypto/Sources/ConcordAttest*.swift` and `src/ConcordAttest.ts`:
   Apple App Attest for the control plane's client attestation (Alpha ADR-0010 D17).
@@ -64,12 +68,11 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   refresh with one shared rotation and a single retry on 401, logout), the DM WebSocket,
   and `createSocket`, which opens every socket with the app's fixed origin
   `app://concord-mobile`. Servers must list that origin in `ALLOWED_ORIGINS`.
-  On iOS, every request and the socket URL also carry the app's version (the bundle's marketing
+  Every request and the socket URL also carry the app's version (the bundle's marketing
   version as major.minor.patch) and platform (`X-Concord-Client-Version`,
   `X-Concord-Client-Platform`; `client_version`, `client_platform` on the socket), for the
   server's minimum-version check. A refusal (`CLIENT_VERSION_TOO_OLD`) asks the user to
-  update. Android sends neither until its native module lands. A failed version lookup
-  is retried on the next request.
+  update. A failed version lookup is retried on the next request.
 - DM conversations (`src/state/conversation.ts`, `src/ui/Chat.tsx`): opening a
   conversation loads the newest page, fetches and unwraps each key epoch it uses once
   (`GET /e2ee/keys/:id?version=N`), decrypts natively, then follows new messages over
@@ -89,9 +92,21 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   never replayed automatically. GIF messages load through the server's GIF proxy once
   they are on screen, with an access token rotated ahead of expiry, and wait for a tap
   when the user's "load GIFs automatically" privacy setting is off. On iOS the URL cache
-  is memory only, so those credentialed requests never reach Cache.db. Attachments show
-  their kind and size. Not yet: older pages, starting a new DM, starting a key rotation,
-  edits, reactions, opening attachments and automatic reconnect.
+  is memory only, so those credentialed requests never reach Cache.db. Attachments follow
+  the shared display policy. Photos and animated images show inline once on screen, up to
+  64 MiB (a larger photo waits for a tap). Animated ones also wait for a tap when GIFs
+  load on tap or the phone asks for reduced motion. A photo over 24 megapixels opens from
+  a card instead, because Android cannot draw it. A failed photo says why and tries again
+  on a tap. Other files show their kind and size and download only when tapped, up to
+  256 MiB, then open in the share sheet, typed by the file's extension. The ciphertext
+  downloads natively (https only, no redirects, capped in bytes and at 30 minutes) and
+  never enters JavaScript. Attachments decrypt with the key epoch the server names in
+  `X-File-Key-Version`, else the current one. Plaintext lands in the app's cache folder,
+  which is emptied at sign-out (cancelling a running download), at session expiry and at
+  every launch; a failed decrypt leaves none behind. The app keeps up to 256 MiB of
+  opened files and deletes the oldest past that. A file is reused only in the chat that
+  opened it. Not yet: older pages, starting a new DM, starting a key rotation,
+  edits, reactions, text previews, video playback and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token, session id, user id) in a device-only Keychain item readable after

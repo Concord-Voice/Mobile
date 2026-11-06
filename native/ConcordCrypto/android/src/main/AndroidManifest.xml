@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Hands a decrypted attachment to the share sheet the user opened; nothing else. -->
+        <provider
+            android:name="com.concordvoice.crypto.ConcordAttachmentProvider"
+            android:authorities="${applicationId}.concordattachments"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/concord_attachment_paths" />
+        </provider>
+    </application>
+</manifest>

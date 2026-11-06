@@ -36,6 +36,7 @@ encrypted direct messages.
 ### Added
 
 - **Messages:** Android now encrypts natively, the same way iOS does. Private keys stay in Android Keystore behind your fingerprint, and phones without secure hardware ask for your password instead.
+- **Messages:** Photos and animated images in direct messages now show inline, decrypted on your phone. Other files download only when you tap them, then open in the share sheet. Animated images follow your GIF setting, and wait for a tap while your phone asks for reduced motion. A photo with too many pixels to draw opens in the share sheet instead.
 
 ### Fixed
 
@@ -43,7 +44,7 @@ encrypted direct messages.
 - **Messages:** Android no longer says "This version of the app is no longer supported". The app now tells the server it is the Android app and which version it is.
 - **Sign-in:** When fingerprint unlock can't be turned on, for example because no fingerprint is set up, the app now says why instead of silently signing you out next launch.
 - **Layout:** On Android, the tabs and the message box no longer sit under the navigation bar. Screens now pad for the phone's real status and navigation bars.
-- **Messages:** GIF messages and messages with attachments no longer show as empty bubbles. GIFs play through Concord's GIF proxy once their message is on screen (Android shows the first frame for now). As on desktop, they wait for a tap when "Load GIFs automatically" is off in your privacy settings. Each attachment is named with its size, such as "Photo, 2.0 KB", until the app can open it.
+- **Messages:** GIF messages and messages with attachments no longer show as empty bubbles. GIFs play through Concord's GIF proxy once their message is on screen. As on desktop, they wait for a tap when "Load GIFs automatically" is off in your privacy settings. Each attachment is named with its size, such as "Photo, 2.0 KB".
 
 ## [0.1.0] - 2026-11-05
 

@@ -24,6 +24,9 @@ class ConcordKeyStore {
   fun symmetric(handle: String): ByteArray =
     (entry(handle) as? Entry.Symmetric)?.key ?: fail(Failure.WRONGKEYKIND)
 
+  /** A copy taken under the lock, so a release cannot zero it halfway. */
+  @Synchronized fun symmetricCopy(handle: String): ByteArray = symmetric(handle).copyOf()
+
   fun rsaPrivate(handle: String): PrivateKey =
     (entry(handle) as? Entry.RsaPrivate)?.key ?: fail(Failure.WRONGKEYKIND)
 

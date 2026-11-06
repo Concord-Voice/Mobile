@@ -1,7 +1,13 @@
-import { FlatList } from 'react-native';
+import {
+  AccessibilityInfo,
+  FlatList,
+  NativeModules,
+  Platform,
+  Share,
+} from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import App from '../App';
-import type { ConcordApi } from '../src/core/ConcordApi';
+import type { Attachment, ConcordApi } from '../src/core/ConcordApi';
 import { useSession } from '../src/state/session';
 import type { ChatLine } from '../src/state/conversation';
 import { Chat } from '../src/ui/Chat';
@@ -24,9 +30,23 @@ async function render() {
 
 const actions = useSession.getState();
 
+/** The native calls Chat makes itself. An image's pixel size comes from `pixels`, by URI. */
+const pixels = new Map<string, { width: number; height: number }>();
+const nativeFiles = {
+  attachmentImageSize: jest.fn(
+    async (uri: string) => pixels.get(uri) ?? { width: 0, height: 0 },
+  ),
+  deleteAttachment: jest.fn(async (_uri: string) => null),
+  shareAttachment: jest.fn(async (_uri: string) => null),
+};
+const modules = NativeModules as { ConcordCryptoModule?: object };
+
 afterEach(async () => {
   await ReactTestRenderer.act(() => mounted?.unmount());
   mounted = null;
+  delete modules.ConcordCryptoModule;
+  pixels.clear();
+  Object.values(nativeFiles).forEach(f => f.mockClear());
   useSession.setState({
     ...actions,
     stage: { kind: 'signed_out' },
@@ -175,6 +195,7 @@ test('keeps edits made while a send is in flight and restores a failed draft', a
         }),
     ),
     close: jest.fn(),
+    openAttachment: jest.fn(),
   };
   useSession.setState({
     stage: { kind: 'signed_in', userId: 'u' },
@@ -246,6 +267,7 @@ test('sends a message and shows decrypted lines', async () => {
     start: jest.fn(async () => {}),
     send: jest.fn(async () => {}),
     close: jest.fn(),
+    openAttachment: jest.fn(),
   };
   useSession.setState({
     stage: { kind: 'signed_in', userId: 'u' },
@@ -304,7 +326,14 @@ function gifApi(auto: boolean | Error) {
   return { api, gif };
 }
 
-function chatWith(lines: ChatLine[]) {
+type OpenAttachment = (a: Attachment, limit: number) => Promise<string>;
+
+function chatWith(
+  lines: ChatLine[],
+  openAttachment: OpenAttachment = jest.fn(async () => {
+    throw new Error('offline');
+  }),
+) {
   return {
     lines,
     dropped: false,
@@ -312,6 +341,7 @@ function chatWith(lines: ChatLine[]) {
     start: jest.fn(async () => {}),
     send: jest.fn(async () => {}),
     close: jest.fn(),
+    openAttachment,
   };
 }
 
@@ -341,10 +371,10 @@ test('plays GIFs through the proxy and names attachments', async () => {
       sender: 'Peer',
       text: '',
       attachments: [
-        { id: 'a1', fileType: 'photo', fileSize: 2048 },
-        { id: 'a2', fileType: 'file', fileSize: 3 * 1024 * 1024 },
-        { id: 'a3', fileType: 'audio', fileSize: 12 },
-        { id: 'a5', fileType: 'constructor', fileSize: 2 },
+        { id: 'a1', fileType: 'photo', fileSize: 2048, mimeType: 'image/png' },
+        { id: 'a2', fileType: 'file', fileSize: 3 * 1024 * 1024, mimeType: '' },
+        { id: 'a3', fileType: 'audio', fileSize: 12, mimeType: '' },
+        { id: 'a5', fileType: 'constructor', fileSize: 2, mimeType: '' },
       ],
     },
     {
@@ -352,7 +382,9 @@ test('plays GIFs through the proxy and names attachments', async () => {
       userId: 'peer',
       sender: 'Peer',
       text: 'caption',
-      attachments: [{ id: 'a4', fileType: 'video', fileSize: 1536 }],
+      attachments: [
+        { id: 'a4', fileType: 'video', fileSize: 1536, mimeType: 'video/mp4' },
+      ],
     },
     { id: 'm7', userId: 'peer', sender: 'Peer', text: '', gifSlug: '' },
   ]);
@@ -464,7 +496,7 @@ test.each([
     });
     const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
     await onScreen(tree, ['m1']);
-    expect(text(tree)).toContain('hi|GIF, tap to load');
+    expect(text(tree)).toContain('hi|Tap to load GIF');
     expect(gif).not.toHaveBeenCalled();
     const [tap] = tree.root.findAll(
       n =>
@@ -472,7 +504,7 @@ test.each([
         !!n.props.onPress &&
         n
           .findAllByType('Text' as never)
-          .some(t => t.props.children === 'GIF, tap to load'),
+          .some(t => t.props.children === 'Tap to load GIF'),
     );
     await ReactTestRenderer.act(async () => tap.props.onPress());
     expect(gif).toHaveBeenCalledWith('tiny');
@@ -485,6 +517,334 @@ test.each([
     ).toBeGreaterThan(0);
   },
 );
+
+const MIB = 1024 * 1024;
+const file = (
+  id: string,
+  fileType: string,
+  fileSize: number,
+  mimeType = '',
+): Attachment => ({ id, fileType, fileSize, mimeType });
+
+/** Mounts a chat whose one message carries `attachments`, and puts it on screen. */
+async function chatWithFiles(
+  attachments: Attachment[],
+  openAttachment: OpenAttachment,
+  auto: boolean | Error = true,
+) {
+  const { api, gif } = gifApi(auto);
+  modules.ConcordCryptoModule = nativeFiles;
+  const fake = chatWith(
+    [
+      { id: 'm1', userId: 'peer', sender: 'Peer', text: '', attachments },
+      { id: 'm2', userId: 'peer', sender: 'Peer', text: '', gifSlug: 'tiny' },
+    ],
+    openAttachment,
+  );
+  useSession.setState({
+    stage: { kind: 'signed_in', userId: 'u' },
+    api,
+    identity: 'HANDLE' as never,
+  });
+  const dm = { id: 'd3', title: 'Peer', unreadCount: 0, lastActivity: 'now' };
+  await ReactTestRenderer.act(async () => {
+    mounted = ReactTestRenderer.create(
+      <Chat dm={dm} onBack={() => {}} open={() => fake} />,
+    );
+  });
+  const tree = mounted as unknown as ReactTestRenderer.ReactTestRenderer;
+  return { tree, gif, show: () => onScreen(tree, ['m1', 'm2']) };
+}
+
+const imageOf = (tree: ReactTestRenderer.ReactTestRenderer, label: string) =>
+  tree.root.findAll(
+    n => n.props.accessibilityLabel === label && !!n.props.onError,
+  )[0]?.props.source?.uri;
+
+const button = (tree: ReactTestRenderer.ReactTestRenderer, label: string) =>
+  tree.root.findAll(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      !!n.props.onPress &&
+      n.findAllByType('Text' as never).some(t => t.props.children === label),
+  )[0];
+
+test('shows photos inline and opens other files only on a tap', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
+  let finishPhoto!: () => void;
+  let pdfTries = 0;
+  const openAttachment = jest.fn(async (a: Attachment, _limit: number) => {
+    if (a.id === 'p1')
+      await new Promise<void>(resolve => {
+        finishPhoto = resolve;
+      });
+    if (a.id === 'f1' && ++pdfTries === 1)
+      throw Object.assign(new Error('auth'), {
+        code: 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+      });
+    return `file:///c/${a.id}`;
+  });
+  try {
+    const { tree, show } = await chatWithFiles(
+      [
+        file('p1', 'photo', 2048, 'image/png'),
+        file('g1', 'animated', 1024, 'image/gif'),
+        file('p2', 'photo', 70 * MIB, 'image/jpeg'),
+        file('f1', 'file', 3 * MIB, 'application/pdf'),
+        file('f2', 'file', 300 * MIB),
+      ],
+      openAttachment,
+    );
+    // Nothing downloads before its message is on screen.
+    expect(openAttachment).not.toHaveBeenCalled();
+    await show();
+    // Small photos and animated images load on their own, one download at a time, held to
+    // the 64 MiB auto-load limit plus envelope overhead.
+    expect(
+      openAttachment.mock.calls.map(([a, limit]) => [a.id, limit]),
+    ).toEqual([['p1', 64 * MIB + 4096]]);
+    await ReactTestRenderer.act(async () => finishPhoto());
+    expect(openAttachment.mock.calls.map(([a]) => a.id)).toEqual(['p1', 'g1']);
+    expect(imageOf(tree, 'Photo, 2.0 KB')).toBe('file:///c/p1');
+    expect(imageOf(tree, 'Animated image, 1.0 KB')).toBe('file:///c/g1');
+    // A photo takes its shape once it has loaded.
+    const photo = () =>
+      tree.root.findAll(
+        n => n.props.accessibilityLabel === 'Photo, 2.0 KB' && !!n.props.onLoad,
+      )[0];
+    await ReactTestRenderer.act(async () =>
+      photo().props.onLoad({
+        nativeEvent: { source: { width: 480, height: 270 } },
+      }),
+    );
+    expect(photo().props.style).toContainEqual({ width: 240, height: 135 });
+    // A large photo and every other file wait for a tap.
+    const shown = text(tree);
+    expect(shown).toContain('Photo, 70.0 MB, tap to load');
+    expect(shown).toContain('File, 3.0 MB|Tap to open');
+    expect(shown).toContain('File, 300.0 MB|Too large to open on this phone');
+    expect(button(tree, 'File, 300.0 MB').props.disabled).toBe(true);
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 70.0 MB, tap to load').props.onPress(),
+    );
+    expect(openAttachment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'p2' }),
+      256 * MIB + 4096,
+    );
+    expect(imageOf(tree, 'Photo, 70.0 MB')).toBe('file:///c/p2');
+
+    // A failed open says why and tries again on the next tap; an opened file is not
+    // downloaded twice.
+    const pdf = () => button(tree, 'File, 3.0 MB');
+    await ReactTestRenderer.act(async () => pdf().props.onPress());
+    expect(text(tree)).toContain(
+      "File, 3.0 MB|Can't open: the file is damaged or was changed",
+    );
+    expect(share).not.toHaveBeenCalled();
+    await ReactTestRenderer.act(async () => pdf().props.onPress());
+    await ReactTestRenderer.act(async () => pdf().props.onPress());
+    expect(share).toHaveBeenCalledTimes(2);
+    expect(share).toHaveBeenCalledWith({ url: 'file:///c/f1' });
+    expect(pdfTries).toBe(2);
+    expect(text(tree)).toContain('File, 3.0 MB|Tap to open');
+  } finally {
+    share.mockRestore();
+  }
+});
+
+test('explains a failed photo, retries it, and opens oversized ones from a card', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
+  pixels.set('file:///c/p3', { width: 10000, height: 10000 });
+  let photoTries = 0;
+  let finishFile!: () => void;
+  const openAttachment = jest.fn(async (a: Attachment, _limit: number) => {
+    if (a.id === 'p1' && ++photoTries === 1)
+      throw Object.assign(new Error('auth'), {
+        code: 'E_CONCORD_CRYPTO_AUTHENTICATIONFAILED',
+      });
+    if (a.id === 'f1')
+      await new Promise<void>(resolve => {
+        finishFile = resolve;
+      });
+    return `file:///c/${a.id}`;
+  });
+  try {
+    const { tree, show } = await chatWithFiles(
+      [
+        file('p1', 'photo', 2048, 'image/png'),
+        file('p2', 'photo', 300 * MIB, 'image/png'),
+        file('p3', 'photo', MIB, 'image/png'),
+        file('f1', 'file', 10, 'application/zip'),
+      ],
+      openAttachment,
+    );
+    await show();
+    // A failed photo says why, and a tap tries again.
+    expect(text(tree)).toContain(
+      "Photo, 2.0 KB|Can't open: the file is damaged or was changed",
+    );
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 2.0 KB').props.onPress(),
+    );
+    expect(photoTries).toBe(2);
+    expect(imageOf(tree, 'Photo, 2.0 KB')).toBe('file:///c/p1');
+    // Too large to download, or too many pixels to draw: a card instead of an image.
+    expect(text(tree)).toContain(
+      'Photo, 300.0 MB|Too large to open on this phone',
+    );
+    expect(button(tree, 'Photo, 300.0 MB').props.disabled).toBe(true);
+    expect(imageOf(tree, 'Photo, 1.0 MB')).toBeUndefined();
+    expect(text(tree)).toContain('Photo, 1.0 MB|Tap to open');
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 1.0 MB').props.onPress(),
+    );
+    // Already downloaded, so the card shares the same file.
+    expect(share).toHaveBeenCalledWith({ url: 'file:///c/p3' });
+    expect(
+      openAttachment.mock.calls.filter(([a]) => a.id === 'p3'),
+    ).toHaveLength(1);
+    // A file being opened cannot be tapped again.
+    const zip = () => button(tree, 'File, 10 B');
+    await ReactTestRenderer.act(async () => {
+      zip().props.onPress();
+    });
+    expect(text(tree)).toContain('File, 10 B|Opening…');
+    expect(zip().props.disabled).toBe(true);
+    await ReactTestRenderer.act(async () => finishFile());
+    expect(text(tree)).toContain('File, 10 B|Tap to open');
+  } finally {
+    share.mockRestore();
+  }
+});
+
+test('keeps at most 256 MiB of opened files, deleting the oldest', async () => {
+  const openAttachment = jest.fn(async (a: Attachment) => `file:///c/${a.id}`);
+  const { tree, show } = await chatWithFiles(
+    ['q1', 'q2', 'q3'].map(id => file(id, 'photo', 100 * MIB, 'image/png')),
+    openAttachment,
+  );
+  await show();
+  for (let i = 0; i < 3; i++)
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Photo, 100.0 MB, tap to load').props.onPress(),
+    );
+  expect(openAttachment.mock.calls.map(([a]) => a.id)).toEqual([
+    'q1',
+    'q2',
+    'q3',
+  ]);
+  expect(nativeFiles.deleteAttachment.mock.calls).toEqual([['file:///c/q1']]);
+});
+
+test('opens files through the native share sheet on Android', async () => {
+  jest.replaceProperty(Platform, 'OS', 'android');
+  const failures = [
+    ['E_CONCORD_CRYPTO_UNSUPPORTEDFORMAT', 'Update the app to open this file'],
+    ['E_CONCORD_CRYPTO_TOOLARGE', 'Too large to open on this phone'],
+    [undefined, "Couldn't open. Tap to try again"],
+  ];
+  const openAttachment = jest.fn(async () => {
+    const failure = failures.shift();
+    if (failure) throw Object.assign(new Error('failed'), { code: failure[0] });
+    return 'file:///c/f1';
+  });
+  try {
+    const { tree, show } = await chatWithFiles(
+      [file('f1', 'file', 10, 'application/zip')],
+      openAttachment,
+    );
+    await show();
+    const messages = [
+      'Update the app to open this file',
+      'Too large to open on this phone',
+      "Couldn't open. Tap to try again",
+    ];
+    for (const message of messages) {
+      await ReactTestRenderer.act(async () =>
+        button(tree, 'File, 10 B').props.onPress(),
+      );
+      expect(text(tree)).toContain(`File, 10 B|${message}`);
+    }
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'File, 10 B').props.onPress(),
+    );
+    // Native code types the share by the file's own extension, not the sender's type.
+    expect(nativeFiles.shareAttachment).toHaveBeenCalledWith('file:///c/f1');
+  } finally {
+    jest.restoreAllMocks();
+  }
+});
+
+test('holds animation for a tap while the phone asks for reduced motion', async () => {
+  let changed!: (on: boolean) => void;
+  jest
+    .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+    .mockResolvedValue(true);
+  jest
+    .spyOn(AccessibilityInfo, 'addEventListener')
+    .mockImplementation((_event, handler) => {
+      changed = handler as (on: boolean) => void;
+      return { remove: jest.fn() };
+    });
+  const openAttachment = jest.fn(async (a: Attachment) => `file:///c/${a.id}`);
+  try {
+    const { tree, gif, show } = await chatWithFiles(
+      [file('g1', 'animated', 1024, 'image/gif')],
+      openAttachment,
+    );
+    await show();
+    // Both a GIF message and an animated attachment wait.
+    expect(
+      text(tree)
+        .split('|')
+        .filter(t => t === 'Tap to play GIF'),
+    ).toHaveLength(2);
+    expect(gif).not.toHaveBeenCalled();
+    expect(openAttachment).not.toHaveBeenCalled();
+    expect(AccessibilityInfo.addEventListener).toHaveBeenCalledWith(
+      'reduceMotionChanged',
+      expect.any(Function),
+    );
+    // Turning the setting off lets them play.
+    await ReactTestRenderer.act(async () => changed(false));
+    expect(gif).toHaveBeenCalledWith('tiny');
+    expect(imageOf(tree, 'Animated image, 1.0 KB')).toBe('file:///c/g1');
+  } finally {
+    jest.restoreAllMocks();
+  }
+});
+
+test('waits for a tap on an animated attachment when GIFs load on tap', async () => {
+  const openAttachment = jest.fn(async (a: Attachment) => `file:///c/${a.id}`);
+  const { tree, show } = await chatWithFiles(
+    [file('g1', 'animated', 1024, 'image/gif')],
+    openAttachment,
+    false,
+  );
+  await show();
+  expect(openAttachment).not.toHaveBeenCalled();
+  const taps = tree.root.findAll(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      !!n.props.onPress &&
+      n
+        .findAllByType('Text' as never)
+        .some(t => t.props.children === 'Tap to load GIF'),
+  );
+  // The GIF message and the attachment each ask.
+  expect(taps.length).toBeGreaterThanOrEqual(2);
+  await ReactTestRenderer.act(async () =>
+    button(tree, 'Tap to load GIF').props.onPress(),
+  );
+  await ReactTestRenderer.act(async () =>
+    button(tree, 'Tap to load GIF').props.onPress(),
+  );
+  expect(imageOf(tree, 'Animated image, 1.0 KB')).toBe('file:///c/g1');
+});
 
 test.each(['late error', 'late success'] as const)(
   'ignores %s from an old Chat start after replacing the conversation',
@@ -503,6 +863,7 @@ test.each(['late error', 'late success'] as const)(
       ),
       send: jest.fn(async () => {}),
       close: jest.fn(),
+      openAttachment: jest.fn(),
     };
     const replacement = {
       lines: [],
@@ -516,6 +877,7 @@ test.each(['late error', 'late success'] as const)(
       ),
       send: jest.fn(async () => {}),
       close: jest.fn(),
+      openAttachment: jest.fn(),
     };
     useSession.setState({
       stage: { kind: 'signed_in', userId: 'u' },
@@ -587,6 +949,7 @@ test('an old Chat send failure cannot restore its draft, error or sending state 
         }),
     ),
     close: jest.fn(),
+    openAttachment: jest.fn(),
   };
   const replacement = {
     lines: [],
@@ -600,6 +963,7 @@ test('an old Chat send failure cannot restore its draft, error or sending state 
         }),
     ),
     close: jest.fn(),
+    openAttachment: jest.fn(),
   };
   useSession.setState({
     stage: { kind: 'signed_in', userId: 'u' },

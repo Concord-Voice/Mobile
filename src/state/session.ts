@@ -9,6 +9,7 @@ import {
   persistIdentity,
   randomId,
   releaseAll,
+  clearAttachments,
   releaseKey,
   saveSession,
   unlockIdentity,
@@ -58,6 +59,13 @@ type Origin = { server: string; machineId: string };
 type Persisted = Origin & SavedSession;
 
 const UNLOCK_REASON = 'Unlock your Concord messages';
+
+/** "https://h//" -> "https://h", without a regex that backtracks on many slashes. */
+function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === '/') end--;
+  return url.slice(0, end);
+}
 
 function account(p: { server: string; userId: string }): string {
   return `${p.userId}@${p.server}`;
@@ -240,6 +248,7 @@ export function createSessionStore(
           error: 'Your session ended. Log in again.',
         });
         releaseAll().catch(() => {});
+        clearAttachments().catch(() => {});
         // A record that survives is refused again next launch, which retries this.
         forget(userId ? { ...at, userId } : undefined).catch(() => {});
       };
@@ -386,7 +395,7 @@ export function createSessionStore(
       signIn: (server, email, password) =>
         run(async () => {
           const api = connect({
-            server: server.trim().replace(/\/+$/, ''),
+            server: withoutTrailingSlashes(server.trim()),
             // One id per sign-in, persisted with the session it belongs to.
             machineId: await randomId(),
           });
@@ -441,7 +450,8 @@ export function createSessionStore(
           error: null,
           notice: null,
         });
-        // Local state is gone first; server revocation and key release are best effort.
+        // Local state is gone first; server revocation, key release and deleting attachment
+        // files are best effort.
         const [, , wiped] = await Promise.allSettled([
           api?.logout(),
           releaseAll(),
@@ -450,6 +460,7 @@ export function createSessionStore(
               ? { ...at, userId: stage.userId }
               : undefined,
           ),
+          clearAttachments(),
         ]);
         // The saved sign-in survived: say so rather than reopen it silently next launch.
         if (wiped.status === 'rejected')

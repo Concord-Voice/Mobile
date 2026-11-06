@@ -1,5 +1,7 @@
 import {
+  decryptAttachment,
   decryptMessage,
+  downloadAttachment,
   encryptMessage,
   type KeyHandle,
   releaseKey,
@@ -51,6 +53,40 @@ function unwrap(plaintext: string): { text: string; gifSlug?: string } {
     }
   }
   return { text: plaintext.trim() ? plaintext : '' };
+}
+
+/** desktop parseKeyVersionHeader: absent is null (current key); anything malformed fails. */
+function keyVersion(raw: string | null): number | null {
+  if (raw === null) return null;
+  const n = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(n) || n < 1)
+    throw new Error('Unreadable attachment key epoch');
+  return n;
+}
+
+const EXTENSIONS = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/gif', 'gif'],
+  ['image/webp', 'webp'],
+  ['image/heic', 'heic'],
+  ['image/heif', 'heif'],
+  ['video/mp4', 'mp4'],
+  ['video/quicktime', 'mov'],
+  ['video/webm', 'webm'],
+  ['audio/mpeg', 'mp3'],
+  ['audio/mp4', 'm4a'],
+  ['audio/ogg', 'ogg'],
+  ['audio/wav', 'wav'],
+  ['application/pdf', 'pdf'],
+  ['application/zip', 'zip'],
+  ['text/plain', 'txt'],
+  ['text/markdown', 'md'],
+]);
+
+/** The file extension for a MIME type, so a shared file opens in the right app. */
+function extension(mimeType: string): string {
+  return EXTENSIONS.get(mimeType.split(';')[0].trim().toLowerCase()) ?? 'bin';
 }
 
 // ponytail: Math.random is enough here; the nonce only pairs a send with its ack and is no secret.
@@ -313,6 +349,27 @@ export class Conversation {
     // A read receipt only once the newest line could actually be shown.
     if (!this.lines.at(-1)?.unreadable)
       this.api.markDmRead(this.id).catch(() => {});
+  }
+
+  /**
+   * Downloads and decrypts an attachment natively (at most `maxBytes` of ciphertext) and
+   * returns the plaintext file's URI. The key is the epoch the server names for the file,
+   * else the current one, as on desktop.
+   */
+  async openAttachment(a: Attachment, maxBytes: number): Promise<string> {
+    // Queued opens from a closed chat (or an expired session) never download.
+    if (!this.isCurrent()) throw new Error('Conversation closed');
+    const { url, headers } = await this.api.attachmentRequest(a.id);
+    const file = await downloadAttachment(url, headers, maxBytes);
+    // ponytail: a failure before the decrypt leaves the ciphertext until sign-out or the next
+    // launch empties the folder; it is still encrypted.
+    const key = await this.keyFor(keyVersion(file.keyVersion) ?? 0);
+    const { uri } = await decryptAttachment(
+      file.id,
+      key,
+      extension(a.mimeType || file.mimeType || ''),
+    );
+    return uri;
   }
 
   /** Encrypts under the current key and sends; resolves once the server stores it. */
