@@ -319,8 +319,8 @@ const holding = new Set<string>();
  * The hold action for an attachment, or none past what the phone opens. It downloads and
  * decrypts the file if it is not open yet, then shares it: the share sheet on iOS, a menu of
  * share or save on Android (asked first, so a cancel downloads nothing). A hold on an
- * attachment whose hold is still running is ignored. ponytail: nothing shows while a large file downloads for a hold; show
- * "Opening…" on the held view if that wait confuses people.
+ * attachment whose hold is still running is ignored. ponytail: nothing shows while a large
+ * file downloads for a hold; show "Opening…" on the held view if that wait confuses people.
  */
 function holdAction(
   attachment: Attachment,
