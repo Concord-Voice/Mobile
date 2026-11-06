@@ -151,8 +151,7 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   fun downloadAttachment(url: String, headers: ReadableMap, maxBytes: Double, promise: Promise) =
     run(promise, attachmentExecutor) {
       val named = headers.toHashMap().mapValues { it.value as? String ?: fail(Failure.INVALIDINPUT) }
-      if (!maxBytes.isFinite() || maxBytes < 1) fail(Failure.INVALIDINPUT)
-      val result = attachments.download(url, named, maxBytes.toLong())
+      val result = attachments.download(url, named, byteCap(maxBytes, 1))
       Arguments.createMap().apply {
         putString("id", result["id"] as String)
         putString("mimeType", result["mimeType"] as String?)
@@ -167,7 +166,10 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
       val key = service.store.symmetricCopy(channelKeyHandle)
       try {
         val result = attachments.decrypt(id, key, fileExtension)
-        Arguments.createMap().apply { putString("uri", result["uri"] as String) }
+        Arguments.createMap().apply {
+          putString("uri", result["uri"] as String)
+          putDouble("size", result["size"] as Double)
+        }
       } finally {
         key.fill(0)
       }
@@ -176,8 +178,7 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
   @ReactMethod
   fun readAttachmentText(uri: String, maxBytes: Double, promise: Promise) =
     run(promise, attachmentExecutor) {
-      if (!maxBytes.isFinite() || maxBytes < 0) fail(Failure.INVALIDINPUT)
-      attachments.readText(uri, maxBytes.toLong())
+      attachments.readText(uri, byteCap(maxBytes, 0))
     }
 
   @ReactMethod

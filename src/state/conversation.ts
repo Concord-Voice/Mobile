@@ -356,7 +356,11 @@ export class Conversation {
    * returns the plaintext file's URI. The key is the epoch the server names for the file,
    * else the current one, as on desktop.
    */
-  async openAttachment(a: Attachment, maxBytes: number): Promise<string> {
+  /** Downloads and decrypts one attachment; resolves to the plaintext file and its size. */
+  async openAttachment(
+    a: Attachment,
+    maxBytes: number,
+  ): Promise<{ uri: string; size: number }> {
     // Queued opens from a closed chat (or an expired session) never download.
     if (!this.isCurrent()) throw new Error('Conversation closed');
     const { url, headers } = await this.api.attachmentRequest(a.id);
@@ -364,12 +368,11 @@ export class Conversation {
     // ponytail: a failure before the decrypt leaves the ciphertext until sign-out or the next
     // launch empties the folder; it is still encrypted.
     const key = await this.keyFor(keyVersion(file.keyVersion) ?? 0);
-    const { uri } = await decryptAttachment(
+    return decryptAttachment(
       file.id,
       key,
       extension(a.mimeType || file.mimeType || ''),
     );
-    return uri;
   }
 
   /** Encrypts under the current key and sends; resolves once the server stores it. */

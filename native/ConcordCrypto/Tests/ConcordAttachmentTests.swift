@@ -162,6 +162,7 @@ final class ConcordAttachmentTests: XCTestCase {
     }
     for uri in [
       folder.appendingPathComponent("\(id).enc").absoluteString,
+      folder.appendingPathComponent("\(id).enc").absoluteString + "/.",
       folder.appendingPathComponent("../x").absoluteString, "https://h/a",
     ] {
       XCTAssertThrowsError(try files.readText(uri: uri, maxBytes: 8)) {

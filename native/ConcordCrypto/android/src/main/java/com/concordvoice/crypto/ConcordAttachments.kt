@@ -15,6 +15,15 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
+ * A byte cap from JavaScript as a whole number of at least [min], refused otherwise, as iOS's
+ * Int64(exactly:) refuses it. NaN and infinities fail the remainder test.
+ */
+internal fun byteCap(value: Double, min: Long): Long {
+  if (value % 1.0 != 0.0 || value < min || value >= Long.MAX_VALUE.toDouble()) fail(Failure.INVALIDINPUT)
+  return value.toLong()
+}
+
+/**
  * Desktop attachment files, matching client/desktop/src/renderer/utils/crypto/
  * attachmentChunkedCrypto.ts (v2 and v3 chunked envelopes) and attachmentCrypto.ts (legacy
  * single-shot blobs), and the iOS ConcordAttachment byte for byte. Decrypts file to file, one

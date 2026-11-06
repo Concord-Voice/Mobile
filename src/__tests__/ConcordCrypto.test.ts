@@ -215,16 +215,20 @@ describe('ConcordCrypto', () => {
     }
     expect(await decryptAttachment(HANDLE, key, 'png')).toEqual({
       uri: 'file:///c/a.png',
+      size: 12,
     });
     expect(module.decryptAttachment).toHaveBeenCalledWith(HANDLE, key, 'png');
-    // Plaintext is only ever a local file.
-    module.decryptAttachment.mockResolvedValueOnce({
-      uri: 'https://h/a',
-      size: 1,
-    });
-    await expect(decryptAttachment(HANDLE, key, 'png')).rejects.toThrow(
-      'Invalid native crypto output',
-    );
+    // Plaintext is only ever a local file, with a whole size.
+    for (const bad of [
+      { uri: 'https://h/a', size: 1 },
+      { uri: 'file:///c/a.png' },
+      { uri: 'file:///c/a.png', size: -1 },
+    ]) {
+      module.decryptAttachment.mockResolvedValueOnce(bad);
+      await expect(decryptAttachment(HANDLE, key, 'png')).rejects.toThrow(
+        'Invalid native crypto output',
+      );
+    }
     module.readAttachmentText = jest
       .fn()
       .mockResolvedValueOnce('hi')

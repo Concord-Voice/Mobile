@@ -280,12 +280,12 @@ export async function decryptAttachment(
   id: string,
   channelKey: KeyHandle,
   fileExtension: string,
-): Promise<{ uri: string }> {
+): Promise<{ uri: string; size: number }> {
   const value = await native().decryptAttachment(id, channelKey, fileExtension);
   const record = (value ?? {}) as Record<string, unknown>;
   if (typeof record.uri !== 'string' || !record.uri.startsWith('file://'))
     throw new Error('Invalid native crypto output');
-  return { uri: record.uri };
+  return { uri: record.uri, size: count(record.size) };
 }
 
 /** The text of a decrypted attachment file, at most `maxBytes`, decoded as UTF-8. */

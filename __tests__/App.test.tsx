@@ -336,7 +336,11 @@ function gifApi(auto: boolean | Error) {
   return { api, gif };
 }
 
-type OpenAttachment = (a: Attachment, limit: number) => Promise<string>;
+/** Resolves to the decrypted file, or to its URI when it is as large as the server said. */
+type OpenAttachment = (
+  a: Attachment,
+  limit: number,
+) => Promise<string | { uri: string; size: number }>;
 
 function chatWith(
   lines: ChatLine[],
@@ -351,7 +355,12 @@ function chatWith(
     start: jest.fn(async () => {}),
     send: jest.fn(async () => {}),
     close: jest.fn(),
-    openAttachment,
+    openAttachment: async (a: Attachment, limit: number) => {
+      const opened = await openAttachment(a, limit);
+      return typeof opened === 'string'
+        ? { uri: opened, size: a.fileSize }
+        : opened;
+    },
   };
 }
 
@@ -750,6 +759,21 @@ test('keeps at most 256 MiB of opened files, deleting the oldest', async () => {
   expect(nativeFiles.deleteAttachment.mock.calls).toEqual([['file:///c/q1']]);
 });
 
+test("counts opened files by their decrypted size, not the server's", async () => {
+  // Each photo claims 1 B but decrypts to 100 MiB: the third still evicts the first.
+  const openAttachment = jest.fn(async (a: Attachment) => ({
+    uri: `file:///c/${a.id}`,
+    size: 100 * MIB,
+  }));
+  const { show } = await chatWithFiles(
+    ['q1', 'q2', 'q3'].map(id => file(id, 'photo', 1, 'image/png')),
+    openAttachment,
+  );
+  await show();
+  expect(openAttachment).toHaveBeenCalledTimes(3);
+  expect(nativeFiles.deleteAttachment.mock.calls).toEqual([['file:///c/q1']]);
+});
+
 test('opens files through the native share sheet on Android', async () => {
   jest.replaceProperty(Platform, 'OS', 'android');
   const failures = [
@@ -790,55 +814,116 @@ test('opens files through the native share sheet on Android', async () => {
 });
 
 test('previews text and Markdown files, collapsed, as plain text', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
   const long = Array.from({ length: 12 }, (_, i) => `# line ${i}`).join('\n');
+  const wide = 'word '.repeat(60);
+  const huge = 'x'.repeat(70 * 1024);
   texts.set('file:///c/long', long);
   texts.set('file:///c/short', 'hi');
+  texts.set('file:///c/wide', wide);
+  texts.set('file:///c/huge', huge);
   const { readAttachmentText } = nativeFiles;
-  const openAttachment = jest.fn(async (a: Attachment) => `file:///c/${a.id}`);
+  const openAttachment = jest.fn(async (a: Attachment) => {
+    if (a.id === 'gone') throw new Error('offline');
+    return `file:///c/${a.id}`;
+  });
+  try {
+    const { tree, show } = await chatWithFiles(
+      [
+        file('long', 'file', 2048, 'text/markdown; charset=utf-8'),
+        file('short', 'file', 2, 'text/plain'),
+        file('bad', 'file', 3, 'text/plain'),
+        file('big', 'file', 2 * MIB, 'text/plain'),
+        file('wide', 'file', 300, 'text/plain'),
+        file('huge', 'file', 70 * 1024, 'text/plain'),
+        file('gone', 'file', 4, 'text/plain'),
+      ],
+      openAttachment,
+    );
+    // Only a name and size until the message is on screen.
+    expect(text(tree)).toContain('File, 2.0 KB');
+    expect(openAttachment).not.toHaveBeenCalled();
+    await show();
+    // Text up to 1 MiB preloads; a larger file waits for a tap like any other.
+    expect(openAttachment.mock.calls.map(([a]) => a.id)).toEqual([
+      'long',
+      'short',
+      'bad',
+      'wide',
+      'huge',
+      'gone',
+    ]);
+    expect(openAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'long' }),
+      MIB + 4096,
+    );
+    expect(readAttachmentText).toHaveBeenCalledWith('file:///c/long', MIB);
+    const preview = (shown: string) =>
+      tree.root
+        .findAllByType('Text' as never)
+        .find(n => n.props.children === shown);
+    // Markdown shows as written, collapsed to nine lines, under the file's own card.
+    expect(preview(long)?.props.numberOfLines).toBe(9);
+    expect(text(tree)).toContain(`File, 2.0 KB|Tap to open|${long}`);
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Expand (2.0 KB)').props.onPress(),
+    );
+    expect(preview(long)?.props.numberOfLines).toBeUndefined();
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Collapse').props.onPress(),
+    );
+    expect(preview(long)?.props.numberOfLines).toBe(9);
+    // The card opens the whole file from the copy already decrypted.
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'File, 2.0 KB').props.onPress(),
+    );
+    expect(share).toHaveBeenCalledWith({ url: 'file:///c/long' });
+    expect(
+      openAttachment.mock.calls.filter(([a]) => a.id === 'long'),
+    ).toHaveLength(1);
+    const shown = text(tree);
+    // Short text needs no toggle; an unreadable or undownloadable one is only a card.
+    expect(shown).toContain('File, 2 B|Tap to open|hi');
+    expect(shown).not.toContain('Expand (2 B)');
+    expect(shown).toContain('File, 3 B|Tap to open');
+    expect(shown).toContain('File, 4 B|Tap to open');
+    expect(shown).toContain('File, 2.0 MB|Tap to open');
+    // One line that wraps still gets a toggle.
+    expect(shown).toContain('Expand (300 B)');
+    // A long file hands layout only a bounded slice, collapsed or expanded.
+    expect(preview(huge.slice(0, 2048))?.props.numberOfLines).toBe(9);
+    await ReactTestRenderer.act(async () =>
+      button(tree, 'Expand (70.0 KB)').props.onPress(),
+    );
+    expect(preview(huge.slice(0, 64 * 1024))).toBeDefined();
+    expect(text(tree)).toContain(
+      'Showing the first 64 KB. Open the file for the rest.',
+    );
+  } finally {
+    share.mockRestore();
+  }
+});
+
+test('reads no text once the chat has closed', async () => {
+  let finish!: () => void;
+  texts.set('file:///c/slow', 'secret');
+  const openAttachment = jest.fn(async (a: Attachment) => {
+    await new Promise<void>(resolve => {
+      finish = resolve;
+    });
+    return `file:///c/${a.id}`;
+  });
   const { tree, show } = await chatWithFiles(
-    [
-      file('long', 'file', 2048, 'text/markdown; charset=utf-8'),
-      file('short', 'file', 2, 'text/plain'),
-      file('bad', 'file', 3, 'text/plain'),
-      file('big', 'file', 2 * MIB, 'text/plain'),
-    ],
+    [file('slow', 'file', 6, 'text/plain')],
     openAttachment,
   );
-  // Only a name and size until the message is on screen.
-  expect(text(tree)).toContain('File, 2.0 KB');
-  expect(openAttachment).not.toHaveBeenCalled();
   await show();
-  // Text up to 1 MiB preloads; a larger file waits for a tap like any other.
-  expect(openAttachment.mock.calls.map(([a]) => a.id)).toEqual([
-    'long',
-    'short',
-    'bad',
-  ]);
-  expect(openAttachment).toHaveBeenCalledWith(
-    expect.objectContaining({ id: 'long' }),
-    MIB + 4096,
-  );
-  expect(readAttachmentText).toHaveBeenCalledWith('file:///c/long', MIB);
-  const preview = () =>
-    tree.root.findAll(
-      n => n.props.children === long && n.props.numberOfLines !== null,
-    )[0];
-  // Markdown shows as written, collapsed to nine lines.
-  expect(preview().props.numberOfLines).toBe(9);
-  await ReactTestRenderer.act(async () =>
-    button(tree, 'Expand (2.0 KB)').props.onPress(),
-  );
-  expect(preview().props.numberOfLines).toBeUndefined();
-  await ReactTestRenderer.act(async () =>
-    button(tree, 'Collapse').props.onPress(),
-  );
-  expect(preview().props.numberOfLines).toBe(9);
-  const shown = text(tree);
-  // Short text needs no toggle; an unreadable one becomes a card that can be tapped.
-  expect(shown).toContain('hi');
-  expect(shown).not.toContain('Expand (2 B)');
-  expect(shown).toContain('File, 3 B|Tap to open');
-  expect(shown).toContain('File, 2.0 MB|Tap to open');
+  expect(openAttachment).toHaveBeenCalledTimes(1);
+  await ReactTestRenderer.act(async () => tree.unmount());
+  await ReactTestRenderer.act(async () => finish());
+  expect(nativeFiles.readAttachmentText).not.toHaveBeenCalled();
 });
 
 test('holds animation for a tap while the phone asks for reduced motion', async () => {
