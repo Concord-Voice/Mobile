@@ -86,8 +86,13 @@ class ConcordCryptoModule(private val context: ReactApplicationContext) : ReactC
 
   override fun getName() = "ConcordCryptoModule"
 
-  /** A JS reload or teardown drops every key handle and stops the crypto thread. */
+  /**
+   * A JS reload or teardown drops every key handle and stops the crypto thread. A save still
+   * waiting on the picker settles as cancelled, since its result would reach no one.
+   */
   override fun invalidate() {
+    saving?.second?.resolve(false)
+    saving = null
     executor.shutdownNow()
     attachmentExecutor.shutdownNow()
     service.store.releaseAll()

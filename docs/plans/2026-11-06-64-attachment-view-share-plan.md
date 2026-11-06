@@ -89,7 +89,7 @@ the URI with the existing attachment-folder check.
     `onAccessibilityAction`. It is spread on every attachment Pressable, and wraps the inline
     image and video;
   - `holdAction(attachment, openFile)`, which opens the file up to 256 MiB, holds it while
-    sharing, runs one hold at a time, and on Android shows the two-item menu first;
+    sharing, runs one hold per attachment at a time, and on Android shows the two-item menu first;
   - `FileCard`, which previews on iOS and shows the hint on Android;
   - `VideoView`'s new failure text and prompt copy;
   - a `TextPreview` label that expands on a tap.

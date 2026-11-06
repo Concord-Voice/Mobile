@@ -220,8 +220,13 @@ final class ConcordCryptoModule: NSObject {
   ) {
     // Cancelled first, off the queue: a running download would otherwise hold the clear back.
     service.attachments.cancel()
-    // At sign-out the previewer goes too, so no file it already loaded stays on screen.
-    DispatchQueue.main.async { self.shown?.dismiss(animated: false) }
+    // At sign-out the previewer goes too, so no file it already loaded stays on screen. A
+    // dismissal in code skips the delegate, so the references are dropped here.
+    DispatchQueue.main.async {
+      self.shown?.dismiss(animated: false)
+      self.shown = nil
+      self.preview = nil
+    }
     run(resolve, reject, on: attachmentQueue) {
       self.service.attachments.clear()
       return NSNull()

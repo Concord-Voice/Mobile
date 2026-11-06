@@ -792,6 +792,32 @@ test('a hold while a file downloads shares that download, once', async () => {
   }
 });
 
+test('a share that never ends blocks holds on that file only', async () => {
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockReturnValueOnce(new Promise(() => {}))
+    .mockResolvedValue({ action: 'sharedAction', activityType: undefined });
+  try {
+    const { tree, show } = await chatWithFiles(
+      // Ids no other test uses: the held one stays held for the rest of the run.
+      [
+        file('stuck', 'file', 1024, 'application/pdf'),
+        file('free', 'file', 2048, 'application/pdf'),
+      ],
+      async (a: Attachment) => `file:///c/${a.id}`,
+    );
+    await show();
+    await hold(tree, 'File, 1.0 KB');
+    await hold(tree, 'File, 1.0 KB');
+    expect(share.mock.calls).toEqual([[{ url: 'file:///c/stuck' }]]);
+    await hold(tree, 'File, 2.0 KB');
+    expect(share).toHaveBeenLastCalledWith({ url: 'file:///c/free' });
+    expect(share).toHaveBeenCalledTimes(2);
+  } finally {
+    share.mockRestore();
+  }
+});
+
 test('explains a failed photo, retries it, and opens oversized ones from a card', async () => {
   const share = jest
     .spyOn(Share, 'share')

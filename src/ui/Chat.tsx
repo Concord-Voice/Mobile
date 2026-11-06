@@ -309,14 +309,17 @@ function shareOrSaveMenu(label: string): Promise<'share' | 'save' | null> {
   );
 }
 
-/** True from a hold until its share or save ends, so a second hold can't stack a sheet. */
-let holding = false;
+/**
+ * The attachments held until their share or save ends, so a second hold can't stack a
+ * sheet. Per attachment, so one hold that never settles can't block every other one.
+ */
+const holding = new Set<string>();
 
 /**
  * The hold action for an attachment, or none past what the phone opens. It downloads and
  * decrypts the file if it is not open yet, then shares it: the share sheet on iOS, a menu of
- * share or save on Android (asked first, so a cancel downloads nothing). Holds while one is
- * running are ignored. ponytail: nothing shows while a large file downloads for a hold; show
+ * share or save on Android (asked first, so a cancel downloads nothing). A hold on an
+ * attachment whose hold is still running is ignored. ponytail: nothing shows while a large file downloads for a hold; show
  * "Opening…" on the held view if that wait confuses people.
  */
 function holdAction(
@@ -326,8 +329,8 @@ function holdAction(
   if (attachment.fileSize > OPEN_LIMIT) return undefined;
   const label = attachmentLabel(attachment);
   return () => {
-    if (holding) return;
-    holding = true;
+    if (holding.has(attachment.id)) return;
+    holding.add(attachment.id);
     (async () => {
       const choice =
         Platform.OS === 'ios' ? 'share' : await shareOrSaveMenu(label);
@@ -351,7 +354,7 @@ function holdAction(
         );
       })
       .finally(() => {
-        holding = false;
+        holding.delete(attachment.id);
       });
   };
 }
