@@ -28,6 +28,7 @@ jest.mock('../ConcordCrypto', () => ({
   })),
   decryptAttachment: jest.fn(async (id: string, key: string, ext: string) => ({
     uri: `file:///c/${id}.${ext}#${key}`,
+    size: 12,
   })),
 }));
 const crypto = jest.requireMock('../ConcordCrypto') as Record<
@@ -216,9 +217,10 @@ test('opens an attachment under the epoch the server names for it', async () => 
     mimeType,
   });
   // The epoch header picks the key; the sender's MIME type picks the extension.
-  expect(await conv.openAttachment(file('image/png'), 99)).toBe(
-    'file:///c/F.png#Kw1',
-  );
+  expect(await conv.openAttachment(file('image/png'), 99)).toEqual({
+    uri: 'file:///c/F.png#Kw1',
+    size: 12,
+  });
   expect(api.attachmentRequest).toHaveBeenCalledWith('a1');
   expect(crypto.downloadAttachment).toHaveBeenCalledWith(
     'https://x/media/attachments/a1',
@@ -232,13 +234,15 @@ test('opens an attachment under the epoch the server names for it', async () => 
     mimeType: 'application/pdf',
     keyVersion: null,
   });
-  expect(await conv.openAttachment(file('Text/Plain; charset=utf-8'), 99)).toBe(
-    'file:///c/F.txt#Kw2',
-  );
-  expect(await conv.openAttachment(file('application/x-thing'), 99)).toBe(
+  expect(
+    (await conv.openAttachment(file('Text/Plain; charset=utf-8'), 99)).uri,
+  ).toBe('file:///c/F.txt#Kw2');
+  expect((await conv.openAttachment(file('application/x-thing'), 99)).uri).toBe(
     'file:///c/F.bin#Kw2',
   );
-  expect(await conv.openAttachment(file(''), 99)).toBe('file:///c/F.pdf#Kw2');
+  expect((await conv.openAttachment(file(''), 99)).uri).toBe(
+    'file:///c/F.pdf#Kw2',
+  );
   // A malformed epoch fails before anything is decrypted, as on desktop.
   crypto.decryptAttachment.mockClear();
   for (const keyVersion of ['0', '01x', '9007199254740993']) {

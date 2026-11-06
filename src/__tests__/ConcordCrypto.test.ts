@@ -16,6 +16,7 @@ import {
   nativeErrorCode,
   persistIdentity,
   randomId,
+  readAttachmentText,
   releaseAll,
   releaseKey,
   saveSession,
@@ -214,14 +215,30 @@ describe('ConcordCrypto', () => {
     }
     expect(await decryptAttachment(HANDLE, key, 'png')).toEqual({
       uri: 'file:///c/a.png',
+      size: 12,
     });
     expect(module.decryptAttachment).toHaveBeenCalledWith(HANDLE, key, 'png');
-    // Plaintext is only ever a local file.
-    module.decryptAttachment.mockResolvedValueOnce({
-      uri: 'https://h/a',
-      size: 1,
-    });
-    await expect(decryptAttachment(HANDLE, key, 'png')).rejects.toThrow(
+    // Plaintext is only ever a local file, with a whole size.
+    for (const bad of [
+      { uri: 'https://h/a', size: 1 },
+      { uri: 'file:///c/a.png' },
+      { uri: 'file:///c/a.png', size: -1 },
+    ]) {
+      module.decryptAttachment.mockResolvedValueOnce(bad);
+      await expect(decryptAttachment(HANDLE, key, 'png')).rejects.toThrow(
+        'Invalid native crypto output',
+      );
+    }
+    module.readAttachmentText = jest
+      .fn()
+      .mockResolvedValueOnce('hi')
+      .mockResolvedValueOnce(7);
+    expect(await readAttachmentText('file:///c/a.txt', 10)).toBe('hi');
+    expect(module.readAttachmentText).toHaveBeenCalledWith(
+      'file:///c/a.txt',
+      10,
+    );
+    await expect(readAttachmentText('file:///c/a.txt', 10)).rejects.toThrow(
       'Invalid native crypto output',
     );
     await clearAttachments();

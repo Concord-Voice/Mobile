@@ -98,15 +98,19 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   load on tap or the phone asks for reduced motion. A photo over 24 megapixels opens from
   a card instead, because Android cannot draw it. A failed photo says why and tries again
   on a tap. Other files show their kind and size and download only when tapped, up to
-  256 MiB, then open in the share sheet, typed by the file's extension. The ciphertext
-  downloads natively (https only, no redirects, capped in bytes and at 30 minutes) and
-  never enters JavaScript. Attachments decrypt with the key epoch the server names in
-  `X-File-Key-Version`, else the current one. Plaintext lands in the app's cache folder,
-  which is emptied at sign-out (cancelling a running download), at session expiry and at
-  every launch; a failed decrypt leaves none behind. The app keeps up to 256 MiB of
-  opened files and deletes the oldest past that. A file is reused only in the chat that
-  opened it. Not yet: older pages, starting a new DM, starting a key rotation,
-  edits, reactions, text previews, video playback and automatic reconnect.
+  256 MiB, then open in the share sheet, typed by the file's extension, except
+  `text/plain` and `text/markdown` files up to 1 MiB, which preload into a nine-line
+  preview under their file card. The preview expands to at most 64 KB, and the card
+  opens the whole file; one that cannot be read shows only the card. Both show as plain
+  text, never rendered as Markdown. The ciphertext downloads natively (https only, no
+  redirects, capped in bytes and at 30 minutes) and never enters JavaScript. Attachments
+  decrypt with the key epoch the server names in `X-File-Key-Version`, else the current
+  one. Plaintext lands in the app's cache folder, which is emptied at sign-out
+  (cancelling a running download), at session expiry and at every launch; a failed
+  decrypt leaves none behind. The app keeps up to 256 MiB of opened files, counted from
+  the decrypted files rather than the server's sizes, and deletes the oldest past that.
+  A file is reused only in the chat that opened it. Not yet: older pages, starting a new
+  DM, starting a key rotation, edits, reactions, video playback and automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token, session id, user id) in a device-only Keychain item readable after
@@ -235,9 +239,10 @@ The Android crypto module is still absent: the real adapter must refuse it with
 A copy of the runtime APK is signed with an isolated disposable test key, which
 supplies no production signing or trusted-install evidence.
 
-The host runners bound device boot to 5 minutes, runtime observation to 3 minutes,
-native XCTest to 10 minutes and each runtime build to 20 minutes. Only the
-isolated XCTest action enables module testability for its Release product copy;
+The host runners bound simulator boot to 10 minutes, emulator boot to 5 minutes,
+runtime observation to 3 minutes, native XCTest to 10 minutes and each runtime
+build to 20 minutes. Only the isolated XCTest action enables module testability
+for its Release product copy;
 ordinary Release application builds keep their existing settings. They stop/delete
 only the simulator/emulator, AVD and test key they created. Uploaded artifacts are
 limited to version/digest/source metadata, fixed case booleans, sanitized test IDs

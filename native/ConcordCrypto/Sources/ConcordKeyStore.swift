@@ -241,8 +241,19 @@ public final class ConcordAttachmentFiles {
     }
     let output = directory.appendingPathComponent("\(id).\(fileExtension)")
     try ConcordAttachment.decrypt(at: input, to: output, key: key)
-    let size = try FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber
-    return ["uri": output.absoluteString, "size": size ?? NSNumber(value: 0)]
+    // The app's cache counts this size, so a file without one is not handed back.
+    guard let size = try FileManager.default.attributesOfItem(atPath: output.path)[.size] as? NSNumber
+    else { throw ConcordCryptoError.notFound }
+    return ["uri": output.absoluteString, "size": size]
+  }
+
+  /// The text of a plaintext file this class wrote, at most `maxBytes`, as UTF-8. Invalid bytes
+  /// become U+FFFD, as desktop's TextDecoder does.
+  public func readText(uri: String, maxBytes: Int64) throws -> String {
+    let file = try plaintext(uri)
+    let size = try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber
+    guard let size, size.int64Value <= maxBytes else { throw ConcordCryptoError.tooLarge }
+    return String(decoding: try Data(contentsOf: file), as: UTF8.self)
   }
 
   /// Deletes every attachment file, ciphertext and plaintext.
@@ -279,11 +290,12 @@ public final class ConcordAttachmentFiles {
 
   /// The plaintext file behind a URI `decrypt` returned; anything else is refused.
   private func plaintext(_ uri: String) throws -> URL {
-    guard let url = URL(string: uri), url.isFileURL, url.pathExtension != "enc" else {
-      throw ConcordCryptoError.invalidInput
-    }
+    guard let url = URL(string: uri), url.isFileURL else { throw ConcordCryptoError.invalidInput }
+    // Checked after standardizing, which turns "<id>.enc/." into "<id>.enc".
     let file = url.standardizedFileURL
-    guard file.deletingLastPathComponent().path == directory.standardizedFileURL.path else {
+    guard file.pathExtension != "enc",
+      file.deletingLastPathComponent().path == directory.standardizedFileURL.path
+    else {
       throw ConcordCryptoError.invalidInput
     }
     return file

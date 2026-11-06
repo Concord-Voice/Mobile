@@ -25,6 +25,7 @@ import {
   attachmentImageSize,
   deleteAttachment,
   nativeErrorCode,
+  readAttachmentText,
   shareAttachment,
 } from '../ConcordCrypto';
 import type {
@@ -226,6 +227,16 @@ const OVERHEAD = 4096;
  * per-format limits if larger JPEG photos need to show inline.
  */
 const MAX_PIXELS = 24_000_000;
+/** Text and Markdown files up to this preload into a collapsed preview. */
+const TEXT_LIMIT = MIB;
+const TEXT_TYPES = new Set(['text/plain', 'text/markdown']);
+/** Lines a collapsed text preview shows. */
+const PREVIEW_LINES = 9;
+/** Characters a collapsed preview hands to layout, and the most an expanded one shows. */
+const COLLAPSED_CHARS = 2048;
+const EXPANDED_CHARS = 64 * 1024;
+/** A narrow guess at characters per line, so a line that wraps counts as several. */
+const LINE_CHARS = 25;
 
 type OpenFile = (a: Attachment, limit: number) => Promise<string>;
 
@@ -281,6 +292,15 @@ function AttachmentView({
     // The header's size ignores EXIF rotation, so the shape still comes from the loaded image.
     return { uri };
   }, [openFile, attachment]);
+  const mime = attachment.mimeType.split(';')[0].trim().toLowerCase();
+  if (TEXT_TYPES.has(mime) && fileSize <= TEXT_LIMIT)
+    return (
+      <TextPreview
+        attachment={attachment}
+        openFile={openFile}
+        visible={visible}
+      />
+    );
   if (
     (fileType === 'photo' || fileType === 'animated') &&
     fileSize <= OPEN_LIMIT &&
@@ -300,6 +320,92 @@ function AttachmentView({
     );
   }
   return <FileCard attachment={attachment} openFile={openFile} />;
+}
+
+/**
+ * Whether text may need more than the collapsed lines. ponytail: a guess from line lengths that
+ * errs towards showing Expand; measure the laid-out text if a needless Expand bothers anyone.
+ */
+function overflows(text: string): boolean {
+  if (text.length > COLLAPSED_CHARS) return true;
+  let lines = 0;
+  for (const line of text.split('\n')) {
+    lines += Math.max(1, Math.ceil(line.length / LINE_CHARS));
+    if (lines > PREVIEW_LINES) return true;
+  }
+  return false;
+}
+
+/**
+ * A text or Markdown file, preloaded once on screen into a collapsed preview under its file card,
+ * which opens the whole file. Both show as plain text, and an expanded preview stops at 64 KB.
+ * If it cannot be read, only the card shows.
+ */
+function TextPreview({
+  attachment,
+  openFile,
+  visible,
+}: Readonly<{ attachment: Attachment; openFile: OpenFile; visible: boolean }>) {
+  const [preview, setPreview] = useState<{
+    text: string;
+    long: boolean;
+  } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!visible) return;
+    let live = true;
+    openFile(attachment, TEXT_LIMIT + OVERHEAD)
+      .then(uri => {
+        // Gone from the screen: the plaintext stays in its file, not in JavaScript.
+        if (!live) throw new Error('Closed');
+        return readAttachmentText(uri, TEXT_LIMIT);
+      })
+      .then(
+        read => {
+          if (live) setPreview({ text: read, long: overflows(read) });
+        },
+        () => {
+          if (live) setFailed(true);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [visible, openFile, attachment]);
+  if (failed) return <FileCard attachment={attachment} openFile={openFile} />;
+  if (preview === null)
+    return <Text style={styles.attachment}>{attachmentLabel(attachment)}</Text>;
+  const { text, long } = preview;
+  return (
+    <View>
+      <FileCard attachment={attachment} openFile={openFile} />
+      <Text
+        style={styles.text}
+        selectable
+        numberOfLines={expanded ? undefined : PREVIEW_LINES}
+      >
+        {text.slice(0, expanded ? EXPANDED_CHARS : COLLAPSED_CHARS)}
+      </Text>
+      {expanded && text.length > EXPANDED_CHARS ? (
+        <Text style={styles.hint}>
+          Showing the first 64 KB. Open the file for the rest.
+        </Text>
+      ) : null}
+      {long ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setExpanded(open => !open)}
+        >
+          <Text style={styles.hint}>
+            {expanded
+              ? 'Collapse'
+              : `Expand (${formatSize(attachment.fileSize)})`}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
 
 /** A file that waits for a tap, then downloads, decrypts and opens the share sheet. */
@@ -341,13 +447,16 @@ const KINDS = new Map([
   ['audio', 'Audio'],
 ]);
 
+/** "2.0 KB": 1024-based with one decimal, as desktop's formatFileSize. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < MIB) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / MIB).toFixed(1)} MB`;
+}
+
 /** "Photo, 2.0 KB": what the attachment is, before anything is downloaded. */
 function attachmentLabel({ fileType, fileSize }: Attachment): string {
-  const kind = KINDS.get(fileType) ?? 'File';
-  if (fileSize < 1024) return `${kind}, ${fileSize} B`;
-  if (fileSize < 1024 * 1024)
-    return `${kind}, ${(fileSize / 1024).toFixed(1)} KB`;
-  return `${kind}, ${(fileSize / 1024 / 1024).toFixed(1)} MB`;
+  return `${KINDS.get(fileType) ?? 'File'}, ${formatSize(fileSize)}`;
 }
 
 // One attachment downloads at a time, each with fresh headers when its turn comes. Opened
@@ -356,7 +465,7 @@ function attachmentLabel({ fileType, fileSize }: Attachment): string {
 let attachmentQueue: Promise<unknown> = Promise.resolve();
 type Opened = { open: Promise<string>; size: number };
 const openedFiles = new WeakMap<ConcordApi, Map<string, Opened>>();
-/** Decrypted bytes kept at once, as on desktop. Sizes are the server's, from the upload. */
+/** Decrypted bytes kept at once, as on desktop, counted from the files rather than the server. */
 const KEEP_BYTES = 256 * MIB;
 
 function openCached(
@@ -377,25 +486,32 @@ function openCached(
   const key = `${chat}:${a.id}`;
   const known = files.get(key);
   if (known) return known.open;
-  const open = attachmentQueue.then(() =>
+  const file = attachmentQueue.then(() =>
     conversation.openAttachment(a, limit),
   );
-  attachmentQueue = open.catch(() => {});
-  files.set(key, { open, size: a.fileSize });
-  let kept = 0;
-  for (const file of files.values()) kept += file.size;
-  // Map order is insertion order, so the first entries are the oldest; the new one stays.
-  for (const [old, file] of files) {
-    if (kept <= KEEP_BYTES || old === key) break;
-    files.delete(old);
-    kept -= file.size;
-    file.open.then(deleteAttachment).catch(() => {});
-  }
-  // A failure is forgotten, so a tap tries again.
-  open.catch(() => {
-    if (files.get(key)?.open === open) files.delete(key);
-  });
-  return open;
+  attachmentQueue = file.catch(() => {});
+  const entry: Opened = { open: file.then(f => f.uri), size: 0 };
+  files.set(key, entry);
+  file.then(
+    ({ size }) => {
+      // Opens finish in queue order, so every earlier entry already has its size.
+      entry.size = size;
+      let kept = 0;
+      for (const other of files.values()) kept += other.size;
+      // Map order is insertion order, so the first entries are the oldest; this one stays.
+      for (const [old, other] of files) {
+        if (kept <= KEEP_BYTES || other === entry) break;
+        files.delete(old);
+        kept -= other.size;
+        other.open.then(deleteAttachment).catch(() => {});
+      }
+    },
+    // A failure is forgotten, so a tap tries again.
+    () => {
+      if (files.get(key) === entry) files.delete(key);
+    },
+  );
+  return entry.open;
 }
 
 /** The phone's reduce-motion setting, live. */

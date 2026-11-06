@@ -15,6 +15,15 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
+ * A byte cap from JavaScript as a whole number of at least [min], refused otherwise, as iOS's
+ * Int64(exactly:) refuses it. NaN and infinities fail the remainder test.
+ */
+internal fun byteCap(value: Double, min: Long): Long {
+  if (value % 1.0 != 0.0 || value < min || value >= Long.MAX_VALUE.toDouble()) fail(Failure.INVALIDINPUT)
+  return value.toLong()
+}
+
+/**
  * Desktop attachment files, matching client/desktop/src/renderer/utils/crypto/
  * attachmentChunkedCrypto.ts (v2 and v3 chunked envelopes) and attachmentCrypto.ts (legacy
  * single-shot blobs), and the iOS ConcordAttachment byte for byte. Decrypts file to file, one
@@ -243,6 +252,16 @@ class ConcordAttachmentFiles(
     } finally {
       input.delete()
     }
+  }
+
+  /**
+   * The text of a plaintext file this class wrote, at most [maxBytes], as UTF-8. Invalid bytes
+   * become U+FFFD, as desktop's TextDecoder does.
+   */
+  fun readText(uri: String, maxBytes: Long): String {
+    val file = fileFor(uri) ?: fail(Failure.INVALIDINPUT)
+    if (file.length() > maxBytes) fail(Failure.TOOLARGE)
+    return file.readBytes().toString(Charsets.UTF_8)
   }
 
   /** Deletes every attachment file, ciphertext and plaintext. */

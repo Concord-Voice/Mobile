@@ -137,7 +137,7 @@ class ConcordAttachmentTest {
     File(folder, "$id.png").writeBytes(ByteArray(1))
     File(folder, "$id.enc").writeBytes(ByteArray(1))
     assertEquals(File(folder, "$id.png").canonicalFile, files.fileFor("file://${folder.absolutePath}/$id.png"))
-    for (uri in listOf("file://${folder.absolutePath}/$id.enc", "file://${folder.absolutePath}/../x", "https://h/a")) {
+    for (uri in listOf("file://${folder.absolutePath}/$id.enc", "file://${folder.absolutePath}/$id.enc/.", "file://${folder.absolutePath}/../x", "https://h/a")) {
       assertEquals(null, files.fileFor(uri))
       expect(Failure.INVALIDINPUT) { files.delete(uri) }
     }
@@ -145,6 +145,20 @@ class ConcordAttachmentTest {
     files.delete("file://${folder.absolutePath}/$id.png")
     assertFalse(File(folder, "$id.png").exists())
     assertTrue(File(folder, "$id.enc").exists())
+  }
+
+  @Test fun readsTextOnlyFromItsOwnPlaintextFiles() {
+    val files = ConcordAttachmentFiles(folder)
+    val id = java.util.UUID.randomUUID().toString().uppercase()
+    // Invalid UTF-8 becomes U+FFFD, as with desktop's TextDecoder.
+    File(folder, "$id.txt").writeBytes("héllo\n".toByteArray() + byteArrayOf(0xff.toByte()))
+    File(folder, "$id.enc").writeBytes(ByteArray(1))
+    val uri = "file://${folder.absolutePath}/$id.txt"
+    assertEquals("héllo\n\uFFFD", files.readText(uri, 8))
+    expect(Failure.TOOLARGE) { files.readText(uri, 7) }
+    for (bad in listOf("file://${folder.absolutePath}/$id.enc", "file://${folder.absolutePath}/../x", "https://h/a")) {
+      expect(Failure.INVALIDINPUT) { files.readText(bad, 8) }
+    }
   }
 
   @Test fun legacyBlobsOverTheCapAreRefused() {
@@ -205,5 +219,14 @@ class ConcordAttachmentTest {
     }
     // Nothing is left behind by a refused download.
     assertEquals(emptyList<String>(), folder.list()?.toList() ?: emptyList<String>())
+  }
+
+  @Test
+  fun byteCapsAreWholeNumbersInRange() {
+    assertEquals(0L, byteCap(0.0, 0))
+    assertEquals(1_048_576L, byteCap(1_048_576.0, 1))
+    for (bad in listOf(-1.0, 0.0, 1.5, Double.NaN, Double.POSITIVE_INFINITY, Long.MAX_VALUE.toDouble())) {
+      expect(Failure.INVALIDINPUT) { byteCap(bad, 1) }
+    }
   }
 }
