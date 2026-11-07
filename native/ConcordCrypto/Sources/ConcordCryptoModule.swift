@@ -1,4 +1,5 @@
 import Foundation
+import QuickLook
 import React
 
 /// React Native bridge for ConcordCryptoService. Errors reject with a stable code only, never
@@ -11,6 +12,9 @@ final class ConcordCryptoModule: NSObject {
   // Attachments get their own serial queue: one download or decrypt at a time, and a large
   // file never holds up message crypto.
   private let attachmentQueue = DispatchQueue(label: "com.concordvoice.mobile.attachments")
+  // The previewer on screen and its data source, kept alive while it shows; main queue only.
+  private weak var shown: QLPreviewController?
+  private var preview: AttachmentPreview?
 
   override init() {
     super.init()
@@ -216,6 +220,13 @@ final class ConcordCryptoModule: NSObject {
   ) {
     // Cancelled first, off the queue: a running download would otherwise hold the clear back.
     service.attachments.cancel()
+    // At sign-out the previewer goes too, so no file it already loaded stays on screen. A
+    // dismissal in code skips the delegate, so the references are dropped here.
+    DispatchQueue.main.async {
+      self.shown?.dismiss(animated: false)
+      self.shown = nil
+      self.preview = nil
+    }
     run(resolve, reject, on: attachmentQueue) {
       self.service.attachments.clear()
       return NSNull()
@@ -227,6 +238,38 @@ final class ConcordCryptoModule: NSObject {
     reject: @escaping RCTPromiseRejectBlock
   ) {
     run(resolve, reject, on: attachmentQueue) { try self.service.attachments.imageSize(uri: uri) }
+  }
+
+  /// Shows a decrypted attachment in the system previewer, inside the app, at the user's tap.
+  /// Resolves false only when the file can't be previewed. True otherwise: once it is on screen,
+  /// or when nothing can show it now (a previewer is already open, or the screen is changing),
+  /// so the card goes back to its hint and a later tap can try again.
+  @objc func previewAttachment(
+    _ uri: String, resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    // The same check as reads and deletes: only a file this module decrypted.
+    guard let file = try? service.attachments.plaintext(uri) else {
+      return reject("E_CONCORD_CRYPTO_INVALIDINPUT", "Crypto operation failed", nil)
+    }
+    DispatchQueue.main.async {
+      guard QLPreviewController.canPreview(file as NSURL) else { return resolve(false) }
+      // UIKit drops a presentation from a controller that is leaving or already presenting,
+      // without calling back, so those cases resolve here instead.
+      guard self.shown == nil, let host = RCTPresentedViewController(),
+        host.viewIfLoaded?.window != nil, !host.isBeingDismissed, host.presentedViewController == nil
+      else { return resolve(true) }
+      // ponytail: nothing holds the file in the app's cache while it shows; hold it from JS until
+      // the previewer closes if 256 MiB of other opens behind it ever evict one.
+      let preview = AttachmentPreview(file) { [weak self] in self?.preview = nil }
+      self.preview = preview
+      let controller = QLPreviewController()
+      controller.dataSource = preview
+      controller.delegate = preview
+      self.shown = controller
+      host.present(controller, animated: true)
+      resolve(true)
+    }
   }
 
   @objc func deleteAttachment(
@@ -245,4 +288,25 @@ final class ConcordCryptoModule: NSObject {
   ) {
     resolve(UUID().uuidString.lowercased())
   }
+}
+
+/// The previewer's one item. It drops itself once the previewer closes.
+private final class AttachmentPreview: NSObject, QLPreviewControllerDataSource,
+  QLPreviewControllerDelegate
+{
+  private let file: URL
+  private let closed: () -> Void
+
+  init(_ file: URL, closed: @escaping () -> Void) {
+    self.file = file
+    self.closed = closed
+  }
+
+  func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+
+  func previewController(_ controller: QLPreviewController, previewItemAt index: Int)
+    -> QLPreviewItem
+  { file as NSURL }
+
+  func previewControllerDidDismiss(_ controller: QLPreviewController) { closed() }
 }

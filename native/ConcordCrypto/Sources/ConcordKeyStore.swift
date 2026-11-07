@@ -289,7 +289,7 @@ public final class ConcordAttachmentFiles {
   }
 
   /// The plaintext file behind a URI `decrypt` returned; anything else is refused.
-  private func plaintext(_ uri: String) throws -> URL {
+  func plaintext(_ uri: String) throws -> URL {
     guard let url = URL(string: uri), url.isFileURL else { throw ConcordCryptoError.invalidInput }
     // Checked after standardizing, which turns "<id>.enc/." into "<id>.enc".
     let file = url.standardizedFileURL

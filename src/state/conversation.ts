@@ -74,18 +74,36 @@ const EXTENSIONS = new Map([
   ['video/mp4', 'mp4'],
   ['video/quicktime', 'mov'],
   ['video/webm', 'webm'],
+  ['video/x-m4v', 'm4v'],
+  ['video/3gpp', '3gp'],
+  ['video/x-matroska', 'mkv'],
   ['audio/mpeg', 'mp3'],
   ['audio/mp4', 'm4a'],
   ['audio/ogg', 'ogg'],
   ['audio/wav', 'wav'],
   ['application/pdf', 'pdf'],
   ['application/zip', 'zip'],
+  // The previewer picks its viewer by extension, so documents keep theirs.
+  ['application/msword', 'doc'],
+  [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'docx',
+  ],
+  ['application/vnd.ms-excel', 'xls'],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'],
+  ['application/vnd.ms-powerpoint', 'ppt'],
+  [
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'pptx',
+  ],
+  ['application/rtf', 'rtf'],
+  ['text/csv', 'csv'],
   ['text/plain', 'txt'],
   ['text/markdown', 'md'],
 ]);
 
 /** The file extension for a MIME type, so a shared file opens in the right app. */
-function extension(mimeType: string): string {
+export function extension(mimeType: string): string {
   return EXTENSIONS.get(mimeType.split(';')[0].trim().toLowerCase()) ?? 'bin';
 }
 

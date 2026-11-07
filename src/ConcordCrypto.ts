@@ -62,6 +62,10 @@ type NativeCrypto = {
   deleteAttachment(uri: string): Promise<unknown>;
   /** Android only; iOS shares through React Native's Share. */
   shareAttachment?(uri: string): Promise<unknown>;
+  /** iOS only: the system previewer inside the app. */
+  previewAttachment?(uri: string): Promise<unknown>;
+  /** Android only: the system "save as" picker. */
+  saveAttachment?(uri: string): Promise<unknown>;
 };
 
 const HANDLE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
@@ -326,4 +330,27 @@ export async function shareAttachment(uri: string): Promise<void> {
   const module = native();
   if (!module.shareAttachment) throw new Error('Sharing is not available');
   await module.shareAttachment(uri);
+}
+
+function flag(value: unknown): boolean {
+  if (typeof value !== 'boolean')
+    throw new Error('Invalid native crypto output');
+  return value;
+}
+
+/**
+ * iOS: shows a decrypted attachment in the system previewer. True after it opens; false when
+ * the file can't be previewed or a previewer is already showing.
+ */
+export async function previewAttachment(uri: string): Promise<boolean> {
+  const module = native();
+  if (!module.previewAttachment) throw new Error('Preview is not available');
+  return flag(await module.previewAttachment(uri));
+}
+
+/** Android: saves a decrypted attachment where the person picks. False when they cancel. */
+export async function saveAttachment(uri: string): Promise<boolean> {
+  const module = native();
+  if (!module.saveAttachment) throw new Error('Saving is not available');
+  return flag(await module.saveAttachment(uri));
 }

@@ -84,41 +84,53 @@ The React Native client for iOS (#206) and Android (#205). The app lives at the 
   as on desktop. A message that will not decrypt, or whose key cannot be loaded, is
   shown as such, never dropped, and sends no read receipt. Live messages that arrive
   while history loads merge into it in order. A dropped socket is shown; reopening the
-  conversation reconnects. A server overload close (1013) pauses manual reopening
-  across conversations for the server's validated 100–30000 ms delay (1000 ms if its
-  reason is invalid). The pause survives token refresh within that sign-in; expiry
-  never opens a socket automatically. Valid budget advisories fail pending operations
-  with a local busy message; malformed advisories are ignored, and operations are
-  never replayed automatically. GIF messages load through the server's GIF proxy once
-  they are on screen, with an access token rotated ahead of expiry, and wait for a tap
-  when the user's "load GIFs automatically" privacy setting is off. On iOS the URL cache
-  is memory only, so those credentialed requests never reach Cache.db. Attachments follow
-  the shared display policy. Photos and animated images show inline once on screen, up to
-  64 MiB (a larger photo waits for a tap). Animated ones also wait for a tap when GIFs
-  load on tap or the phone asks for reduced motion. A photo over 24 megapixels opens from
-  a card instead, because Android cannot draw it. A failed photo says why and tries again
-  on a tap. Other files show their kind and size and download only when tapped, up to
-  256 MiB, then open in the share sheet, typed by the file's extension, except
-  `text/plain` and `text/markdown` files up to 1 MiB, which preload into a nine-line
-  preview under their file card. The preview expands to at most 64 KB, and the card
-  opens the whole file; one that cannot be read shows only the card. Both show as plain
-  text, never rendered as Markdown. Videos play inline through `react-native-video`,
-  paused until played: up to 64 MiB they preload once on screen, and a larger one, up
-  to 256 MiB, asks first ("Large video — download {size}?"). A failed download says
-  why and tries again on a tap; a video the phone cannot play becomes its file card.
-  The player has no AirPlay, buffers only seconds on Android, and keeps its file from
-  cache eviction while on screen. Android leaves out media3's streaming formats,
-  because the app plays only local files; media3 adds the auto-granted
-  `ACCESS_NETWORK_STATE` permission. The ciphertext downloads natively (https only, no
-  redirects, capped in bytes and at 30 minutes) and never enters JavaScript.
-  Attachments decrypt with the key epoch the server names in `X-File-Key-Version`,
-  else the current one. Plaintext lands in the app's cache folder, which is emptied at
-  sign-out (cancelling a running download), at session expiry and at every launch; a
-  failed decrypt leaves none behind. The app keeps up to 256 MiB of opened files,
-  counted from the decrypted files rather than the server's sizes, and deletes the
-  oldest past that, except files that a video on screen holds. A file is reused only
-  in the chat that opened it. Not yet: older pages, starting a new DM, starting a key
-  rotation, edits, reactions and automatic reconnect.
+  conversation reconnects. A server overload close (1013) pauses manual reopening across
+  conversations for the server's validated 100–30000 ms delay (1000 ms if its reason is
+  invalid). The pause survives token refresh within that sign-in; expiry never opens a
+  socket automatically. Valid budget advisories fail pending operations with a local
+  busy message; malformed advisories are ignored, and operations are never replayed
+  automatically. GIF messages load through the server's GIF proxy once they are on
+  screen, with an access token rotated ahead of expiry, and wait for a tap when the
+  user's "load GIFs automatically" privacy setting is off. On iOS the URL cache is
+  memory only, so those credentialed requests never reach Cache.db. Attachments follow
+  the shared display policy. Photos and animated images show inline once on screen, up
+  to 64 MiB (a larger photo waits for a tap). Animated ones also wait for a tap when
+  GIFs load on tap or the phone asks for reduced motion. A photo over 24 megapixels
+  shows as a file card instead, because Android cannot draw it. A failed photo says why
+  and tries again on a tap. Other files show their kind and size and download only when
+  asked, up to 256 MiB. On iOS a tap downloads the file and shows it in the system
+  previewer (QuickLook) inside the app, and says so when it can't; on Android a tap does
+  nothing, and the card says "No preview on Android yet. Hold to share or save".
+  `text/plain` and `text/markdown` files up to 1 MiB preload into a nine-line preview
+  under their label, which expands it, to at most 64 KB; one that cannot be read shows
+  only a file card. Both show as plain text, never rendered as Markdown. Videos play
+  inline through `react-native-video`, paused until played: up to 64 MiB they preload
+  once on screen, and a larger one, up to 256 MiB, asks first ("Large video, {size}. Tap
+  to play"). A failed download says why and tries again on a tap; a video the phone
+  cannot play says so and names its format. The player has no AirPlay, buffers only
+  seconds on Android, and keeps its file from cache eviction while on screen. Android
+  leaves out media3's streaming formats, because the app plays only local files; media3
+  adds the auto-granted `ACCESS_NETWORK_STATE` permission. A long press of half a second
+  on any attachment up to 256 MiB except a GIF message (on a loaded video, on its name
+  above the player), or the screen-reader action "Share or save", is the only way a file
+  leaves the app, besides the iOS previewer's own share button. On iOS it downloads the
+  file if needed, then opens the share sheet, typed by the file's extension. On Android
+  it first offers "Share…" and "Save to phone…" (the system save picker, which needs no
+  storage permission), then downloads; dismissing the menu downloads nothing. One hold
+  runs at a time. The iOS preview and the Android save accept only files in the app's
+  attachment folder, through the same check as text reads and deletes, and the save
+  writes only to a document the system picker returns. Sign-out closes an open
+  previewer. `NSPhotoLibraryAddUsageDescription` lets the iOS share sheet save to
+  Photos. The ciphertext downloads natively (https only, no redirects, capped in bytes
+  and at 30 minutes) and never enters JavaScript. Attachments decrypt with the key epoch
+  the server names in `X-File-Key-Version`, else the current one. Plaintext lands in the
+  app's cache folder, which is emptied at sign-out (cancelling a running download), at
+  session expiry and at every launch; a failed decrypt leaves none behind. The app keeps
+  up to 256 MiB of opened files, counted from the decrypted files rather than the
+  server's sizes, and deletes the oldest past that, except files that a video on screen,
+  or a running share or save, holds. A file is reused only in the chat that opened it.
+  Not yet: older pages, starting a new DM, starting a key rotation, edits, reactions and
+  automatic reconnect.
 - Persisted sessions (`src/state/session.ts`): after sign-in, the unlocked identity key
   is stored behind Face ID / Touch ID, and the session record (server, machine id,
   refresh token, session id, user id) in a device-only Keychain item readable after
