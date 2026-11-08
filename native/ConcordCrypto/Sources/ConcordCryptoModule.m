@@ -73,6 +73,9 @@ RCT_EXTERN_METHOD(clearAttachments:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(attachmentImageSize:(NSString *)uri
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(previewAttachment:(NSString *)uri
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(deleteAttachment:(NSString *)uri
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
