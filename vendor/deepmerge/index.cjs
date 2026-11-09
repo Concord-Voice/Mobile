@@ -58,7 +58,10 @@ function getEnumerableOwnPropertySymbols(target) {
 }
 
 function getKeys(target) {
-	return Object.keys(target).concat(getEnumerableOwnPropertySymbols(target))
+	// Never forward the prototype mutator, including to callers using Object.assign.
+	return Object.keys(target).filter(function(key) {
+		return key !== '__proto__'
+	}).concat(getEnumerableOwnPropertySymbols(target))
 }
 
 function propertyIsOnObject(object, property) {
@@ -76,21 +79,11 @@ function propertyIsUnsafe(target, key) {
 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
 }
 
-// Define own data properties without invoking inherited setters (GHSA-gcqx-w48m-w2h4).
-function assignOwnProperty(object, key, value) {
-	Object.defineProperty(object, key, {
-		value: value,
-		writable: true,
-		enumerable: true,
-		configurable: true
-	});
-}
-
 function mergeObject(target, source, options) {
 	var destination = {};
 	if (options.isMergeableObject(target)) {
 		getKeys(target).forEach(function(key) {
-			assignOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
 		});
 	}
 	getKeys(source).forEach(function(key) {
@@ -99,9 +92,9 @@ function mergeObject(target, source, options) {
 		}
 
 		if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
-			assignOwnProperty(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+			destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
 		} else {
-			assignOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
 		}
 	});
 	return destination

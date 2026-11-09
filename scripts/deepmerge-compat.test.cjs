@@ -51,14 +51,7 @@ for (const [name, input] of [
     assert.equal(value.injected, undefined);
     assert.equal({}.injected, undefined);
     assert.deepEqual([JSON.stringify(target), JSON.stringify(source)], before);
-    if (Object.hasOwn(value, '__proto__')) {
-      assert.deepEqual(Object.getOwnPropertyDescriptor(value, '__proto__'), {
-        value: { injected: true },
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
-    }
+    assert.equal(Object.hasOwn(value, '__proto__'), false);
   });
 }
 
@@ -97,6 +90,19 @@ test('preserves symbols, cloning, nulls, functions and custom merge options', ()
   );
   assert.deepEqual(merge.all([{ a: 1 }, { b: 2 }]), { a: 1, b: 2 });
   assert.throws(() => merge.all({}), /first argument should be an array/);
+});
+
+test('discards escaped prototype keys and never evaluates their getters', () => {
+  const escaped = JSON.parse('{"\\u005f\\u005fproto__":{"injected":true}}');
+  assert.equal(Object.hasOwn(merge(escaped, {}), '__proto__'), false);
+  const getter = Object.defineProperty({}, '__proto__', {
+    enumerable: true,
+    get() {
+      throw new Error('prototype getter must not execute');
+    },
+  });
+  assert.deepEqual(merge(getter, {}), {});
+  assert.deepEqual(merge(Object.create(null), getter), {});
 });
 
 test('preserves unsafe inherited/non-enumerable source-key refusal', () => {
@@ -241,8 +247,8 @@ for (const poisoned of [false, true]) {
           transform: {},
         }),
       );
-      const result = (await require('jest-config').readConfig({ config }, root))
-        .projectConfig.globals;
+      const loaded = await require('jest-config').readConfig({ config }, root);
+      const result = loaded.projectConfig.globals;
       assert.equal(result.project, true);
       assert.equal(result.injected, undefined);
       assert.equal(Object.getPrototypeOf(result), Object.prototype);
@@ -250,6 +256,21 @@ for (const poisoned of [false, true]) {
       if (!poisoned) {
         assert.deepEqual(result.nested, { preset: true, project: true });
         assert.deepEqual(result.items, [1, 2]);
+      }
+      // Jest copies normalized globals through Object.assign. Retaining an own
+      // __proto__ would be safe in the merge result but poison this next consumer.
+      const { TestEnvironment } = require('jest-environment-node');
+      const environment = new TestEnvironment(loaded, {
+        console,
+        docblockPragmas: {},
+        testPath: path.join(root, 'fixture.test.js'),
+      });
+      try {
+        assert.equal(environment.global.injected, undefined);
+        assert.equal(environment.global.project, true);
+        assert.equal(Object.hasOwn(result, '__proto__'), false);
+      } finally {
+        await environment.teardown();
       }
     });
   });

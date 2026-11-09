@@ -27,8 +27,10 @@ Original SHA-256 values:
 
 GHSA-gcqx-w48m-w2h4 allows an own `__proto__` key to change a returned object's
 prototype through target copying, null-prototype targets or nested merging.
-The patch changes all three destination assignments to own enumerable, writable,
-configurable data-property definitions. An inherited setter is never invoked.
+The shared key enumerator discards `__proto__` from both target and source before
+any destination assignment. Merely retaining it as an own data property is unsafe:
+Jest subsequently copies globals with `Object.assign`, invoking the prototype
+setter there. The regression exercises the real Jest environment construction.
 Existing clone, array, symbol, customMerge and unsafe-source-key behavior remains.
 Caller-supplied merge callbacks and `clone: false` may deliberately return existing
 objects; this package is not a general-purpose sanitizer for those objects.
