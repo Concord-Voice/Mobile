@@ -1,0 +1,17 @@
+{
+  "name": "@concordvoice/deepmerge",
+  "version": "4.3.1-concord.1",
+  "private": true,
+  "description": "Audited local deepmerge 4.3.1 patch for returned-object prototype poisoning",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Concord-Voice/Mobile.git",
+    "directory": "vendor/deepmerge"
+  },
+  "engines": {
+    "node": ">=22.11.0"
+  }
+}

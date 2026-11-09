@@ -192,7 +192,6 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | debug | 2.6.9 | MIT | https://github.com/visionmedia/debug |
 | debug | 4.4.3 | MIT | https://github.com/debug-js/debug |
 | decamelize | 1.2.0 | MIT | https://github.com/sindresorhus/decamelize |
-| deepmerge | 4.3.1 | MIT | https://github.com/TehShrike/deepmerge |
 | defaults | 1.0.4 | MIT | https://github.com/sindresorhus/node-defaults |
 | define-lazy-prop | 2.0.0 | MIT | https://github.com/sindresorhus/define-lazy-prop |
 | depd | 2.0.0 | MIT | https://github.com/dougwilson/nodejs-depd |
@@ -655,3 +654,13 @@ tarball. It is dual-licensed under CC0-1.0 or Apache-2.0. The complete upstream
 license is preserved at `native/ConcordCrypto/Vendor/argon2/LICENSE`, and source
 hashes and provenance are recorded in the adjacent `Vendor/README.md`.
 Apple CryptoKit and Security.framework are platform APIs, not vendored libraries.
+
+
+## Vendored development tooling
+
+`vendor/deepmerge/` contains the MIT-licensed deepmerge 4.3.1 CommonJS build
+(including its bundled is-mergeable-object implementation), with a local fix for
+returned-object prototype poisoning. Copyright (c) 2012 James Halliday, Josh Duff,
+and other contributors. The complete license is retained in
+`vendor/deepmerge/LICENSE`; source hashes, the exact patch and removal criteria
+are documented in `vendor/deepmerge/README.md`.
