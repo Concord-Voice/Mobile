@@ -819,7 +819,7 @@ export function Chat({
   dm,
   onBack,
   open = (api, identity, id, me) => new Conversation(api, identity, id, me),
-}: {
+}: Readonly<{
   dm: DmSummary;
   onBack: () => void;
   open?: (
@@ -834,7 +834,7 @@ export function Chat({
     | 'close'
     | 'openAttachment'
   >;
-}) {
+}>) {
   const { api, identity, stage } = useSession();
   const insets = useSafeAreaInsets();
   // The keyboard already covers the bottom bar, so drop that inset while it is open.

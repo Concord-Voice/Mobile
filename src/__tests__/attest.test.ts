@@ -262,6 +262,7 @@ describe('wrapAttester', () => {
     await expect(ok.forgetKey()).resolves.toBeUndefined();
 
     const bad = wrapAttester(native({ supported: 'yes' }, 'not base64!'));
+    await expect(bad.info()).rejects.toThrow(TypeError);
     await expect(bad.info()).rejects.toThrow('Invalid native attest output');
     await expect(bad.generateKey()).rejects.toThrow(
       'Invalid native attest output',

@@ -48,7 +48,7 @@ export function wrapAttester(module: NativeAttest): Attester {
       const value = await module.info();
       const r = (value ?? {}) as Record<string, unknown>;
       if (typeof r.supported !== 'boolean' || typeof r.version !== 'string') {
-        throw new Error('Invalid native attest output');
+        throw new TypeError('Invalid native attest output');
       }
       return {
         supported: r.supported,

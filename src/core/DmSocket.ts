@@ -146,7 +146,7 @@ export class DmSocket {
       const message = dmMessage(frame);
       if (message) this.onMessage?.(message);
       if (!this.usable()) return;
-      for (const waiter of [...this.waiters]) {
+      for (const waiter of this.waiters) {
         const value = waiter.accept(frame);
         if (value !== undefined) {
           this.waiters = this.waiters.filter(w => w !== waiter);
@@ -322,8 +322,7 @@ export class DmSocket {
   nextMessage(conversationId: string, fromUserId: string): Promise<DmMessage> {
     return this.wait(f => {
       const message = dmMessage(f);
-      return message &&
-        message.conversationId === conversationId &&
+      return message?.conversationId === conversationId &&
         message.userId === fromUserId
         ? message
         : undefined;

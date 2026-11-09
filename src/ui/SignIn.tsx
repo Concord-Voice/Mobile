@@ -11,13 +11,13 @@ import type { MfaCodeMethod } from '../core/ConcordApi';
 import { biometricName, useSession } from '../state/session';
 import { colors } from './theme';
 
-function Field(props: {
+function Field(props: Readonly<{
   label: string;
   value: string;
   onChangeText: (value: string) => void;
   secure?: boolean;
   keyboard?: 'email-address' | 'url' | 'number-pad';
-}) {
+}>) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{props.label}</Text>
@@ -36,11 +36,11 @@ function Field(props: {
   );
 }
 
-function Submit(props: {
+function Submit(props: Readonly<{
   title: string;
   onPress: () => void;
   disabled: boolean;
-}) {
+}>) {
   const busy = useSession(s => s.busy);
   return (
     <Pressable
@@ -112,7 +112,7 @@ const METHOD_LABELS: Record<MfaCodeMethod, string> = {
   backup_code: 'Backup code',
 };
 
-export function MfaCode({ methods }: { methods: string[] }) {
+export function MfaCode({ methods }: Readonly<{ methods: string[] }>) {
   const { verifyMfa, sendMfaEmail, signOut } = useSession();
   const usable = (Object.keys(METHOD_LABELS) as MfaCodeMethod[]).filter(m =>
     methods.includes(m),

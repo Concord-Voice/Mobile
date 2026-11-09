@@ -1157,6 +1157,28 @@ describe('DmSocket', () => {
     expect(dropped).toHaveBeenCalledTimes(1);
   });
 
+  it('settles every matching waiter and retains unrelated waiters', async () => {
+    let socket!: FakeSocket;
+    const dm = await DmSocket.open(
+      'ws://x',
+      () => (socket = new FakeSocket(() => undefined)),
+    );
+    const first = dm.nextMessage(CONV, PEER);
+    const second = dm.nextMessage(CONV, PEER);
+    const unrelated = dm.nextMessage('other', PEER);
+    socket.emit('dm_message', {
+      id: 'shared',
+      conversation_id: CONV,
+      user_id: PEER,
+      content: 'ciphertext',
+      key_version: 1,
+    });
+    await expect(first).resolves.toMatchObject({ id: 'shared' });
+    await expect(second).resolves.toMatchObject({ id: 'shared' });
+    dm.close();
+    await expect(unrelated).rejects.toThrow('Socket closed');
+  });
+
   it('times out waits and failed opens', async () => {
     const dm = await DmSocket.open(
       'ws://x',
