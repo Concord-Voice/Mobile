@@ -8,7 +8,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest",
+    "test": "npm run test:dependency-compat && jest",
+    "test:dependency-compat": "node --test scripts/dependency-compat.test.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -39,6 +40,12 @@
     "react-test-renderer": "19.3.1",
     "typescript": "^6.0.3"
   },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.5"
+    }
+  },
+  "//overrides_security": "GHSA-g3hv-75wg-m249: pin only typescript-estree's named minimatch API to the patched release; legacy minimatch 3 callers retain their own API. Remove when the parent requests a patched major. npm test covers the actual project-service consumer and bounded amplification regression.",
   "engines": {
     "node": ">= 22.11.0"
   }
