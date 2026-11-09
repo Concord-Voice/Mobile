@@ -60,6 +60,10 @@ type Persisted = Origin & SavedSession;
 
 const UNLOCK_REASON = 'Unlock your Concord messages';
 
+function ignoreCleanupError(): void {
+  // Best-effort cleanup must not replace the operation's original result.
+}
+
 /** "https://h//" -> "https://h", without a regex that backtracks on many slashes. */
 function withoutTrailingSlashes(url: string): string {
   let end = url.length;
@@ -75,7 +79,7 @@ function parsePersisted(raw: string): Persisted | null {
   try {
     const v = JSON.parse(raw) as Record<string, unknown>;
     const field = (k: string) =>
-      typeof v[k] === 'string' && v[k] !== '' ? (v[k] as string) : null;
+      typeof v[k] === 'string' && v[k] !== '' ? v[k] : null;
     const [server, machineId, refreshToken, sessionId, userId] = [
       'server',
       'machineId',
@@ -106,7 +110,7 @@ function persist(at: Origin, saved: SavedSession | null): void {
         machineId: at.machineId,
         ...saved,
       }),
-    ).catch(() => {});
+    ).catch(ignoreCleanupError);
 }
 
 /** Why the saved sign-in was not kept, in words; the password still works every launch. */
@@ -247,10 +251,12 @@ export function createSessionStore(
           notice: null,
           error: 'Your session ended. Log in again.',
         });
-        releaseAll().catch(() => {});
-        clearAttachments().catch(() => {});
+        releaseAll().catch(ignoreCleanupError);
+        clearAttachments().catch(ignoreCleanupError);
         // A record that survives is refused again next launch, which retries this.
-        forget(userId ? { ...at, userId } : undefined).catch(() => {});
+        forget(userId ? { ...at, userId } : undefined).catch(
+          ignoreCleanupError,
+        );
       };
       origin = at;
       set({ api, notice: null });
@@ -272,7 +278,7 @@ export function createSessionStore(
         await persistIdentity(identity, account({ ...at, userId }));
         // Signed out while saving: the sign-out's wipe may have run first, so undo the save.
         if (get().api === null) {
-          await forget({ ...at, userId }).catch(() => {});
+          await forget({ ...at, userId }).catch(ignoreCleanupError);
           return;
         }
         if (get().api !== api) return;
@@ -281,7 +287,7 @@ export function createSessionStore(
         const code = nativeErrorCode(error);
         console.warn(`Biometric unlock not saved: ${code ?? 'unknown'}`);
         if (get().api === api) set({ notice: persistNotice(code) });
-        await deleteSession().catch(() => {});
+        await deleteSession().catch(ignoreCleanupError);
         return;
       }
       api.onRotated = writer(api, at);
@@ -305,7 +311,7 @@ export function createSessionStore(
       } catch (error) {
         // Without the key the app is useless, so the fresh server session goes too.
         if (get().api !== api) return;
-        await api.logout().catch(() => {});
+        await api.logout().catch(ignoreCleanupError);
         set({ stage: { kind: 'signed_out' }, api: null });
         throw error;
       }
@@ -318,6 +324,73 @@ export function createSessionStore(
       await remember(api, identity);
     };
 
+    const recoverMissingIdentity = async (saved: Persisted, error: unknown) => {
+      set({ stage: { kind: 'signed_out' } });
+      const code = nativeErrorCode(error);
+      // Anything but a missing key: keep everything, so "Unlock" can try again.
+      if (code === 'E_CONCORD_CRYPTO_USERCANCELLED') return;
+      if (code !== 'E_CONCORD_CRYPTO_NOTFOUND') {
+        // Lockout or a Keychain fault: say so, and leave the password as the way in.
+        set({
+          error: `${biometricName()} could not unlock your saved sign-in. Try again, or log in with your password.`,
+        });
+        return;
+      }
+      // Face ID set changed, so the key copy is gone: end the server session too.
+      const api = makeApi(saved.server, saved.machineId);
+      api.onRotated = () => persist(saved, api.saved());
+      let revoked = true;
+      try {
+        await api.resume(saved);
+        await api.logout();
+      } catch (e) {
+        revoked = e instanceof ApiError && e.status === 401;
+      }
+      // Not revoked (offline): keep the rotated record, so the next launch tries again.
+      await (revoked ? forget(saved) : deleteIdentity(account(saved))).catch(
+        ignoreCleanupError,
+      );
+      set({
+        canResume: false,
+        error: 'Log in again to unlock your messages on this device.',
+      });
+    };
+
+    const restore = async () => {
+      // Only from launch or the sign-in screen: never over a live session or MFA step.
+      const { kind } = get().stage;
+      if (kind !== 'starting' && kind !== 'signed_out') return;
+      const raw = await loadSession().catch(() => null);
+      const saved = raw === null ? null : parsePersisted(raw);
+      if (!saved) {
+        set({ stage: { kind: 'signed_out' }, canResume: false });
+        return;
+      }
+      set({ canResume: true });
+      let identity: KeyHandle;
+      try {
+        identity = await loadIdentity(account(saved), UNLOCK_REASON);
+      } catch (error) {
+        await recoverMissingIdentity(saved, error);
+        return;
+      }
+      const api = connect(saved, saved.userId);
+      try {
+        await api.resume(saved);
+      } catch {
+        // Only a refusal (401) gets here, and onExpired has already reset the store.
+        await releaseKey(identity).catch(ignoreCleanupError);
+        return;
+      }
+      if (get().api !== api) {
+        await releaseKey(identity).catch(ignoreCleanupError);
+        return;
+      }
+      api.onRotated = writer(api, saved);
+      api.onRotated();
+      set({ identity, stage: { kind: 'signed_in', userId: api.userId } });
+    };
+
     return {
       stage: { kind: 'starting' },
       busy: false,
@@ -327,70 +400,7 @@ export function createSessionStore(
       identity: null,
       canResume: false,
 
-      restore: () =>
-        run(async () => {
-          // Only from launch or the sign-in screen: never over a live session or MFA step.
-          const { kind } = get().stage;
-          if (kind !== 'starting' && kind !== 'signed_out') return;
-          const raw = await loadSession().catch(() => null);
-          const saved = raw === null ? null : parsePersisted(raw);
-          if (!saved) {
-            set({ stage: { kind: 'signed_out' }, canResume: false });
-            return;
-          }
-          set({ canResume: true });
-          let identity: KeyHandle;
-          try {
-            identity = await loadIdentity(account(saved), UNLOCK_REASON);
-          } catch (error) {
-            set({ stage: { kind: 'signed_out' } });
-            const code = nativeErrorCode(error);
-            // Anything but a missing key: keep everything, so "Unlock" can try again.
-            if (code === 'E_CONCORD_CRYPTO_USERCANCELLED') return;
-            if (code !== 'E_CONCORD_CRYPTO_NOTFOUND') {
-              // Lockout or a Keychain fault: say so, and leave the password as the way in.
-              set({
-                error: `${biometricName()} could not unlock your saved sign-in. Try again, or log in with your password.`,
-              });
-              return;
-            }
-            // Face ID set changed, so the key copy is gone: end the server session too.
-            const api = makeApi(saved.server, saved.machineId);
-            api.onRotated = () => persist(saved, api.saved());
-            let revoked = true;
-            try {
-              await api.resume(saved);
-              await api.logout();
-            } catch (e) {
-              revoked = e instanceof ApiError && e.status === 401;
-            }
-            // Not revoked (offline): keep the rotated record, so the next launch tries again.
-            await (revoked
-              ? forget(saved)
-              : deleteIdentity(account(saved))
-            ).catch(() => {});
-            set({
-              canResume: false,
-              error: 'Log in again to unlock your messages on this device.',
-            });
-            return;
-          }
-          const api = connect(saved, saved.userId);
-          try {
-            await api.resume(saved);
-          } catch {
-            // Only a refusal (401) gets here, and onExpired has already reset the store.
-            await releaseKey(identity).catch(() => {});
-            return;
-          }
-          if (get().api !== api) {
-            await releaseKey(identity).catch(() => {});
-            return;
-          }
-          api.onRotated = writer(api, saved);
-          api.onRotated();
-          set({ identity, stage: { kind: 'signed_in', userId: api.userId } });
-        }),
+      restore: () => run(restore),
 
       signIn: (server, email, password) =>
         run(async () => {
@@ -400,7 +410,7 @@ export function createSessionStore(
             machineId: await randomId(),
           });
           const result = await api.login(email.trim(), password);
-          if (get().api !== api) return api.logout().catch(() => {});
+          if (get().api !== api) return api.logout().catch(ignoreCleanupError);
           if (result.kind === 'mfa') {
             pendingPassword = password;
             set({
@@ -433,7 +443,7 @@ export function createSessionStore(
             method,
             code.trim(),
           );
-          if (get().api !== api) return api.logout().catch(() => {});
+          if (get().api !== api) return api.logout().catch(ignoreCleanupError);
           await finish(api, keys, password);
         }),
 

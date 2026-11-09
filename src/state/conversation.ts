@@ -246,22 +246,31 @@ export class Conversation {
       // Older clients labelled every write 1 whatever key they used: try the current key too.
       if (m.keyVersion === 1) {
         try {
-          return { ...base, ...(await open(0)) };
+          return { ...base, ...(await this.decryptLegacy(m.content)) };
         } catch {
-          // The current epoch may have rotated since it was looked up: ask again, at most
-          // once per REFUSED_MS, since the label (and so this retry) is the sender's choice.
-          if (Date.now() - this.lookedUpAt >= REFUSED_MS) {
-            this.current = null;
-            try {
-              return { ...base, ...(await open(0)) };
-            } catch {
-              // Report the labelled epoch's failure below.
-            }
-          }
+          // Report the labelled epoch's failure below.
         }
       }
       const text = error instanceof KeyUnavailable ? NO_KEY : UNREADABLE;
       return { ...base, text, unreadable: true };
+    }
+  }
+
+  private async decryptLegacy(
+    content: string,
+  ): Promise<ReturnType<typeof unwrap>> {
+    const open = async () =>
+      unwrap(await decryptMessage(content, await this.keyFor(0)));
+    try {
+      return await open();
+    } catch (error) {
+      // The current epoch may have rotated since it was looked up: ask again, at most
+      // once per REFUSED_MS, since the label (and so this retry) is the sender's choice.
+      if (Date.now() - this.lookedUpAt >= REFUSED_MS) {
+        this.current = null;
+        return open();
+      }
+      throw error;
     }
   }
 

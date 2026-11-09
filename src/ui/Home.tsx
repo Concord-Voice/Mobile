@@ -9,7 +9,7 @@ import { colors } from './theme';
 const TABS = ['Messages', 'Servers', 'Alerts', 'You'] as const;
 type Tab = (typeof TABS)[number];
 
-function Messages({ onOpen }: { onOpen: (dm: DmSummary) => void }) {
+function Messages({ onOpen }: Readonly<{ onOpen: (dm: DmSummary) => void }>) {
   const api = useSession(s => s.api);
   const [dms, setDms] = useState<DmSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);

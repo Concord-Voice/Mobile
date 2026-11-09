@@ -126,13 +126,16 @@ export type DmSummary = {
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string | undefined) {
     // Status and error code only: response bodies may echo user data.
-    super(`Concord API ${status}${code ? ` ${code}` : ''}`);
+    const suffix = code ? ` ${code}` : '';
+    super(`Concord API ${status}${suffix}`);
   }
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 const CREDENTIAL_ROUTE = /^\/auth\/(login|register|mfa\/|refresh|logout)/;
+
+type RequestRetryState = { refreshed: boolean; attested: boolean };
 
 /** Attestation refusals that a fresh App Attest proof can cure (ADR-0010 D17). */
 const ATTEST_AND_RETRY = new Set([
@@ -213,48 +216,64 @@ export class ConcordApi {
     body?: unknown,
     refreshOn401 = true,
   ): Promise<Record<string, unknown>> {
-    let refreshed = false;
-    let attested = false;
+    const retry: RequestRetryState = { refreshed: false, attested: false };
     for (;;) {
       try {
         return await this.request(method, path, body);
       } catch (error) {
-        // Credential routes never retry: their 401 means a wrong password or code.
-        if (
-          !(error instanceof ApiError) ||
-          !this.session ||
-          CREDENTIAL_ROUTE.test(path)
-        ) {
-          throw error;
-        }
-        // An expired access token gets one refresh, and a missing or stale
-        // attestation one fresh proof; each retries the request once.
-        if (error.status === 401 && !refreshed && refreshOn401) {
-          refreshed = true;
-          await this.refresh();
-        } else if (
-          error.status === 403 &&
-          !attested &&
-          this.attester &&
-          ATTEST_AND_RETRY.has(error.code ?? '')
-        ) {
-          attested = true;
-          try {
-            await this.attest();
-          } catch (proofError) {
-            // No App Attest here (simulator, old device): the caller sees the refusal.
-            if (!(proofError instanceof ApiError)) throw error;
-            // The access token can expire while the proof is generated: refresh once
-            // and start over, which allows one more proof.
-            if (proofError.status !== 401 || refreshed) throw proofError;
-            refreshed = true;
-            attested = false;
-            await this.refresh();
-          }
-        } else {
-          throw error;
-        }
+        await this.recoverRequest(error, path, refreshOn401, retry);
       }
+    }
+  }
+
+  private async recoverRequest(
+    error: unknown,
+    path: string,
+    refreshOn401: boolean,
+    retry: RequestRetryState,
+  ): Promise<void> {
+    // Credential routes never retry: their 401 means a wrong password or code.
+    if (
+      !(error instanceof ApiError) ||
+      !this.session ||
+      CREDENTIAL_ROUTE.test(path)
+    ) {
+      throw error;
+    }
+    // An expired access token gets one refresh, and a missing or stale
+    // attestation one fresh proof; each retries the request once.
+    if (error.status === 401 && !retry.refreshed && refreshOn401) {
+      retry.refreshed = true;
+      await this.refresh();
+      return;
+    }
+    if (
+      error.status !== 403 ||
+      retry.attested ||
+      !this.attester ||
+      !ATTEST_AND_RETRY.has(error.code ?? '')
+    ) {
+      throw error;
+    }
+    retry.attested = true;
+    await this.recoverAttestation(error, retry);
+  }
+
+  private async recoverAttestation(
+    refusal: ApiError,
+    retry: RequestRetryState,
+  ): Promise<void> {
+    try {
+      await this.attest();
+    } catch (proofError) {
+      // No App Attest here (simulator, old device): the caller sees the refusal.
+      if (!(proofError instanceof ApiError)) throw refusal;
+      // The access token can expire while the proof is generated: refresh once
+      // and start over, which allows one more proof.
+      if (proofError.status !== 401 || retry.refreshed) throw proofError;
+      retry.refreshed = true;
+      retry.attested = false;
+      await this.refresh();
     }
   }
 
@@ -480,11 +499,9 @@ export class ConcordApi {
    * Concurrent callers share one run, since each proof spends a challenge.
    */
   attest(): Promise<void> {
-    if (!this.attesting) {
-      this.attesting = this.runAttest().finally(() => {
-        this.attesting = null;
-      });
-    }
+    this.attesting ??= this.runAttest().finally(() => {
+      this.attesting = null;
+    });
     return this.attesting;
   }
 
