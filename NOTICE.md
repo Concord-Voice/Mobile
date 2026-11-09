@@ -274,7 +274,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | jest-util | 29.7.0 | MIT | https://github.com/jestjs/jest |
 | jest-validate | 29.7.0 | MIT | https://github.com/jestjs/jest |
 | jest-worker | 29.7.0 | MIT | https://github.com/jestjs/jest |
-| joi | 17.13.8 | BSD-3-Clause | https://github.com/hapijs/joi |
+| joi | 17.13.9 | BSD-3-Clause | https://github.com/hapijs/joi |
 | js-tokens | 4.0.0 | MIT | https://github.com/lydell/js-tokens |
 | js-yaml | 4.3.2 | MIT | https://github.com/nodeca/js-yaml |
 | jsc-safe-url | 0.2.4 | 0BSD | https://github.com/robhogan/jsc-safe-url |
