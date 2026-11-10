@@ -112,7 +112,7 @@ dependencies {
     implementation(project(":concord-crypto"))
     // GIFs and animated attachments animate on Android only with Fresco's GIF decoder.
     // Keep it at React Native's Fresco version (react-native/gradle/libs.versions.toml).
-    implementation("com.facebook.fresco:animated-gif:3.7.0")
+    implementation("com.facebook.fresco:animated-gif:3.9.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
