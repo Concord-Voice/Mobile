@@ -3,8 +3,9 @@
 This private local package preserves deepmerge 4.3.1's CommonJS API and types for
 React Native CLI/config/doctor and Jest. The root npm override applies to every
 installed deepmerge edge. A direct development dependency anchors the file path
-at the repository root; the override references it with `$deepmerge`. It has no install script, runtime dependency or network
-operation, and is usable with `npm ci --ignore-scripts`.
+at the repository root; the override references it with `$deepmerge`. It has no
+install script, runtime dependency or network operation, and is usable with
+`npm ci --ignore-scripts`.
 
 ## Provenance
 
@@ -56,8 +57,11 @@ Because the lockfile links this package instead of a versioned registry entry,
 dependency scanners will not match a future deepmerge advisory against it.
 `concord.reviewBy` in `package.json` carries the re-check deadline the removed
 scanner exception used to carry; the compatibility test fails after that date
-until someone re-checks upstream advisories and releases and moves it.
-`vendor/` is owned by the security team in `CODEOWNERS`.
+until someone re-checks upstream advisories and releases and moves it. It
+reports the due date for the last 30 days before failing. Set
+`CONCORD_SKIP_REVIEW_DEADLINE=1` only to bisect or rebuild a historical commit.
+The security team owns `vendor/` and the files that keep this patch in force
+(`package.json`, `package-lock.json`, the compatibility tests and `CODEOWNERS`).
 
 Remove this override and directory when an upstream release or parent replacement
 fixes the behavior and passes these same compatibility and regression cases.

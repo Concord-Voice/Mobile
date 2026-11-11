@@ -655,7 +655,6 @@ license is preserved at `native/ConcordCrypto/Vendor/argon2/LICENSE`, and source
 hashes and provenance are recorded in the adjacent `Vendor/README.md`.
 Apple CryptoKit and Security.framework are platform APIs, not vendored libraries.
 
-
 ## Vendored development tooling
 
 `vendor/deepmerge/` contains the MIT-licensed deepmerge 4.3.1 CommonJS build

@@ -6,4 +6,9 @@ scripts/security/ @Concord-Voice/security
 .gitar/ @Concord-Voice/security
 .claude/ @Concord-Voice/security
 scripts/repo-config.sh @Concord-Voice/security
-vendor/ @Concord-Voice/security
+/vendor/ @Concord-Voice/security
+/package.json @Concord-Voice/security
+/package-lock.json @Concord-Voice/security
+/scripts/deepmerge-compat.test.cjs @Concord-Voice/security
+/scripts/dependency-compat.test.cjs @Concord-Voice/security
+/CODEOWNERS @Concord-Voice/security

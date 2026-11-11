@@ -16,7 +16,7 @@ const consumers = [
 ];
 
 for (const consumer of consumers) {
-  test(`${consumer} resolves the patched implementation before lifecycle scripts`, () => {
+  test(`${consumer} resolves the patched implementation`, () => {
     const fromConsumer = createRequire(require.resolve(consumer));
     assert.equal(fromConsumer('deepmerge'), merge);
     assert.equal(
@@ -291,15 +291,33 @@ for (const poisoned of [false, true]) {
   });
 }
 
-test('vendored patch is inside its upstream advisory re-check window', () => {
+const REVIEW_WARNING_DAYS = 30;
+
+test('vendored patch is inside its upstream advisory re-check window', t => {
   // The lockfile links this package, so dependency scanners cannot match a
   // future deepmerge advisory against it. This deadline replaces the expiry
   // the removed scanner exception carried: re-check upstream advisories and
   // releases, then move reviewBy in vendor/deepmerge/package.json.
   const { reviewBy } = require('deepmerge/package.json').concord;
   assert.match(reviewBy, /^\d{4}-\d{2}-\d{2}$/);
+  const deadline = new Date(`${reviewBy}T00:00:00Z`);
+  // Date.parse rolls impossible dates such as 2027-02-31 into the next month.
+  assert.equal(deadline.toISOString().slice(0, 10), reviewBy);
+  if (process.env.CONCORD_SKIP_REVIEW_DEADLINE === '1') {
+    // For bisecting or rebuilding a historical commit only; CI never sets it.
+    t.skip('CONCORD_SKIP_REVIEW_DEADLINE=1');
+    return;
+  }
+  const daysLeft = (deadline.getTime() - Date.now()) / 86_400_000;
+  if (daysLeft <= REVIEW_WARNING_DAYS) {
+    t.diagnostic(
+      `vendor/deepmerge upstream advisory re-check due ${reviewBy} (${Math.ceil(
+        daysLeft,
+      )} days)`,
+    );
+  }
   assert.ok(
-    Date.now() < Date.parse(`${reviewBy}T00:00:00Z`),
+    daysLeft > 0,
     `vendor/deepmerge is past its ${reviewBy} upstream advisory re-check`,
   );
 });
