@@ -52,6 +52,13 @@ and Jest consumers. Use clean installs both with and without lifecycle scripts;
 all four parent resolutions must use this local package. Ordinary app tests,
 lint, typecheck, supply-chain scans and native CI remain required.
 
+Because the lockfile links this package instead of a versioned registry entry,
+dependency scanners will not match a future deepmerge advisory against it.
+`concord.reviewBy` in `package.json` carries the re-check deadline the removed
+scanner exception used to carry; the compatibility test fails after that date
+until someone re-checks upstream advisories and releases and moves it.
+`vendor/` is owned by the security team in `CODEOWNERS`.
+
 Remove this override and directory when an upstream release or parent replacement
 fixes the behavior and passes these same compatibility and regression cases.
 Keep the upstream license and this provenance with any copied implementation.

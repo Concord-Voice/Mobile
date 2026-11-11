@@ -40,12 +40,27 @@ for (const [name, input] of [
     'recursive collision',
     () => [{ nested: hostile() }, { nested: { ok: true } }],
   ],
-  ['array element cloning', () => [[hostile()], []]],
+  [
+    // Index-wise merging puts the hostile element in the target position.
+    // Default array concatenation only clones it as a source, which upstream
+    // already handles, so that shape cannot detect a reverted patch.
+    'index-wise array element merging',
+    () => [
+      [hostile()],
+      [{}],
+      {
+        arrayMerge: (target, source, options) =>
+          target.map((element, index) =>
+            merge(element, source[index], options),
+          ),
+      },
+    ],
+  ],
 ]) {
   test(`does not poison the returned prototype during ${name}`, () => {
-    const [target, source] = input();
+    const [target, source, options] = input();
     const before = [JSON.stringify(target), JSON.stringify(source)];
-    const result = merge(target, source);
+    const result = merge(target, source, options);
     const value = result.nested || (Array.isArray(result) ? result[0] : result);
     assert.equal(Object.getPrototypeOf(value), Object.prototype);
     assert.equal(value.injected, undefined);
@@ -275,3 +290,16 @@ for (const poisoned of [false, true]) {
     });
   });
 }
+
+test('vendored patch is inside its upstream advisory re-check window', () => {
+  // The lockfile links this package, so dependency scanners cannot match a
+  // future deepmerge advisory against it. This deadline replaces the expiry
+  // the removed scanner exception carried: re-check upstream advisories and
+  // releases, then move reviewBy in vendor/deepmerge/package.json.
+  const { reviewBy } = require('deepmerge/package.json').concord;
+  assert.match(reviewBy, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(
+    Date.now() < Date.parse(`${reviewBy}T00:00:00Z`),
+    `vendor/deepmerge is past its ${reviewBy} upstream advisory re-check`,
+  );
+});

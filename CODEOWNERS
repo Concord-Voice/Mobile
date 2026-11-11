@@ -6,3 +6,4 @@ scripts/security/ @Concord-Voice/security
 .gitar/ @Concord-Voice/security
 .claude/ @Concord-Voice/security
 scripts/repo-config.sh @Concord-Voice/security
+vendor/ @Concord-Voice/security
