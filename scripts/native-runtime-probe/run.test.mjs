@@ -18,7 +18,7 @@ const expected = {
   nonce: 'a'.repeat(32),
   sourceHead: 'b'.repeat(40),
   platform: 'ios',
-  rnVersion: '0.88.0',
+  rnVersion: '0.88.1',
   reactVersion: '19.3.1',
   ossVersion: '1.0.0',
   hbcVersion: 99,
@@ -44,7 +44,7 @@ function verdict(platform = 'ios') {
     nonce: expected.nonce,
     sourceHead: expected.sourceHead,
     platform,
-    rnVersion: '0.88.0',
+    rnVersion: '0.88.1',
     reactVersion: '19.3.1',
     hermes: { ossVersion: '1.0.0', build: 'Release' },
     checks: Object.fromEntries(names.map(name => [name, true])),
@@ -172,28 +172,28 @@ test('permits a failure-only private sanitizer without propagating raw subproces
 
 test('binds native dependency selections independently of the compiler package', () => {
   const lock =
-    'PODS:\n  - hermes-engine (260318099.0.4):\n    - hermes-engine/Pre-built (= 260318099.0.4)\n';
-  const properties = 'HERMES_VERSION_NAME=260318099.0.4\n';
-  assert.equal(nativeSelection('ios', lock), '260318099.0.4');
-  assert.equal(nativeSelection('android', properties), '260318099.0.4');
+    'PODS:\n  - hermes-engine (260318099.0.5):\n    - hermes-engine/Pre-built (= 260318099.0.5)\n';
+  const properties = 'HERMES_VERSION_NAME=260318099.0.5\n';
+  assert.equal(nativeSelection('ios', lock), '260318099.0.5');
+  assert.equal(nativeSelection('android', properties), '260318099.0.5');
   assert.throws(() =>
-    nativeSelection('ios', lock.replace('260318099.0.4', '250829098.0.17')),
+    nativeSelection('ios', lock.replace('260318099.0.5', '250829098.0.17')),
   );
   assert.throws(() => nativeSelection('ios', 'PODS:\n'));
   assert.throws(() =>
     nativeSelection('android', 'HERMES_VERSION_NAME=unknown'),
   );
   const dependency =
-    'com.facebook.hermes:hermes-android:260318099.0.4\n   Variant releaseRuntimeElements-published:\n';
+    'com.facebook.hermes:hermes-android:260318099.0.5\n   Variant releaseRuntimeElements-published:\n';
   assert.equal(
-    resolvedAndroidEngine(dependency, '260318099.0.4'),
-    'com.facebook.hermes:hermes-android:260318099.0.4',
+    resolvedAndroidEngine(dependency, '260318099.0.5'),
+    'com.facebook.hermes:hermes-android:260318099.0.5',
   );
   assert.throws(() => resolvedAndroidEngine(dependency, '250829098.0.17'));
   assert.throws(() =>
     resolvedAndroidEngine(
       dependency.replace('com.facebook.hermes', 'com.example'),
-      '260318099.0.4',
+      '260318099.0.5',
     ),
   );
 });
