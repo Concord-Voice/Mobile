@@ -12,3 +12,6 @@ scripts/repo-config.sh @Concord-Voice/security
 /scripts/deepmerge-compat.test.cjs @Concord-Voice/security
 /scripts/dependency-compat.test.cjs @Concord-Voice/security
 /CODEOWNERS @Concord-Voice/security
+/.github/CODEOWNERS @Concord-Voice/security
+/docs/CODEOWNERS @Concord-Voice/security
+/scripts/patch-react-native-gradle-plugin.mjs @Concord-Voice/security

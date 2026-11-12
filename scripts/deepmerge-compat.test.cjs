@@ -301,23 +301,34 @@ test('vendored patch is inside its upstream advisory re-check window', t => {
   const { reviewBy } = require('deepmerge/package.json').concord;
   assert.match(reviewBy, /^\d{4}-\d{2}-\d{2}$/);
   const deadline = new Date(`${reviewBy}T00:00:00Z`);
-  // Date.parse rolls impossible dates such as 2027-02-31 into the next month.
+  assert.ok(
+    !Number.isNaN(deadline.getTime()),
+    `reviewBy ${reviewBy} is not a date`,
+  );
+  // new Date rolls impossible dates such as 2027-02-31 into the next month.
   assert.equal(deadline.toISOString().slice(0, 10), reviewBy);
+  const inCi = Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
   if (process.env.CONCORD_SKIP_REVIEW_DEADLINE === '1') {
-    // For bisecting or rebuilding a historical commit only; CI never sets it.
+    // For bisecting or rebuilding a historical commit locally only.
+    assert.ok(!inCi, 'CONCORD_SKIP_REVIEW_DEADLINE is not allowed in CI');
     t.skip('CONCORD_SKIP_REVIEW_DEADLINE=1');
     return;
   }
   const daysLeft = (deadline.getTime() - Date.now()) / 86_400_000;
-  if (daysLeft <= REVIEW_WARNING_DAYS) {
-    t.diagnostic(
-      `vendor/deepmerge upstream advisory re-check due ${reviewBy} (${Math.ceil(
-        daysLeft,
-      )} days)`,
-    );
-  }
   assert.ok(
     daysLeft > 0,
     `vendor/deepmerge is past its ${reviewBy} upstream advisory re-check`,
   );
+  if (daysLeft <= REVIEW_WARNING_DAYS) {
+    const message = `vendor/deepmerge upstream advisory re-check due ${reviewBy} (${Math.ceil(
+      daysLeft,
+    )} days left)`;
+    t.diagnostic(message);
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      // A workflow command on its own line becomes a visible annotation.
+      process.stdout.write(
+        `\n::warning file=vendor/deepmerge/package.json::${message}\n`,
+      );
+    }
+  }
 });

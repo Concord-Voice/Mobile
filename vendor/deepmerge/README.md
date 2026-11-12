@@ -58,10 +58,13 @@ dependency scanners will not match a future deepmerge advisory against it.
 `concord.reviewBy` in `package.json` carries the re-check deadline the removed
 scanner exception used to carry; the compatibility test fails after that date
 until someone re-checks upstream advisories and releases and moves it. It
-reports the due date for the last 30 days before failing. Set
-`CONCORD_SKIP_REVIEW_DEADLINE=1` only to bisect or rebuild a historical commit.
+reports the due date for the last 30 days before failing, as a GitHub warning
+annotation in Actions. Set `CONCORD_SKIP_REVIEW_DEADLINE=1` only to bisect or
+rebuild a historical commit locally; the test rejects it when `CI` or
+`GITHUB_ACTIONS` is set.
 The security team owns `vendor/` and the files that keep this patch in force
-(`package.json`, `package-lock.json`, the compatibility tests and `CODEOWNERS`).
+(`package.json`, `package-lock.json`, the compatibility tests, the root
+`postinstall` script and every `CODEOWNERS` location).
 
 Remove this override and directory when an upstream release or parent replacement
 fixes the behavior and passes these same compatibility and regression cases.
