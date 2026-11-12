@@ -365,7 +365,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | raw-body | 3.0.2 | MIT | https://github.com/stream-utils/raw-body |
 | react-devtools-core | 6.1.5 | MIT | https://github.com/facebook/react |
 | react-is | 18.3.1 | MIT | https://github.com/facebook/react |
-| react-native-safe-area-context | 5.10.1 | MIT | https://github.com/appandflow/react-native-safe-area-context |
+| react-native-safe-area-context | 5.11.1 | MIT | https://github.com/appandflow/react-native-safe-area-context |
 | react-native-video | 6.19.3 | MIT | https://github.com/TheWidlarzGroup/react-native-video |
 | react-native | 0.88.0 | MIT | https://github.com/react/react-native |
 | react-refresh | 0.14.2 | MIT | https://github.com/facebook/react |
