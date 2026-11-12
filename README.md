@@ -160,7 +160,7 @@ npm run ios                                         # or: npm run android
 `bundle install` needs Ruby 3.2 or newer, so install one with Homebrew or rbenv first; macOS's system Ruby 2.6 is too old.
 
 `npm ci` also applies a bounded Android build compatibility patch: React Native
-0.88.0's included Gradle build selects Kotlin 2.2.0, which cannot read Gradle
+0.88.1's included Gradle build selects Kotlin 2.2.0, which cannot read Gradle
 9.8.2's embedded Kotlin 2.4 metadata. The postinstall script requires the exact
 RN/plugin versions and catalog bytes, changes only the Kotlin selection to
 2.4.21, and refuses unexpected dependency changes. The app uses the same Kotlin
