@@ -218,7 +218,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | exponential-backoff | 3.1.3 | Apache-2.0 | https://github.com/coveooss/exponential-backoff |
 | fast-glob | 3.3.3 | MIT | https://github.com/mrmlnc/fast-glob |
 | fast-xml-builder | 1.3.1 | MIT | https://github.com/NaturalIntelligence/fast-xml-builder |
-| fast-xml-parser | 5.11.2 | MIT | https://github.com/NaturalIntelligence/fast-xml-parser |
+| fast-xml-parser | 5.12.0 | MIT | https://github.com/NaturalIntelligence/fast-xml-parser |
 | fastq | 1.20.3 | ISC | https://github.com/mcollina/fastq |
 | fb-dotslash | 0.5.8 | (MIT OR Apache-2.0) | https://github.com/facebook/dotslash |
 | fb-watchman | 2.0.4 | MIT | https://github.com/facebook/watchman |
@@ -266,7 +266,7 @@ Run `python3 scripts/update-mobile-notice.py --check` to verify the table.
 | is-number | 7.0.0 | MIT | https://github.com/jonschlinkert/is-number |
 | is-stream | 2.0.1 | MIT | https://github.com/sindresorhus/is-stream |
 | is-unicode-supported | 0.1.0 | MIT | https://github.com/sindresorhus/is-unicode-supported |
-| is-unsafe | 2.0.2 | MIT | https://github.com/NaturalIntelligence/is-unsafe |
+| is-unsafe | 2.0.3 | MIT | https://github.com/NaturalIntelligence/is-unsafe |
 | is-wsl | 1.1.0 | MIT | https://github.com/sindresorhus/is-wsl |
 | is-wsl | 2.2.0 | MIT | https://github.com/sindresorhus/is-wsl |
 | isexe | 2.0.0 | ISC | https://github.com/isaacs/isexe |
