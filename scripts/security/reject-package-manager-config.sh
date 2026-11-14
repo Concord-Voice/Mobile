@@ -12,6 +12,9 @@
 # Matching ignores case because macOS runners and developer Macs read .NPMRC
 # as .npmrc; paths with the two non-ASCII letters that fold to ASCII fail too.
 set -euo pipefail
+# Byte-wise matching and output: macOS tr stops at the first non-UTF-8 name
+# in a UTF-8 locale, which would hide the rest of the listing.
+export LC_ALL=C
 
 ALLOWED_PACKAGE_JSON=(
   package.json
@@ -38,7 +41,7 @@ trap 'rm -f "$list" "$stage" "$pkgs"' EXIT
 # case-insensitive matching and the allowlist comparison stays exact.
 git -c core.quotePath=false ls-files -z -s --full-name -- ':(top)' >"$stage"
 # U+017F (long s) and U+212A (Kelvin sign) are the only non-ASCII letters
-# whose case fold is ASCII: macOS opens package.j\u017Fon as package.json, but
+# whose simple case fold is ASCII: macOS opens package.j\u017Fon as package.json, but
 # git icase and CODEOWNERS only fold ASCII. Written as UTF-8 bytes for bash 3.2.
 fold_s=$'\xc5\xbf'
 fold_k=$'\xe2\x84\xaa'
