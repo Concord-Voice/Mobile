@@ -6,6 +6,9 @@ const path = require('node:path');
 const { test } = require('node:test');
 const merge = require('deepmerge');
 
+// Fixed path, so a node_modules directory nearer this file cannot stand in.
+const VENDOR_DIR = path.join(__dirname, '..', 'vendor', 'deepmerge');
+
 const hostile = () =>
   JSON.parse('{"__proto__":{"injected":true},"ordinary":1}');
 const consumers = [
@@ -293,12 +296,21 @@ for (const poisoned of [false, true]) {
 
 const REVIEW_WARNING_DAYS = 30;
 
+test('deepmerge resolves to the vendored file from this test', () => {
+  assert.equal(
+    fs.realpathSync(require.resolve('deepmerge')),
+    fs.realpathSync(path.join(VENDOR_DIR, 'index.cjs')),
+  );
+});
+
 test('vendored patch is inside its upstream advisory re-check window', t => {
   // The lockfile links this package, so dependency scanners cannot match a
   // future deepmerge advisory against it. This deadline replaces the expiry
   // the removed scanner exception carried: re-check upstream advisories and
   // releases, then move reviewBy in vendor/deepmerge/package.json.
-  const { reviewBy } = require('deepmerge/package.json').concord;
+  const { reviewBy } = JSON.parse(
+    fs.readFileSync(path.join(VENDOR_DIR, 'package.json'), 'utf8'),
+  ).concord;
   assert.match(reviewBy, /^\d{4}-\d{2}-\d{2}$/);
   const deadline = new Date(`${reviewBy}T00:00:00Z`);
   assert.ok(
