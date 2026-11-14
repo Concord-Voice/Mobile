@@ -76,6 +76,15 @@ class MobileScannerContract(unittest.TestCase):
         self.assertEqual(report['env']['BUILD_RESULT'], '${{ needs.build.result }}')
         self.assertNotIn('SONAR_TOKEN', json.dumps(WORKFLOW))
 
+    def test_native_jobs_run_the_guard_before_setup_node(self):
+        native = yaml.load((ROOT / '.github/workflows/mobile-native.yml').read_text(),
+                           Loader=yaml.BaseLoader)
+        for name in ('ios-native', 'android-native'):
+            names = [step.get('uses', step.get('run', '')) for step in native['jobs'][name]['steps']]
+            guard = names.index('scripts/security/reject-package-manager-config.sh')
+            setup = next(i for i, n in enumerate(names) if n.startswith('actions/setup-node@'))
+            self.assertLess(guard, setup, name)
+
     def test_default_branch_scanners_run_after_ioc(self):
         baseline = yaml.load((ROOT / '.github/workflows/scanner-baseline.yml').read_text(),
                              Loader=yaml.BaseLoader)

@@ -10,7 +10,7 @@
 #  - package.json outside the known packages: a "name" plus "exports"
 #    self-reference makes require() resolve to a file beside it.
 # Matching ignores case because macOS runners and developer Macs read .NPMRC
-# as .npmrc.
+# as .npmrc; paths with the two non-ASCII letters that fold to ASCII fail too.
 set -euo pipefail
 
 ALLOWED_PACKAGE_JSON=(
@@ -37,9 +37,15 @@ trap 'rm -f "$list" "$stage" "$pkgs"' EXIT
 # Bash 3.2 (the macOS runner's bash) has no ${var,,}, so git does the
 # case-insensitive matching and the allowlist comparison stays exact.
 git -c core.quotePath=false ls-files -z -s --full-name -- ':(top)' >"$stage"
+# U+017F (long s) and U+212A (Kelvin sign) are the only non-ASCII letters
+# whose case fold is ASCII: macOS opens package.j\u017Fon as package.json, but
+# git icase and CODEOWNERS only fold ASCII. Written as UTF-8 bytes for bash 3.2.
+fold_s=$'\xc5\xbf'
+fold_k=$'\xe2\x84\xaa'
 while IFS= read -r -d '' entry; do
-  if [[ ${entry%% *} == 120000 ]]; then
-    printf '%s\0' "${entry#*$'\t'}" >>"$list"
+  path=${entry#*$'\t'}
+  if [[ ${entry%% *} == 120000 || $path == *"$fold_s"* || $path == *"$fold_k"* ]]; then
+    printf '%s\0' "$path" >>"$list"
   fi
 done <"$stage"
 git -c core.quotePath=false ls-files -z --full-name -- ':(top,glob,icase)**/package.json' >"$pkgs"
@@ -56,7 +62,7 @@ if [[ -s "$list" ]]; then
   # after an embedded newline, starts with "path:", so a crafted filename
   # cannot start a workflow command even if the runner trims indentation.
   echo "::error::Tracked npm or Yarn config, npm-shrinkwrap.json, node_modules path, symlink or unexpected package.json is not allowed in this repository. Matching CODEOWNERS entries are case-sensitive; this check is the enforcing control."
-  tr '\0' '\n' <"$list" | sed 's/^/path: /'
+  tr '\0\r' '\n' <"$list" | sed 's/^/path: /'
   exit 1
 fi
 echo "No tracked package-manager config, node_modules, symlinks or unexpected package.json."
