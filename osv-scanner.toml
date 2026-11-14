@@ -1,0 +1,14 @@
+# OSV-Scanner accepted findings. Each entry needs a reason and an expiry date.
+# The protected PR scan runs with --no-ignore and only reports NEW findings,
+# so this file never hides a vulnerability that a PR introduces.
+
+[[IgnoredVulns]]
+id = "GHSA-8474-xrp6-wh69"
+ignoreUntil = 2027-02-14T00:00:00Z
+reason = """
+activesupport safe_constantize DoS. Every fixed release is 8.0.5.2 or later,
+and CocoaPods (cocoapods-core 1.16.2 and 1.17.0) requires activesupport < 8.
+activesupport only runs inside `pod install` on developer and CI machines; it
+is not part of the shipped app. Remove this entry once CocoaPods allows
+activesupport 8, and bump the Gemfile range then.
+"""
