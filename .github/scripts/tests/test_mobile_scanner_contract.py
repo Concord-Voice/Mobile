@@ -60,7 +60,13 @@ class MobileScannerContract(unittest.TestCase):
             self.assertIn('ioc', WORKFLOW['jobs'][name]['needs'], name)
         app = WORKFLOW['jobs']['app-checks']
         self.assertEqual([step['run'] for step in app['steps'] if 'run' in step],
-                         ['npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
+                         ['scripts/security/reject-package-manager-config.sh',
+                          'npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
+        # The guard runs before setup-node, whose npm cache lookup reads project config.
+        names = [step.get('uses', step.get('run', '')) for step in app['steps']]
+        guard = names.index('scripts/security/reject-package-manager-config.sh')
+        setup = next(i for i, n in enumerate(names) if n.startswith('actions/setup-node@'))
+        self.assertLess(guard, setup)
         self.assertEqual(app['permissions'], {'contents': 'read'})
         # The reported build result is build.yml's own job result, never a constant.
         self.assertEqual(WORKFLOW['jobs']['build']['uses'], './.github/workflows/build.yml')
@@ -69,6 +75,15 @@ class MobileScannerContract(unittest.TestCase):
         self.assertIn("'build': os.environ['BUILD_RESULT']", report['run'])
         self.assertEqual(report['env']['BUILD_RESULT'], '${{ needs.build.result }}')
         self.assertNotIn('SONAR_TOKEN', json.dumps(WORKFLOW))
+
+    def test_native_jobs_run_the_guard_before_setup_node(self):
+        native = yaml.load((ROOT / '.github/workflows/mobile-native.yml').read_text(),
+                           Loader=yaml.BaseLoader)
+        for name in ('ios-native', 'android-native'):
+            names = [step.get('uses', step.get('run', '')) for step in native['jobs'][name]['steps']]
+            guard = names.index('scripts/security/reject-package-manager-config.sh')
+            setup = next(i for i, n in enumerate(names) if n.startswith('actions/setup-node@'))
+            self.assertLess(guard, setup, name)
 
     def test_default_branch_scanners_run_after_ioc(self):
         baseline = yaml.load((ROOT / '.github/workflows/scanner-baseline.yml').read_text(),

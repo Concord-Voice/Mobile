@@ -440,6 +440,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Before setup-node, whose npm cache lookup already reads project config:
+      # a PR-controlled .npmrc could set node-options or script-shell, and a
+      # tracked node_modules copy could load ahead of the installed package,
+      # either one neutralising the dependency compatibility gate.
+      - name: Reject tracked package-manager config
+        run: scripts/security/reject-package-manager-config.sh
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -494,6 +500,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s .github/scripts/tests -p test_mobile_notice.py
           python3 -m unittest discover -s .github/scripts/tests -p test_mobile_scanner_contract.py
+          python3 -m unittest discover -s .github/scripts/tests -p test_reject_package_manager_config.py
           python3 -m unittest discover -s .github/scripts/tests -p test_protected_scanner_policy.py
           python3 -m unittest discover -s .github/scripts/tests -p test_ci_scan_verdict.py
           python3 -m unittest discover -s .github/scripts/tests -p test_print_codeql_results.py

@@ -6,7 +6,9 @@ const path = require('node:path');
 const { test } = require('node:test');
 const merge = require('deepmerge');
 
-// Fixed path, so a node_modules directory nearer this file cannot stand in.
+// Fixed path, so a stray node_modules copy nearer this file cannot supply the
+// deadline. A tracked one could still patch this process before any test runs;
+// scripts/security/reject-package-manager-config.sh fails CI on that first.
 const VENDOR_DIR = path.join(__dirname, '..', 'vendor', 'deepmerge');
 
 const hostile = () =>
@@ -319,7 +321,12 @@ test('vendored patch is inside its upstream advisory re-check window', t => {
   );
   // new Date rolls impossible dates such as 2027-02-31 into the next month.
   assert.equal(deadline.toISOString().slice(0, 10), reviewBy);
-  const inCi = Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
+  // CI=0 or CI=false (some shells export it) is a local run; Actions always
+  // sets GITHUB_ACTIONS, so any value there counts.
+  const ci = process.env.CI;
+  const inCi =
+    Boolean(process.env.GITHUB_ACTIONS) ||
+    (Boolean(ci) && !/^(0|false)$/i.test(ci));
   if (process.env.CONCORD_SKIP_REVIEW_DEADLINE === '1') {
     // For bisecting or rebuilding a historical commit locally only.
     assert.ok(!inCi, 'CONCORD_SKIP_REVIEW_DEADLINE is not allowed in CI');
@@ -332,12 +339,16 @@ test('vendored patch is inside its upstream advisory re-check window', t => {
     `vendor/deepmerge is past its ${reviewBy} upstream advisory re-check`,
   );
   if (daysLeft <= REVIEW_WARNING_DAYS) {
-    const message = `vendor/deepmerge upstream advisory re-check due ${reviewBy} (${Math.ceil(
-      daysLeft,
-    )} days left)`;
+    const days = Math.ceil(daysLeft);
+    const message = `vendor/deepmerge upstream advisory re-check due ${reviewBy} (${days} day${
+      days === 1 ? '' : 's'
+    } left)`;
     t.diagnostic(message);
     if (process.env.GITHUB_ACTIONS === 'true') {
-      // A workflow command on its own line becomes a visible annotation.
+      // A workflow command becomes an annotation only at the start of a line;
+      // the leading newline guarantees that. It reaches the log unprefixed
+      // under the default spec reporter; --test-reporter=tap would prefix it
+      // with "# " and GitHub would no longer show it.
       process.stdout.write(
         `\n::warning file=vendor/deepmerge/package.json::${message}\n`,
       );
