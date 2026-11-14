@@ -49,13 +49,13 @@ async function project(t) {
     writeFile(catalog, pristine),
     writeFile(
       rnPackage,
-      JSON.stringify({ name: 'react-native', version: '0.88.0' }),
+      JSON.stringify({ name: 'react-native', version: '0.88.1' }),
     ),
     writeFile(
       pluginPackage,
       JSON.stringify({
         name: '@react-native/gradle-plugin',
-        version: '0.88.0',
+        version: '0.88.1',
       }),
     ),
     writeFile(script, await readFile(sourceURL)),
@@ -124,11 +124,11 @@ test('patch preserves every catalog byte except the one approved Kotlin version'
   );
   assert.deepEqual(JSON.parse(await readFile(fixture.rnPackage, 'utf8')), {
     name: 'react-native',
-    version: '0.88.0',
+    version: '0.88.1',
   });
   assert.deepEqual(JSON.parse(await readFile(fixture.pluginPackage, 'utf8')), {
     name: '@react-native/gradle-plugin',
-    version: '0.88.0',
+    version: '0.88.1',
   });
 });
 
@@ -168,7 +168,7 @@ test('both exact installed package identities are checked even for an already-pa
             const manifest = JSON.parse(
               await readFile(fixture[target], 'utf8'),
             );
-            manifest[field] = field === 'name' ? 'different-package' : '0.88.1';
+            manifest[field] = field === 'name' ? 'different-package' : '0.88.0';
             await writeFile(fixture[target], JSON.stringify(manifest));
             await rejectUnchanged(
               fixture,

@@ -38,8 +38,8 @@ export const cases = {
   ],
 };
 export class ProbeFailure extends Error {}
-// The Hermes engine and compiler version React Native 0.88.0 pins.
-const HERMES_ENGINE_VERSION = '260318099.0.4';
+// The Hermes engine and compiler version React Native 0.88.1 pins.
+const HERMES_ENGINE_VERSION = '260318099.0.5';
 const refuse = code => {
   throw new ProbeFailure(code);
 };
@@ -349,7 +349,7 @@ async function prepare(platform, target) {
   );
   if (
     rn.version !== pkg.dependencies['react-native'] ||
-    rn.version !== '0.88.0' ||
+    rn.version !== '0.88.1' ||
     compiler.version !== HERMES_ENGINE_VERSION
   )
     refuse('installed-version-mismatch');
