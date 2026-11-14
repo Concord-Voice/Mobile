@@ -18,4 +18,6 @@ scripts/repo-config.sh @Concord-Voice/security
 **/.npmrc @Concord-Voice/security
 **/.yarnrc @Concord-Voice/security
 **/.yarnrc.yml @Concord-Voice/security
-**/node_modules/ @Concord-Voice/security
+**/node_modules @Concord-Voice/security
+**/package.json @Concord-Voice/security
+**/npm-shrinkwrap.json @Concord-Voice/security
