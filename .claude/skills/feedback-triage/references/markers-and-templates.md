@@ -8,10 +8,10 @@ The public repo is source-available; the reporter's words are theirs. The routin
 
 ## The managed status comment
 
-Sentinel (first line, exact) lets the routine locate its comment among all comments:
+Sentinel (first line, exact) lets the routine locate its comment among all comments. It uses the Phase 0 prefix `$SP` (default `feedback-triage`); write it with the resolved value:
 
 ```markdown
-<!-- feedback-triage:status v1 -->
+<!-- $SP:status v1 -->
 ### 🛰️ Feedback triage status
 
 👥 **Reported by 3 user(s)** · 📌 Tracked as `example-repo-private#1234` · 🗓️ Tracked for **an upcoming Beta update**
@@ -61,7 +61,7 @@ ME="${FT_ME:-$(gh api user --jq .login 2>/dev/null)}"
 case "$ME" in app/*) ME="${ME#app/}[bot]" ;; esac
 # `gh api --jq` takes no --arg, so pipe to jq for the identity filter.
 gh api "repos/$PUBLIC/issues/$N/comments" --paginate \
-  | jq -c --arg me "$ME" '.[] | select((.user.login | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end) == $me and (.body | startswith("<!-- feedback-triage:status v1 -->"))) | {id, body}' \
+  | jq -c --arg me "$ME" --arg s "<!-- $SP:status v1 -->" '.[] | select((.user.login | if startswith("app/") then ltrimstr("app/") + "[bot]" else . end) == $me and (.body | startswith($s))) | {id, body}' \
   > /tmp/ft-managed.jsonl
 # More than one is ambiguous: leave this issue for a human and move to the next one.
 [ "$(grep -c '"id"' /tmp/ft-managed.jsonl)" -le 1 ] || { echo "more than one managed comment on #$N; skipping it for a human to fix" >&2; continue; }
