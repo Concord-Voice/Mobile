@@ -32,20 +32,24 @@ git -c core.quotePath=false ls-files -z --full-name -- \
   ':(top,glob,icase)**/node_modules/**' >"$list"
 
 stage=$(mktemp)
-trap 'rm -f "$list" "$stage"' EXIT
+pkgs=$(mktemp)
+trap 'rm -f "$list" "$stage" "$pkgs"' EXIT
+# Bash 3.2 (the macOS runner's bash) has no ${var,,}, so git does the
+# case-insensitive matching and the allowlist comparison stays exact.
 git -c core.quotePath=false ls-files -z -s --full-name -- ':(top)' >"$stage"
 while IFS= read -r -d '' entry; do
-  path=${entry#*$'\t'}
   if [[ ${entry%% *} == 120000 ]]; then
-    printf '%s\0' "$path" >>"$list"
-  elif [[ ${path,,} == package.json || ${path,,} == */package.json ]]; then
-    allowed=0
-    for known in "${ALLOWED_PACKAGE_JSON[@]}"; do
-      [[ $path == "$known" ]] && allowed=1
-    done
-    ((allowed)) || printf '%s\0' "$path" >>"$list"
+    printf '%s\0' "${entry#*$'\t'}" >>"$list"
   fi
 done <"$stage"
+git -c core.quotePath=false ls-files -z --full-name -- ':(top,glob,icase)**/package.json' >"$pkgs"
+while IFS= read -r -d '' path; do
+  allowed=0
+  for known in "${ALLOWED_PACKAGE_JSON[@]}"; do
+    [[ $path == "$known" ]] && allowed=1
+  done
+  ((allowed)) || printf '%s\0' "$path" >>"$list"
+done <"$pkgs"
 
 if [[ -s "$list" ]]; then
   # One fixed annotation. Every output line of a name, including any part
