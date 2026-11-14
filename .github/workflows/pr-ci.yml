@@ -500,6 +500,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s .github/scripts/tests -p test_mobile_notice.py
           python3 -m unittest discover -s .github/scripts/tests -p test_mobile_scanner_contract.py
+          python3 -m unittest discover -s .github/scripts/tests -p test_reject_package_manager_config.py
           python3 -m unittest discover -s .github/scripts/tests -p test_protected_scanner_policy.py
           python3 -m unittest discover -s .github/scripts/tests -p test_ci_scan_verdict.py
           python3 -m unittest discover -s .github/scripts/tests -p test_print_codeql_results.py
