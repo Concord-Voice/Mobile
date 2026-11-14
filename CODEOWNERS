@@ -15,3 +15,6 @@ scripts/repo-config.sh @Concord-Voice/security
 /.github/CODEOWNERS @Concord-Voice/security
 /docs/CODEOWNERS @Concord-Voice/security
 /scripts/patch-react-native-gradle-plugin.mjs @Concord-Voice/security
+**/.npmrc @Concord-Voice/security
+**/.yarnrc @Concord-Voice/security
+**/.yarnrc.yml @Concord-Voice/security

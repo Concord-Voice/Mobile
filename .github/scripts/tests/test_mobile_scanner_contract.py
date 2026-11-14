@@ -60,7 +60,13 @@ class MobileScannerContract(unittest.TestCase):
             self.assertIn('ioc', WORKFLOW['jobs'][name]['needs'], name)
         app = WORKFLOW['jobs']['app-checks']
         self.assertEqual([step['run'] for step in app['steps'] if 'run' in step],
-                         ['npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
+                         ['scripts/security/reject-package-manager-config.sh',
+                          'npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
+        # The guard runs before setup-node, whose npm cache lookup reads project config.
+        names = [step.get('uses', step.get('run', '')) for step in app['steps']]
+        guard = names.index('scripts/security/reject-package-manager-config.sh')
+        setup = next(i for i, n in enumerate(names) if n.startswith('actions/setup-node@'))
+        self.assertLess(guard, setup)
         self.assertEqual(app['permissions'], {'contents': 'read'})
         # The reported build result is build.yml's own job result, never a constant.
         self.assertEqual(WORKFLOW['jobs']['build']['uses'], './.github/workflows/build.yml')
