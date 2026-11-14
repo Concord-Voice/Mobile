@@ -15,6 +15,7 @@ git -c core.quotePath=false ls-files -z -- \
   ':(top,glob,icase)**/.npmrc' \
   ':(top,glob,icase)**/.yarnrc' \
   ':(top,glob,icase)**/.yarnrc.yml' \
+  ':(top,glob,icase)**/node_modules' \
   ':(top,glob,icase)**/node_modules/**' >"$list"
 
 found=0
