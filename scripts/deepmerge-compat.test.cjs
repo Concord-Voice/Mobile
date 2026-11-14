@@ -6,7 +6,9 @@ const path = require('node:path');
 const { test } = require('node:test');
 const merge = require('deepmerge');
 
-// Fixed path, so a node_modules directory nearer this file cannot stand in.
+// Fixed path, so a stray node_modules copy nearer this file cannot supply the
+// deadline. A tracked one could still patch this process before any test runs;
+// scripts/security/reject-package-manager-config.sh fails CI on that first.
 const VENDOR_DIR = path.join(__dirname, '..', 'vendor', 'deepmerge');
 
 const hostile = () =>

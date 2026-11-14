@@ -55,6 +55,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Before any npm command: a tracked .npmrc or node_modules file would
+      # change what npm ci runs. See pr-ci.yml app-checks.
+      - name: Reject tracked package-manager config
+        run: scripts/security/reject-package-manager-config.sh
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0
@@ -174,6 +178,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Before any npm command: a tracked .npmrc or node_modules file would
+      # change what npm ci runs. See pr-ci.yml app-checks.
+      - name: Reject tracked package-manager config
+        run: scripts/security/reject-package-manager-config.sh
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0

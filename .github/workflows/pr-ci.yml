@@ -441,8 +441,9 @@ jobs:
         with:
           persist-credentials: false
       # Before setup-node, whose npm cache lookup already reads project config:
-      # a PR-controlled .npmrc could set node-options or script-shell and
-      # neutralise the dependency compatibility gate.
+      # a PR-controlled .npmrc could set node-options or script-shell, and a
+      # tracked node_modules copy could load ahead of the installed package,
+      # either one neutralising the dependency compatibility gate.
       - name: Reject tracked package-manager config
         run: scripts/security/reject-package-manager-config.sh
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
