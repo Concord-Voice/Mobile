@@ -9,6 +9,8 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+GUARD_RUN = ('guard=$(git show HEAD:scripts/security/reject-package-manager-config.sh)\n'
+             'bash -c "$guard"\n')
 WORKFLOW = yaml.load((ROOT / '.github/workflows/pr-ci.yml').read_text(), Loader=yaml.BaseLoader)
 
 
@@ -60,11 +62,11 @@ class MobileScannerContract(unittest.TestCase):
             self.assertIn('ioc', WORKFLOW['jobs'][name]['needs'], name)
         app = WORKFLOW['jobs']['app-checks']
         self.assertEqual([step['run'] for step in app['steps'] if 'run' in step],
-                         ['scripts/security/reject-package-manager-config.sh',
+                         [GUARD_RUN,
                           'npm ci', 'npm test', 'npm run lint', 'npm run typecheck'])
         # The guard runs before setup-node, whose npm cache lookup reads project config.
         names = [step.get('uses', step.get('run', '')) for step in app['steps']]
-        guard = names.index('scripts/security/reject-package-manager-config.sh')
+        guard = names.index(GUARD_RUN)
         setup = next(i for i, n in enumerate(names) if n.startswith('actions/setup-node@'))
         self.assertLess(guard, setup)
         self.assertEqual(app['permissions'], {'contents': 'read'})
@@ -81,7 +83,7 @@ class MobileScannerContract(unittest.TestCase):
                            Loader=yaml.BaseLoader)
         for name in ('ios-native', 'android-native'):
             names = [step.get('uses', step.get('run', '')) for step in native['jobs'][name]['steps']]
-            guard = names.index('scripts/security/reject-package-manager-config.sh')
+            guard = names.index(GUARD_RUN)
             setup = next(i for i, n in enumerate(names) if n.startswith('actions/setup-node@'))
             self.assertLess(guard, setup, name)
 

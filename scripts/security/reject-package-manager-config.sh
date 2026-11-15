@@ -65,7 +65,8 @@ if [[ -s "$list" ]]; then
   # after an embedded newline, starts with "path:", so a crafted filename
   # cannot start a workflow command even if the runner trims indentation.
   echo "::error::Tracked npm or Yarn config, npm-shrinkwrap.json, node_modules path, symlink or unexpected package.json is not allowed in this repository. Matching CODEOWNERS entries are case-sensitive; this check is the enforcing control."
-  tr '\0\r' '\n' <"$list" | sed 's/^/path: /'
+  # sort -u: a path can match more than one rule (a symlink named node_modules).
+  sort -zu "$list" | tr '\0\r' '\n' | sed 's/^/path: /'
   exit 1
 fi
 echo "No tracked package-manager config, node_modules, symlinks or unexpected package.json."

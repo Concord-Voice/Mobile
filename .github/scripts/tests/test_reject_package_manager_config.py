@@ -11,8 +11,13 @@ ALLOWED = ['package.json', 'vendor/deepmerge/package.json',
            '.github/tools/eslint-formatter/package.json', '.github/tools/license-checker/package.json']
 
 
+# Drop GIT_DIR, GIT_INDEX_FILE and friends (set inside hooks) so fixtures never
+# touch the developer's real repository.
+ENV = {**{k: v for k, v in os.environ.items() if not k.startswith('GIT_')}, 'LC_ALL': 'en_US.UTF-8'}
+
+
 def git(repo, *args, **kw):
-    return subprocess.run(['git', '-C', repo, *args], check=True, capture_output=True, **kw)
+    return subprocess.run(['git', '-C', repo, *args], check=True, capture_output=True, env=ENV, **kw)
 
 
 class RejectPackageManagerConfig(unittest.TestCase):
@@ -30,7 +35,7 @@ class RejectPackageManagerConfig(unittest.TestCase):
             workdir = Path(repo, cwd)
             workdir.mkdir(parents=True, exist_ok=True)
             run = subprocess.run(['bash', str(GUARD)], cwd=workdir, capture_output=True,
-                                 env={**os.environ, 'LC_ALL': 'en_US.UTF-8'})
+                                 env=ENV)
             paths = [line[len(b'path: '):] for line in run.stdout.splitlines() if line.startswith(b'path: ')]
             return run.returncode, run.stdout, paths
 
@@ -44,12 +49,17 @@ class RejectPackageManagerConfig(unittest.TestCase):
                      b'x/Node_Modules/p/i.js', b'scripts/node_modules', b'scripts/package.json',
                      b'PACKAGE.JSON', b'Vendor/deepmerge/package.json',
                      'scripts/package.jſon'.encode(), 'npm-shrinKwrap.json'.encode(),
-                     'src/node_moduleſ/x.js'.encode(), b'bad\xff/.npmrc']:
+                     'src/node_moduleſ/x.js'.encode(), 'scripts/ſecurity/reject-package-manager-config.sh'.encode(),
+                     b'bad\xff/.npmrc']:
             with self.subTest(name=name):
                 rc, out, paths = self.run_guard([name])
                 self.assertEqual(rc, 1, out)
                 self.assertEqual(paths, [name])
                 self.assertEqual(out.count(b'::error::'), 1)
+
+    def test_a_path_matching_two_rules_is_listed_once(self):
+        rc, out, paths = self.run_guard(symlink=b'node_modules')
+        self.assertEqual((rc, paths), (1, [b'node_modules']), out)
 
     def test_symlink_fails(self):
         rc, out, paths = self.run_guard(symlink=b'scripts/anylink')

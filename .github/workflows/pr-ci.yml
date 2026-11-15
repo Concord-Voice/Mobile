@@ -445,7 +445,11 @@ jobs:
       # tracked node_modules copy could load ahead of the installed package,
       # either one neutralising the dependency compatibility gate.
       - name: Reject tracked package-manager config
-        run: scripts/security/reject-package-manager-config.sh
+        # Read the guard from git, not the checkout: on macOS a tracked
+        # scripts/ſecurity/... copy can replace it on disk at checkout.
+        run: |
+          guard=$(git show HEAD:scripts/security/reject-package-manager-config.sh)
+          bash -c "$guard"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24

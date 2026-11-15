@@ -58,7 +58,11 @@ jobs:
       # Before any npm command: a tracked .npmrc or node_modules file would
       # change what npm ci runs. See pr-ci.yml app-checks.
       - name: Reject tracked package-manager config
-        run: scripts/security/reject-package-manager-config.sh
+        # Read the guard from git, not the checkout: on macOS a tracked
+        # scripts/ſecurity/... copy can replace it on disk at checkout.
+        run: |
+          guard=$(git show HEAD:scripts/security/reject-package-manager-config.sh)
+          bash -c "$guard"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0
@@ -181,7 +185,11 @@ jobs:
       # Before any npm command: a tracked .npmrc or node_modules file would
       # change what npm ci runs. See pr-ci.yml app-checks.
       - name: Reject tracked package-manager config
-        run: scripts/security/reject-package-manager-config.sh
+        # Read the guard from git, not the checkout: on macOS a tracked
+        # scripts/ſecurity/... copy can replace it on disk at checkout.
+        run: |
+          guard=$(git show HEAD:scripts/security/reject-package-manager-config.sh)
+          bash -c "$guard"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0
