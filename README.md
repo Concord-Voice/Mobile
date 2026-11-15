@@ -342,6 +342,15 @@ suppressions cannot narrow that coverage. Protected OSV scans also include
 Git-ignored lockfiles. Scanner-policy changes must land on `main` before the
 required workflow is repinned to their merge commit.
 
+Gradle dependency locking covers the shipped Android dependencies only.
+`android/app/gradle.lockfile` pins `:app`'s `releaseRuntimeClasspath`, which is
+what goes into the release APK, so OSV-Scanner can read it; without a lockfile it
+sees no Gradle dependencies at all. The Android Gradle plugin's own build, lint
+and test classpaths stay unlocked. After you change an Android dependency, a
+`react-native-video` bump included, run
+`./gradlew :app:dependencies --configuration releaseRuntimeClasspath --write-locks`
+in `android/`. A stale lockfile fails the build.
+
 SonarCloud (project `Concord-Voice_Mobile`) analyses `src/` with Jest coverage.
 On pull requests, the protected required build dispatches `sonarcloud.yml` from
 `main` in the `protected-sonar` environment. That run verifies the caller's
