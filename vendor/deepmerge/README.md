@@ -60,11 +60,14 @@ scanner exception used to carry; the compatibility test fails after that date
 until someone re-checks upstream advisories and releases and moves it. It
 reports the due date for the last 30 days before failing, as a GitHub warning
 annotation in Actions. Set `CONCORD_SKIP_REVIEW_DEADLINE=1` only to bisect or
-rebuild a historical commit locally; the test rejects it when `CI` or
-`GITHUB_ACTIONS` is set.
+rebuild a historical commit locally; the test rejects it in CI: whenever
+`GITHUB_ACTIONS` is set, or `CI` is set to anything other than `0` or `false`.
 The security team owns `vendor/` and the files that keep this patch in force
 (`package.json`, `package-lock.json`, the compatibility tests, the root
-`postinstall` script and every `CODEOWNERS` location).
+`postinstall` script, every `CODEOWNERS` location, and
+`scripts/security/reject-package-manager-config.sh`, which fails CI on any
+tracked `node_modules`, `.npmrc` or shrinkwrap that could stand in for this
+package and so keeps the compatibility test meaningful).
 
 Remove this override and directory when an upstream release or parent replacement
 fixes the behavior and passes these same compatibility and regression cases.

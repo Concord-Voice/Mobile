@@ -318,6 +318,10 @@ Actions and the CI tool manifests. Exact pins are documented in
 Scanner workflows are ported from Alpha. The IOC-gated app checks run `npm ci`,
 `npm test`, `npm run lint` and `npm run typecheck` on pull requests. This new CI
 job was accepted on 2026-10-24; Alpha had no Mobile app-level CI.
+Before `npm ci`, app checks and both native jobs run
+`scripts/security/reject-package-manager-config.sh`, which fails on any tracked
+`.npmrc` or `.yarnrc`, `npm-shrinkwrap.json`, `node_modules` path, symlink or
+unexpected `package.json`.
 
 IOC-gated CodeQL and Scorecard scans also run on pushes to `main` and daily.
 
