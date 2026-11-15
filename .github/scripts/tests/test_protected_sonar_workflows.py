@@ -103,7 +103,15 @@ class ProtectedSonarWorkflowTests(unittest.TestCase):
         self.assertIn("sonar.projectBaseDir", scan["with"]["args"])
         self.assertIn("!inputs.reusable-analysis", scan["with"]["args"])
         self.assertIn("sonar.qualitygate.wait=true", scan["with"]["args"])
-        download = next(step for step in steps if step.get("name") == "Download Mobile app coverage")
+        # SCA may run build tools: off on the PR path, on for the main scan, and
+        # the properties file must never let it resolve Gradle or Python.
+        pr_args, _, main_args = scan["with"]["args"].partition(" || ")
+        self.assertIn("-Dsonar.sca.enabled=false", pr_args)
+        self.assertNotIn("sonar.sca", main_args)
+        props = (ROOT / "sonar-project.properties").read_text().splitlines()
+        self.assertIn("sonar.sca.gradleNoResolve=true", props)
+        self.assertIn("sonar.sca.pythonNoResolve=true", props)
+        download =next(step for step in steps if step.get("name") == "Download Mobile app coverage")
         self.assertEqual(download["if"], "${{ inputs.reusable-analysis && inputs.desktop-coverage }}")
         self.assertEqual(download["with"], {"name": "desktop-coverage", "path": "coverage"})
         self.assertNotIn("github.event_name == 'workflow_call'", str(sonar))
