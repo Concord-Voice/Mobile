@@ -353,8 +353,8 @@ protected PR scan sets `sonar.sca.enabled=false`, because SCA can run build
 tools and that job holds `SONAR_TOKEN`; PR-time dependency gating stays with
 OSV-Scanner and Dependabot. SCA reads npm and Ruby from the committed
 `package-lock.json` and `Gemfile.lock`. Two gaps stay visible: Gradle is
-degraded (`sonar.sca.gradleNoResolve=true`, since the Android Gradle files have
-no lockfile), and CocoaPods (`ios/Podfile`) is not supported by SCA. OSV-Scanner
+degraded (`sonar.sca.gradleNoResolve=true`, since resolving would run build
+scripts in the job that holds `SONAR_TOKEN`), and CocoaPods (`ios/Podfile`) is not supported by SCA. OSV-Scanner
 cannot scan it either: it does not extract `ios/Podfile.lock` by default, and
 `osv.dev` has no CocoaPods ecosystem. No pod is versioned on its own. Each one
 comes from `react-native` or a React Native module in `package-lock.json`, which
