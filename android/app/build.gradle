@@ -106,7 +106,25 @@ android {
     }
 }
 
+// Gradle dependency locking, for the shipped dependency set only. The release runtime
+// classpath is what goes into the release APK, so gradle.lockfile is the list that
+// OSV-Scanner reads; without a lockfile it sees no Gradle dependencies at all. The
+// build-script, lint and test classpaths are the Android Gradle plugin's own tooling
+// and never ship, so they stay unlocked. After changing an Android dependency (a
+// react-native-video bump counts), regenerate the lockfile with
+//   ./gradlew :app:dependencies --configuration releaseRuntimeClasspath --write-locks
+configurations.matching { it.name == "releaseRuntimeClasspath" }.configureEach {
+    resolutionStrategy.activateDependencyLocking()
+}
+
 dependencies {
+    // media3 (through react-native-video) requests Guava 33.3.1, which GHSA-xxph-c9ww-hj94
+    // affects (fixed in 33.7.2).
+    constraints {
+        implementation("com.google.guava:guava:33.8.0-android") {
+            because "GHSA-xxph-c9ww-hj94 affects the 33.3.1-android that media3 requests"
+        }
+    }
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation(project(":concord-crypto"))
