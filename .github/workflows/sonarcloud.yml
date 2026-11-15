@@ -161,7 +161,10 @@ jobs:
         # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key  # pragma: allowlist nextline secret
         uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
         with:
-          args: ${{ !inputs.reusable-analysis && format('-Dsonar.projectBaseDir={0}/protected-sonar-analysis -Dsonar.qualitygate.wait=true', runner.temp) || (inputs.require-quality-gate && '-Dsonar.qualitygate.wait=true' || '') }}
+          # The PR path turns dependency analysis (SCA) off: it can run build
+          # tools in this job, which holds SONAR_TOKEN, and the inert PR tree
+          # has no lockfiles. The main-branch scan keeps SCA on.
+          args: ${{ !inputs.reusable-analysis && format('-Dsonar.projectBaseDir={0}/protected-sonar-analysis -Dsonar.qualitygate.wait=true -Dsonar.sca.enabled=false', runner.temp) || (inputs.require-quality-gate && '-Dsonar.qualitygate.wait=true' || '') }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

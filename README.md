@@ -348,6 +348,14 @@ On pull requests, the protected required build dispatches `sonarcloud.yml` from
 OIDC proof (`tools/sonar-caller-proof`) and scans an inert copy of the PR
 source. `sonar-main.yml` analyses `main` daily. Fork PRs skip the scan.
 
+SonarCloud dependency analysis (SCA) runs only in `sonar-main.yml`. The
+protected PR scan sets `sonar.sca.enabled=false`, because SCA can run build
+tools and that job holds `SONAR_TOKEN`; PR-time dependency gating stays with
+OSV-Scanner and Dependabot. SCA reads npm and Ruby from the committed
+`package-lock.json` and `Gemfile.lock`. Two gaps stay visible: Gradle is
+degraded (`sonar.sca.gradleNoResolve=true`, since the Android Gradle files have
+no lockfile), and CocoaPods (`ios/Podfile`) is not supported by SCA.
+
 ---
 
 ## Security

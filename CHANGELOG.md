@@ -50,6 +50,10 @@ encrypted direct messages.
 - **Messages:** GIF messages and messages with attachments no longer show as empty bubbles. GIFs play through Concord's GIF proxy once their message is on screen. As on desktop, they wait for a tap when "Load GIFs automatically" is off in your privacy settings. Each attachment is named with its size, such as "Photo, 2.0 KB".
 - **Messages:** On iPhone, saving a photo or video to Photos from the share sheet no longer closes the app.
 
+### Security
+
+- **Dependencies:** SonarCloud now checks the app's npm and Ruby dependencies on `main` for known vulnerabilities. Android Gradle dependencies are only partly covered, and CocoaPods is not covered.
+
 ## [0.1.0] - 2026-11-05
 
 The first iOS build signs you in, keeps your session behind Face ID, and reads
