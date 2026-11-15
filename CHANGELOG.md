@@ -52,7 +52,7 @@ encrypted direct messages.
 
 ### Security
 
-- **Dependencies:** SonarCloud now checks the app's npm and Ruby dependencies on `main` for known vulnerabilities. Android Gradle dependencies are only partly covered, and CocoaPods is not covered.
+- **Dependencies:** SonarCloud now checks the app's npm and Ruby dependencies on `main` for known vulnerabilities. Android Gradle dependencies are only partly covered. CocoaPods has no scanner support, but the iOS pods come from React Native npm packages that are scanned, plus the app's own ConcordCrypto module.
 
 ## [0.1.0] - 2026-11-05
 
