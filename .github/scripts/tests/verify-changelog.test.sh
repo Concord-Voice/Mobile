@@ -186,6 +186,7 @@ touch_svcdoc()   { mkdir -p "$1/native/ConcordCrypto" && echo "$2" >> "$1/native
 touch_testhelp() { mkdir -p "$1/src/testhelpers" && echo "// $2" >> "$1/src/testhelpers/fixtures.ts"; }
 touch_admin()    { mkdir -p "$1/client/admin/src" && echo "// $2" >> "$1/client/admin/src/panel.tsx"; }
 
+touch_gradle()    { mkdir -p "$1/native/ConcordCrypto/android" && printf '// %s\n' "$2" > "$1/native/ConcordCrypto/android/$3"; }
 touch_manifest() { mkdir -p "$1/native/ConcordCrypto" && printf '{"version":"1.0.%s"}\n' "$2" > "$1/native/ConcordCrypto/package.json"; }
 
 commit_trailer() { # <dir> <trailer line>
@@ -321,6 +322,12 @@ run_case "test-only change is exempt" 0 "$r"
 # Bot dependency PRs would otherwise need a standing label ritual to stay green.
 r=$(make_repo 0.2.20); touch_manifest "$r" 1; commit_all "$r"
 run_case "dependency manifest change is exempt" 0 "$r"
+
+# Dependabot edits the ConcordCrypto Android build file and its Gradle lockfiles.
+for gradle_file in build.gradle build.gradle.kts gradle.lockfile buildscript-gradle.lockfile; do
+  r=$(make_repo 0.2.20); touch_gradle "$r" change "$gradle_file"; commit_all "$r"
+  run_case "$gradle_file change is exempt" 0 "$r"
+done
 
 # ── Case 18: Changelog-Exempt trailer WITH a reason → PASS ───────────────────
 r=$(make_repo 0.2.20); touch_include "$r" change

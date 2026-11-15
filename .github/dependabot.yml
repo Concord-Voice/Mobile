@@ -150,6 +150,25 @@ updates:
       - "area: deps"
     open-pull-requests-limit: 5
 
+  # ─── Android native module (ConcordCrypto) ─────────────────────────
+  # android/settings.gradle points :concord-crypto at this directory with
+  # projectDir, which sits outside /android, so the entry above does not scan
+  # its build.gradle (androidx.biometric, junit).
+  - package-ecosystem: "gradle"
+    directory: "/native/ConcordCrypto/android"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+    labels:
+      - "area: deps"
+    open-pull-requests-limit: 5
+
   # ─── Python (pre-commit / workflow tooling) ────────────────────────
   # .github/requirements-pyyaml.txt is consumed by pr-ci.yml,
   # workflow-validate.yml and the pin check in required-pr-build.yml, which

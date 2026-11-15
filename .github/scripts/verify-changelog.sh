@@ -239,7 +239,8 @@ fi
 # the native modules, and the iOS and Android app sources (#1857). The exempt
 # set is everything whose change a user cannot observe.
 # Dependency manifests are exempt so bot PRs stay green without a standing
-# label ritual.
+# label ritual. That includes the Gradle build files and lockfiles Dependabot
+# edits under native/ConcordCrypto/android.
 #
 # ORDERING: like Rule 3, this must precede Rule 1 — every path through Rule 1
 # exits, so anything after it is unreachable.
@@ -248,7 +249,7 @@ RELEVANT=$(printf '%s\n' "$CHANGED" \
   | grep -E '^(App\.tsx$|index\.js$|src/|native/|ios/ConcordVoice/|android/app/src/)' \
   | grep -vE '(^|/)(tests?|testdata|testhelpers|testutil|__tests__|__mocks__|fixtures)/' \
   | grep -vE '\.(test|spec)\.(ts|tsx|js|jsx)$|_test\.go$' \
-  | grep -vE '(^|/)(package(-lock)?\.json|go\.(mod|sum))$' \
+  | grep -vE '(^|/)(package(-lock)?\.json|go\.(mod|sum)|build\.gradle(\.kts)?|(buildscript-)?gradle\.lockfile)$' \
   | grep -vE '\.(md|ya?ml)$|(^|/)(Dockerfile[^/]*|Makefile|\.dockerignore|\.env\.example)$' || true)
 # The last two exclusions are noise control, and noise here is corrosive rather
 # than merely annoying: a lint-config or README-only PR told to write a
