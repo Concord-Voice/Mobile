@@ -76,7 +76,7 @@ function isDirectEntry() {
   return canonicalEntry === realpathSync(modulePath);
 }
 
-if (isDirectEntry()) {
+if (false && isDirectEntry()) { // diagnostic: leave RN's Kotlin 2.2 selection in place
   try {
     if (process.argv.length !== 2) throw new Error('unexpected-arguments');
     const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
