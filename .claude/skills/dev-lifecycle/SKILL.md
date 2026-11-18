@@ -1868,7 +1868,9 @@ For each bot in the expected set, check three signals, driven from its `.bots[]`
 gh pr checks <PR> --json name,state,bucket | jq --arg c "<entry.ci_check>" '.[] | select(.name == $c) | {state, bucket}'
 
 # Conversation comment from this bot: EXACT (normalised) login equality — never a substring,
-# which lets a look-alike login satisfy a gatekeeper — and, for a shared login such as
+# which lets a look-alike login satisfy a gatekeeper. A roster login ending in `[bot]` names a
+# GitHub App, so it also requires `user.type == "Bot"`: `norm` strips the suffix, and a plain
+# User account with the bare name (one exists for `sonarqubecloud`) would otherwise match. And, for a shared login such as
 # github-actions[bot], the entry's body marker as well. The bot's own acknowledgement is
 # filtered out. The ack pattern goes in as data through `--arg`, never pasted into the filter:
 # inside a jq string literal a pattern's `\*` is an invalid escape, and the probe errors instead
@@ -1879,17 +1881,17 @@ LOGINS=$(jq -c '.bots[] | select(.name == "<entry.name>") | [.login] | flatten |
 gh api --paginate repos/<owner>/<repo>/issues/<PR>/comments | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" --arg marker "<entry.marker>" --arg p "$ACK" '
       def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [ .[] | select((.user.login | norm) as $u | ($logins | map(norm) | index($u)) != null)
+      [ .[] | select(. as $c | any($logins[]; norm == ($c.user.login | norm) and ((ascii_downcase | endswith("[bot]") | not) or $c.user.type == "Bot")))
             | select($marker == "" or ((.body // "") | contains($marker)))
             | select($p == "" or ((.body // "") | test($p; "i") | not)) ]'
 
 # Formal PR review and/or inline review comments from this bot (same exact, normalised login)
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/reviews | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [.[] | select((.user.login | norm) as $u | ($logins | map(norm) | index($u)) != null)] | length'
+      [.[] | select(. as $c | any($logins[]; norm == ($c.user.login | norm) and ((ascii_downcase | endswith("[bot]") | not) or $c.user.type == "Bot")))] | length'
 gh api --paginate repos/<owner>/<repo>/pulls/<PR>/comments | jq -s 'add // []' \
   | jq --argjson logins "$LOGINS" 'def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-      [.[] | select((.user.login | norm) as $u | ($logins | map(norm) | index($u)) != null)] | length'
+      [.[] | select(. as $c | any($logins[]; norm == ($c.user.login | norm) and ((ascii_downcase | endswith("[bot]") | not) or $c.user.type == "Bot")))] | length'
 ```
 
 A bot's review has **ARRIVED** when ANY of:
@@ -2442,14 +2444,32 @@ while :; do
       | select((.marker // "") == "")
       | { name, head: (.head_verdict_pattern // ""),
           logins: ( [ .login ] | flatten | map(select(. != null and . != ""))
-                    | map(ascii_downcase | sub("\\[bot\\]$"; "")) ) }
+                    | map(ascii_downcase | sub("\\[bot\\]$"; "")) ),
+          typed: ( [ .login ] | flatten | map(select(type == "string") | ascii_downcase)
+                   | map(select(endswith("[bot]")) | sub("\\[bot\\]$"; "")) ) }
       | select((.logins | length) > 0) ]' "$CFG") \
     || { echo "UNKNOWN: could not derive the reviewer login set from $CFG"; exit 2; }
+  # A roster login ending in `[bot]` names a GitHub App. GraphQL drops that suffix, so on the
+  # GraphQL legs below a plain User account with the same bare name is indistinguishable from
+  # the App by login (a User account named `sonarqubecloud` exists, and anyone may comment on a
+  # public repo). REST keeps `user.type`: collect the node ids of every comment and review whose
+  # author is NOT a Bot yet whose login is the bare name of such a roster login, and drop those
+  # ids on every GraphQL leg. GraphQL `id` equals REST `node_id`. Fails closed like the probes.
+  TYPED=$(jq -c '[ (.bots // [])[] | [ .login ] | flatten | .[] | select(type == "string")
+                   | ascii_downcase | select(endswith("[bot]")) | sub("\\[bot\\]$"; "") ] | unique' "$CFG") \
+    || { echo "UNKNOWN: could not derive the App login set from $CFG"; exit 2; }
+  IMPOSTORS=$( set -o pipefail
+      { gh api --paginate "repos/<owner>/<repo>/issues/<PR>/comments" \
+        && gh api --paginate "repos/<owner>/<repo>/pulls/<PR>/reviews"; } \
+      | jq -cs --argjson typed "$TYPED" '[ .[][] | select(.user.type != "Bot")
+            | select((.user.login // "" | ascii_downcase) as $l | $typed | index($l))
+            | .node_id ]' ) \
+    || { echo "UNKNOWN: impostor probe failed — a User account with an App's bare login is indistinguishable from the App"; exit 2; }
   now=$( set -o pipefail
          { gh pr view <PR> --json reviews,comments,statusCheckRollup \
              | jq -r --arg since "$READY_ISO" --arg want "$WANT_FLAT" --argjson nv "$NONVERDICT" \
                      --arg declined "$DECLINED_ALIASES" --arg head "$HEAD_SHA" \
-                     --argjson logins "$LOGINS" '
+                     --argjson logins "$LOGINS" --argjson imp "$IMPOSTORS" '
                  # NORMALISE before comparing logins. `gh pr view --json comments` is GRAPHQL,
                  # and GraphQL `Actor.login` OMITS the `[bot]` suffix that REST returns and that
                  # the roster carries: measured on a real PR, GraphQL says `coderabbitai` where
@@ -2480,9 +2500,12 @@ while :; do
                           | any(. as $s | ($s | length) >= 7 and ($head | startswith($s)))));
                  # A review also binds to its COMMIT: one submitted after a push but for the
                  # superseded head (an in-flight review finishing late) is not about this head.
-                 [ (.reviews[]?      | select(.submittedAt  > $since and (.commit.oid // "") == $head)
+                 # Drop look-alike User accounts first (IMPOSTORS above).
+                 [ (.reviews[]?      | select((.id | IN($imp[])) | not)
+                                     | select(.submittedAt  > $since and (.commit.oid // "") == $head)
                                      | who(.author.login)),
-                   (.comments[]?     | select(.createdAt    > $since or at_head(.))
+                   (.comments[]?     | select((.id | IN($imp[])) | not)
+                                     | select(.createdAt    > $since or at_head(.))
                       | . as $c
                       # BIND the ack element before piping. `|` rebinds `.`, so a bare
                       # `.ack_pattern` inside `($c.body | test(.ack_pattern))` resolves against
@@ -2533,7 +2556,7 @@ while :; do
                  | map(select(. as $s | ($want|split("\n"))
                        | any(. as $w | ($s|ascii_downcase) | contains($w|ascii_downcase)))) | .[]' \
            && gh pr view <PR> --json comments \
-             | jq -r --arg since "$READY_ISO" --argjson markers "$MARKERS" '
+             | jq -r --arg since "$READY_ISO" --argjson markers "$MARKERS" --argjson imp "$IMPOSTORS" '
                  # Same GraphQL-vs-REST login normalisation as the arrival leg above, and this
                  # leg is where the mismatch was ORIGINALLY latent: `.login` is
                  # `github-actions[bot]` for both marker-bearing entries, GraphQL reports
@@ -2544,17 +2567,21 @@ while :; do
                  # on a real PR while fixing the ack leg; fixed here rather than deferred,
                  # because it is the same defect in the same function.
                  def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-                 [ .comments[]? | select(.createdAt > $since) | . as $c | $markers[] as $m
+                 [ .comments[]? | select((.id | IN($imp[])) | not)
+                     | select(.createdAt > $since) | . as $c | $markers[] as $m
                      | select(($c.author.login | norm) == ($m.login | norm)
                               and (($c.body // "") | contains($m.marker)))
                      | $m.name ] | unique | .[]' \
            && gh api --paginate "repos/<owner>/<repo>/pulls/<PR>/comments" \
              | jq -r --argjson logins "$LOGINS" --arg since "$READY_ISO" '
                  # Same exact-equality rule as the other two login legs. This endpoint is REST,
-                 # so logins arrive WITH the `[bot]` suffix; `norm` strips it on both sides.
+                 # so logins arrive WITH the `[bot]` suffix; `norm` strips it on both sides,
+                 # and a login that names an App (`.typed`) must also be a Bot account.
                  def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
                  [ .[] | select(.created_at > $since) | . as $c
-                     | $logins[] | select(.logins | index(($c.user.login | norm))) | .name ]
+                     | $logins[] | select(.logins | index(($c.user.login | norm)))
+                     | select((.typed | index(($c.user.login | norm))) == null or $c.user.type == "Bot")
+                     | .name ]
                  | unique | .[]'
          } 2>/dev/null ) || { echo "UNKNOWN: reviewer probe failed (auth, rate limit or API error) — absence here is unobserved, not confirmed"; exit 2; }
   now=$(printf '%s\n' "$now" | sort -u)
@@ -2563,9 +2590,10 @@ while :; do
   # above, a failed ack probe degrades the timeout MESSAGE and never the verdict, so it must not
   # exit 2. Losing it costs the "acknowledged but never delivered" wording; nothing else.
   nv_now=$( gh pr view <PR> --json comments \
-      | jq -r --arg since "$READY_ISO" --argjson nv "$NONVERDICT" '
+      | jq -r --arg since "$READY_ISO" --argjson nv "$NONVERDICT" --argjson imp "$IMPOSTORS" '
           def norm: (. // "") | ascii_downcase | sub("\\[bot\\]$"; "");
-          [ .comments[]? | select(.createdAt > $since) | . as $c | $nv[] as $p
+          [ .comments[]? | select((.id | IN($imp[])) | not)
+              | select(.createdAt > $since) | . as $c | $nv[] as $p
               | select(($p.logins | index($c.author.login | norm)) != null
                        and (($c.body // "") | test($p.pattern; "i")))
               | "\($p.kind)\t\($p.name)" ] | unique | .[]' 2>/dev/null ) || nv_now=""
