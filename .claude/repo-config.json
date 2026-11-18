@@ -28,6 +28,14 @@
       "decline_pattern": "sent several Gitar comments|wait about [0-9]+ minutes and comment again"
     },
     {
+      "match": "sonarqubecloud",
+      "name": "SonarCloud",
+      "login": "sonarqubecloud[bot]",
+      "ci_check": "SonarCloud Code Analysis",
+      "blocking": true,
+      "when": "always"
+    },
+    {
       "name": "Semgrep SAST",
       "login": "github-actions[bot]",
       "marker": "<!-- semgrep-results -->",
