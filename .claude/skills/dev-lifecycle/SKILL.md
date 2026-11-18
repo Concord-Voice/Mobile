@@ -39,7 +39,7 @@ When a phase says "Run `/skill-name`", you MUST invoke it via the Skill tool. Do
 
 # Dev Lifecycle
 
-> **Structure is generic; the repo-specific knobs are data.** The 9-phase flow, the mode-to-gate matrix, the dispatch gate, and the never-`--admin`-bypass discipline are fixed. Everything that varies per repo — artifact directories, the bot roster waited on at Phase 7.5, the reviewer roster at Phase 8, the quality gate, parent-epic linkage, version-bump, and branch-protection prose — is read from the OPTIONAL per-repo `.claude/repo-config.json` via the shared helper `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has '<jq-filter>'`). With an absent file, or any absent/`null` key, the affected step **degrades gracefully** — it is skipped, never errored. The bot roster in particular lives in `.bots[]` as the **single source of truth** shared with `/enhanced-pr-review`, so the two can never drift on which bots are online/offline or blocking. See `config/repo-config.reference.md` for the full schema.
+> **Structure is generic; the repo-specific knobs are data.** The 9-phase flow, the mode-to-gate matrix, the dispatch gate, and the never-`--admin`-bypass discipline are fixed. Everything that varies per repo — artifact directories, the bot roster waited on at Phase 7.5, the reviewer roster at Phase 8, the quality gate, parent-epic linkage, version-bump, and branch-protection prose — is read from the OPTIONAL per-repo `.claude/repo-config.json` via the shared helper `scripts/repo-config.sh` (`rc_get '<jq-filter>' [default]`, `rc_has '<jq-filter>'`). With an absent file, or any absent/`null` key, the affected step **degrades gracefully** — it is skipped, never errored. The bot roster in particular lives in `.bots[]` as the **single source of truth** shared with `/enhanced-pr-review`, so the two can never drift on which bots are online/offline or blocking. See `.claude/repo-config.reference.md` for the full schema.
 >
 > Load the helper once at the top of any phase that reads config, and resolve the default branch up front (used throughout in place of a hard-coded `main`). **Load the helper from the default branch, never from this checkout:** on a PR branch, `scripts/repo-config.sh` is the PR's code, and sourcing it executes that code before any review gate does. The block below loads the default branch's helper (the branch comes from the GitHub API, then `origin/HEAD`, then `main`), takes `DEFAULT_BRANCH` from that ref rather than the PR-editable `.default_branch` key, and puts the default branch's config in `RC_TRUSTED_CFG`. Each Bash call starts a fresh shell, so repeat this block in any call that uses `rc_get` or `RC_TRUSTED_CFG`. `rc_get` still reads the checkout's `.claude/repo-config.json`, so treat it as PR-controlled. These steps read the default branch's config instead, because their keys pick commands or reviewers: the Phase 4 count-drift probe, the Phase 7.5 bot roster, `/verify-quality-gate`, and the review floor and disposition gate in `/review-pr` and `/enhanced-pr-review`. `/pr-creation` and every other skill that uses the helper load it the same way. Every other `rc_get` key in this skill only shapes paths, prose or board fields, and a PR may change those.
 >
@@ -88,6 +88,8 @@ mirror — telling a Codex reader that these are *its* natives, which is exactly
 | `Monitor`, and Bash `run_in_background` | Phase 6 CI wait (via `/ci-status`), Phase 7.5 arrival wait, Phase 10 run wait | Any background/detached session the harness does provide (Codex exposes exec sessions). Failing that, a **bounded foreground poll** with an explicit deadline — worse, but it still waits rather than handing scheduling to the developer, which is the property that matters |
 | `EnterPlanMode` / `ExitPlanMode` | Ad-hoc path when spec+plan are skipped | A read-only exploration pass — read and search only, no writes — ending in a written plan the developer explicitly approves before any edit. The gate is the point; the tool is not |
 | A persistent lesson store | Step 10.4 capture | A per-project session memory store, where the running harness provides one. Codex and Copilot expose none, so there use the org's **shared lesson store** if one exists (for example a tracked `knowledge/memory/` directory with a committed `INDEX.md` in the org tooling repository), delivered as a PR to that repository. Never invent an untracked path — an unreachable lesson is the same as no lesson |
+| Named-agent dispatch under a multi-model router (e.g. Copilot Fusion) | Every `@agent` dispatch (Phases 1–4, 8) | The router does not start subagents. Dispatch each `@agent` as the harness's custom agent of the same name where one is installed: it runs on its own model pin, outside the router. Where none is installed, name the missing agent in the visibility line and the PR body; never let the router's conversation stand in for the specialist |
+| A router that discards drafts (Fusion's Cascade and Critique patterns) | Phases 3–5 | A discarded draft does not undo its file edits. Before every commit, run `git status` and `git diff --stat` and match every changed path to a plan task. Revert or report any path that no task explains |
 | `/run` | Phase 4 visual verification | The repo's own launch path (its dev-environment start script, then the client under change) plus whatever screenshot capability the harness has. If it has none, say so in the PR body rather than silently claiming verification |
 
 **The fallback is a downgrade, not an exemption.** Each one preserves the property the step
@@ -130,33 +132,17 @@ Defect repair still needs a different *execution* shape — failing test first, 
 
 ---
 
-## Step 0: Resolve Model-Capability Tier (every invocation)
+## No model gate
 
-Before phase detection, resolve the runner's capability tier per the detection procedure in [`_shared/model-capability-tiers.md`](../_shared/model-capability-tiers.md):
+`/dev-lifecycle` never checks which model runs it, and nothing in it depends on the answer. Do not print a tier, search your context for a model ID, or change a default, a gate, or a batch rule because of what model you think you are. Some harnesses show no model ID. A multi-model router (for example Copilot Fusion) sends each prompt to a different model, so there is no one model to check. The defaults in this file are fixed and the same on every harness.
 
-1. Locate harness-provided model-identity evidence: an explicit model ID string injected into the system context (e.g., Claude Code's environment block names the exact model ID). Strip harness decorations (bracketed effort suffixes) before matching.
-2. Match the stripped ID against the catalog's mapping table → profile. GPT-6 rows
-   require equality with the entire ID; the other rows retain prefix matching.
-3. No evidence → `generic` (fail-closed). Present-but-unmapped ID → `generic` plus one WARN line: `WARN: unmapped model ID <id>; resolving generic — catalog may be stale`.
-4. Model self-belief is NEVER sufficient evidence — models misreport their own identity.
+Fixed orchestrator calibration (replaces the retired tier profiles):
 
-Print one line and hold the result in session memory only:
+- **Dynamic batch size:** 2–3 plan tasks inline between verification points.
+- **Retry budget:** 2 local pre-commit remediation cycles per failure, then surface it.
+- **Confidence posture:** decide and log routine choices inside auto phases; surface novel or ambiguous ones.
 
-```
-Tier: <profile> (model-id evidence: <id or "none — generic fail-closed">)
-```
-
-Tier is re-resolved on EVERY invocation (first run and re-entry) and is NEVER persisted — not to the mode-state file, not anywhere. A `tier=` line in any state file is ignored: no code path reads one. The mode-to-gate matrix below is tier-INVARIANT; tier calibrates recommendations and execution mechanics only (see the catalog's "Invariants tiers may not alter").
-
-**Tier is a small lever now — do not over-invest in it (narrowed 2026-07-24).** It used to also decide subagent dispatch granularity and *which model each subagent ran*. Both are retired: every agent pins its own `model` and `effort`, and **no orchestrator at any tier may pass a `model` override at dispatch**. What remains is orchestrator-only calibration — batch size between verification points, retry budget, confidence posture, and the ±1 mode-suggestion notch. An unmapped model ID is therefore a non-event: resolve `generic`, emit the WARN, and proceed. Do not stall a run over tier resolution, and do not let a `generic` resolution talk you out of dispatching the pinned fleet — the fleet's capability is independent of yours.
-
-**Cross-vendor runners.** Use the catalog's [cross-vendor equivalence table](../_shared/model-capability-tiers.md#cross-vendor-equivalence-claude--openai--codex) for the Codex model and effort translation, including its role-specific overrides. Translation happens only when generating that runner's agent profiles: source pins remain unchanged, and the orchestrator never passes a `model` override at dispatch.
-
-**GPT-6 runners.** The catalog maps exact harness IDs `gpt-6-astra`, `gpt-6-sol`, and
-`gpt-6-luna` to the existing `fable-5`, `opus-5`, and `sonnet-5` profiles respectively.
-An unsuffixed `GPT-6` family label supplies no exact model identity; keep the existing
-`generic` fail-closed result in that case. Available models and agent pins do not identify
-the running orchestrator.
+Every agent keeps its own `model` and `effort` pins. Never pass a `model` override at dispatch. To generate agent profiles for a non-Claude runner, translate the pins with [`model-equivalence.md`](../_shared/model-equivalence.md).
 
 ---
 
@@ -869,7 +855,6 @@ single-issue lifecycle afterward.
 | # | Check | On failure |
 |---|---|---|
 | A1 | **Security-surface disclosure.** Any issue carrying `risk: security`, `risk: privacy`, or a security-sensitive `domain:` label | **LIST it in the admission report — do not exclude.** The security-label mode floor was retired (see Phase 1.5), so this is disclosure, not a gate: the developer sees what is in the batch and drops anything they would rather drive themselves. Reviewer dispatch is unaffected — `@security-reviewer`, `@red-team` and any domain reviewers in the repo's `.review_agents` roster still fire on those labels, and Phase 9 still gates each merge |
-| A2 | **Tier floor.** Resolved tier is `generic` | **ABORT the batch.** `Dynamic` degrades to a static split on `generic`, and a `generic` orchestrator must not run a lifecycle beyond trivial scope. Unattended work on the weakest runner is the worst available combination |
 | A3 | **Surface-conflict pre-check.** Two issues whose `@architect` Mode-1 blast-radius scouts predict the same migration sequence number, the same lockfile, or the same canonical-writer file | **SERIALIZE the conflicting pair** (the later issue waits for the earlier one to merge), or exclude if the overlap is deep. The scout already produces this prediction, so the check costs nothing extra |
 | A4 | **Batch cap.** More than 8 issues | **TRUNCATE to the first 8** and say so. An unbounded epic would otherwise spawn unbounded unattended work |
 | A5 | **Parent-epic linkage.** Missing epic for an issue's `release:` stream | WARN only, per the normal Phase-1 posture. Never blocks |
@@ -1094,8 +1079,7 @@ Display the brief, then run the parent-epic linkage check below (if the repo ena
 **Agent Dispatch:** consult `## Phase 1: UNDERSTAND` in [`lifecycle-agent-dispatch.md`](../_shared/lifecycle-agent-dispatch.md). Always: `@architect` (Mode 1 — blast-radius scout), dispatched via the Agent tool after `/issue-brief` returns. Its reviewer prediction feeds Phase 2's design, not just the log. Candidate: `@researcher` when a knowledge gap blocks scoping. Emit the `Dispatched agents (Phase 1): […]` visibility line.
 
 For Codex, Phase 1 agents use their generated Codex agent profiles' model and effort pins, with
-the source `model:` and `effort:` pins named alongside them. The orchestrator's GPT-6
-tier does not change an agent's pin; the repo's agent catalog, where one exists, records the active profile translation.
+the source `model:` and `effort:` pins named alongside them. The orchestrator's own model does not change an agent's pin; the repo's agent catalog, where one exists, records the active profile translation.
 
 ### Parent-epic linkage check
 
@@ -1167,15 +1151,11 @@ Both flags from the `argument-hint` are optional:
 
 | Option | When to recommend |
 |---|---|
-| `Inline` | Sequential work with shallow context. Bug fix, single-file change, simple refactor. Lower token cost. Recommended for trivial single-task scope on EVERY tier. |
+| `Inline` | Sequential work with shallow context. Bug fix, single-file change, simple refactor. Lower token cost. Recommended for trivial single-task scope. |
 | `Subagent Driven` | Parallelizable work, multiple independent tasks, deep context per task. Higher token cost, better isolation. |
-| `Dynamic` (default for capable tiers at nontrivial scope) | Per-task inline-vs-subagent decisions at Phase 3 execution time against criteria D1–D5 (see Phase 3). Replaces the retired plan-time Hybrid split; `--approach=hybrid` is a deprecated alias for `dynamic`. |
+| `Dynamic` (default at nontrivial scope) | Per-task inline-vs-subagent decisions at Phase 3 execution time against criteria D1–D5 (see Phase 3). Replaces the retired plan-time Hybrid split; `--approach=hybrid` is a deprecated alias for `dynamic`. |
 
-**Recommendation precedence: user flag → tier profile → default.**
-
-Tier-conditional defaults (per the [tier catalog](../_shared/model-capability-tiers.md), profile axes 1/1a):
-- `fable-5` / `opus-5` / `sonnet-5` → **Dynamic** for nontrivial scope; **Inline** for trivial single-task scope.
-- `generic` → legacy shape heuristics: single task or simple refactor → **Inline**; ≥3 sub-tasks → **Dynamic-degraded** (plan-time static split: each task pre-marked inline/subagent in the plan itself); 4+ orthogonal sub-issues or explicit parallelism → **Subagent Driven**.
+**Recommendation precedence: user flag → default.** Default: **Dynamic** for nontrivial scope; **Inline** for trivial single-task scope.
 
 ### Question 2: Task Handling Mode
 
@@ -1206,7 +1186,7 @@ The five-mode framework (Hand-Held / Careful / Trusted / Weekly Deps / Overnight
 
 **Phase 9 always gates.** Merge always requires explicit user approval regardless of selected mode. This is the universal floor.
 
-> **What changed (2026-06-20 consolidation).** The old per-phase recommendation table (a different recommended mode for security work, bot PRs, frontend polish, tooling changes, etc.) is gone — mode selection is now a plain default plus a deterministic tier notch (the security floor that accompanied them was itself retired 2026-07-24 — see the retirement note below). The flag-conditional `Auto*` cells went away with Weekly Deps: bot-dependency PRs run as `Automated End-to-End`, content flags surface through `/weekly-deps`'s own triage tiers, not through a mode-matrix special case. `In-the-Loop` no longer gates execution (Phase 3) or final-review fix-application (Phase 8) — it gates only the four shared-state visibility boundaries.
+> **What changed (2026-06-20 consolidation).** The old per-phase recommendation table (a different recommended mode for security work, bot PRs, frontend polish, tooling changes, etc.) is gone — mode selection is now a plain default (the security floor that accompanied them was itself retired 2026-07-24 — see the retirement note below). The flag-conditional `Auto*` cells went away with Weekly Deps: bot-dependency PRs run as `Automated End-to-End`, content flags surface through `/weekly-deps`'s own triage tiers, not through a mode-matrix special case. `In-the-Loop` no longer gates execution (Phase 3) or final-review fix-application (Phase 8) — it gates only the four shared-state visibility boundaries.
 
 > **What changed (2026-07-24 On-the-Loop re-anchoring).** `On-the-Loop` moved from gating `5, 9` to gating `2, 8, 9`. The two modes now differ in *kind*, not just in count: **`In-the-Loop` gates shared-state visibility boundaries** (what becomes visible to others — plan, push, ready, merge), while **`On-the-Loop` gates judgment boundaries** (what a human must decide — the design going in, the review outcome coming out). The mechanical middle runs unattended.
 >
@@ -1214,17 +1194,9 @@ The five-mode framework (Hand-Held / Careful / Trusted / Weekly Deps / Overnight
 >
 > Phase 8's gate in `On-the-Loop` is a **review-outcome** gate: `/enhanced-pr-review` still runs unconditionally (it is read-only triage), and the gate falls on accepting its triage table and fix-application — not on whether the review happens.
 
-### Mode suggestion (default + tier notch)
+### Mode suggestion (fixed default)
 
-There is no per-workflow-type recommendation table. The suggested mode is a plain default, adjusted by model tier. The developer always confirms at Phase 1.5 and can override.
-
-1. **Base default:** `On-the-Loop` (the middle rung — the dev approves the PR push and the merge, and autos the rest).
-2. **Tier notch (deterministic; never at the orchestrator's discretion):** shift the base by the profile's modifier (axis 5 of the [tier catalog](../_shared/model-capability-tiers.md)) along the ladder `In-the-Loop < On-the-Loop < Automated End-to-End`, clamped at the ladder ends:
-   - `fable-5` (+1) → `Automated End-to-End`
-   - `opus-5` / `sonnet-5` (0) → `On-the-Loop`
-   - `generic` (−1) → `In-the-Loop`
-3. **Suggestion-only:** the human confirms at Phase 1.5 exactly as before. The mode-to-gate matrix is untouched and tier-invariant.
-4. **Re-entry precedence:** a confirmed persisted mode-state file ALWAYS wins over a freshly tier-shifted suggestion. Tier seeds only the first Phase 1.5 prompt and the explicit `re-ask` path.
+There is no per-workflow-type recommendation table and no model-based adjustment. The suggested mode is always `On-the-Loop` (the middle rung: the dev approves the design and the review outcome, and the mechanical middle runs automated). The developer confirms at Phase 1.5 and can override. On re-entry, a confirmed persisted mode-state file ALWAYS wins over the suggestion.
 
 > **Retired 2026-07-24 — the security-label mode floor.** A rule previously pinned
 > `risk: security` / `risk: privacy` / security-sensitive `domain:` issues to a
@@ -1247,7 +1219,6 @@ Phase 1.5: AUTONOMY CONTRACT
 [1 ✅] [1.5 ◀] [2 ○] [3 ○] [4 ○] [5 ○] [6 ○] [7 ○] [8 ○] [9 ○]
 
 Issue #<N> characteristics: <labels-summary>
-Tier: <profile> (notch modifier applied: <+1 | 0 | −1 | none — carve-out>)
 Suggested approach: <Inline | Subagent Driven | Dynamic>
 Suggested mode: <In-the-Loop | On-the-Loop | Automated End-to-End>
 
@@ -1284,7 +1255,7 @@ mode=in-the-loop
 
 The state file is best-effort persistence; if it's missing or corrupt, fall through to interactive re-ask. The re-confirmation prompt above is independent of corruption — even a syntactically valid file requires confirmation.
 
-The file never contains a `tier=` key — tier is re-resolved live at Step 0 on every invocation, and a planted `tier=` line is ignored (no reader exists). On re-entry, the confirmed file's mode ALWAYS wins over a freshly tier-shifted suggestion (see "Tier-modulated mode suggestion").
+The file never contains a `tier=` key, and a planted one is ignored (no reader exists). On re-entry, the confirmed file's mode ALWAYS wins over the fixed suggestion (see "Mode suggestion").
 
 ---
 
@@ -1300,7 +1271,7 @@ The file never contains a `tier=` key — tier is re-resolved live at Step 0 on 
 
 **Agent Dispatch:** consult `## Phase 2: PLAN` in [`lifecycle-agent-dispatch.md`](../_shared/lifecycle-agent-dispatch.md). Phase 2 is the **design panel**: `@architect` (philosophy) → parallel `@system-engineer` / `@ui-designer` + `@ux-designer` → `@frontend-designer` (reconcile) → `@architect` (final spec). `@ui-designer` and `@ux-designer` dispatch as a **pair or not at all** — reconciliation exists to resolve their tension. Emit the `Dispatched agents (Phase 2): […]` visibility line, listing the seats **actually** dispatched.
 
-**The panel's canonical implementation is the `design-panel` Workflow** (`.claude/workflows/design-panel.js`), invoked by name via the Workflow tool. Subagents cannot dispatch subagents, so the team hierarchy is expressed as a Workflow script rather than nested delegation. Pass `{issue, brief, backend, frontend, philosophy?, libraryIds?}` as `args` — a real JSON object. Skip it only for a design so small the panel is pure overhead — then dispatch `@architect` alone and say so.
+**The panel's canonical implementation is the `design-panel` Workflow** (`.claude/workflows/design-panel.js`), invoked by name via the Workflow tool. Agentic-Dev-Tooling ships it at `plugins/core-lifecycle/workflows/design-panel.js`, and `install.sh` does not copy it, so a repo adds it itself. When the file is absent, dispatch the seats above directly with the Agent tool. Subagents cannot dispatch subagents, so the team hierarchy is expressed as a Workflow script rather than nested delegation. Pass `{issue, brief, backend, frontend, philosophy?, libraryIds?}` as `args` — a real JSON object. Skip it only for a design so small the panel is pure overhead — then dispatch `@architect` alone and say so.
 
 **Workflow-eager planning (Dynamic / Subagent Driven; default under ultracode).** For a genuinely hard design — wide solution space, several viable architectures — draft the plan from **multiple independent angles via a dynamic Workflow** (judge-panel pattern: N approaches scored by independent agents, synthesize from the winner) rather than committing to the first approach. `design-panel` is the standing instance of this pattern; author a bespoke Workflow when the solution space needs more than one architect voice. See the Phase 3 "Escalation rung" for when a Workflow is the right tool.
 
@@ -1392,7 +1363,7 @@ Execution is selected by the Phase 1.5 Implementation Approach:
 
 - **Inline** → run `/superpowers:executing-plans` for the whole plan.
 - **Subagent Driven** → run `/superpowers:subagent-driven-development` for the whole plan.
-- **Dynamic** → the orchestrator executes the plan task-by-task as the session spine (executing-plans discipline); for EACH task, decide inline vs subagent against the criteria below, batch-sized by the tier profile (axis 2). On the `generic` tier, Dynamic degrades to the plan-time static split (each task pre-marked in the plan).
+- **Dynamic** → the orchestrator executes the plan task-by-task as the session spine (executing-plans discipline); for EACH task, decide inline vs subagent against the criteria below, in batches of 2–3 tasks between verification points (see § No model gate).
 
 #### Task shape — construction or defect repair (evaluated FIRST, before D0)
 
@@ -1424,7 +1395,7 @@ When D0 binds — small task, files already in context, **and D3 does not apply*
 
 **Then check E1-E4 — the escalation criteria.** When the table has named `@backend-developer` or `@frontend-developer`, evaluate `## Escalation (E1-E4)` in [`lifecycle-agent-dispatch.md`](../_shared/lifecycle-agent-dispatch.md): **E1** novel logic with no in-repo precedent · **E2** auth / crypto / E2EE / RBAC / IPC-sender surface · **E3** one contract spanning frontend *and* backend · **E4** the same task already bounced twice off a producer. If one fires and the repo defines an escalation agent, that agent takes the task; with none defined, record the criterion and surface the task to the developer. Otherwise the producer does.
 
-Read the floor in that section before applying these — **volume, tedium, and unfamiliarity never escalate**, and a wide sweep is D6 (Workflow), not E3. This is agent selection, not a `model` override: never pass a `model` argument to `Agent`, at any tier, for any reason. Under `Automated End-to-End`, a genuinely borderline E1/E3 call resolves toward escalation.
+Read the floor in that section before applying these — **volume, tedium, and unfamiliarity never escalate**, and a wide sweep is D6 (Workflow), not E3. This is agent selection, not a `model` override: never pass a `model` argument to `Agent`, for any reason. Under `Automated End-to-End`, a genuinely borderline E1/E3 call resolves toward escalation.
 
 **Escalation rung — author a dynamic Workflow (sits ABOVE inline-vs-subagent).** This check applies to **both `Dynamic` and `Subagent Driven`** approaches — for `Subagent Driven` it OVERRIDES "run `subagent-driven-development` for the whole plan" whenever the plan (or a plan task) is a wide sweep; do not let a per-task or whole-plan subagent framing dissolve an aggregate wide sweep into "many narrow tasks" that each dodge D6. D1–D5 choose inline-vs-subagent for a SINGLE task. Before applying them, check whether the task — **or the plan in aggregate** — is a **wide, independent, parallelizable sweep**: many homogeneous units (dozens+ of routes / files / modules), a large migration, or work that benefits from cross-checking (security/correctness audits — missing-authz, IPC-sender, secret-leak). If so, the right tool is a **dynamic Workflow authored via the Workflow tool** (fan-out + adversarial cross-check), NOT a handful of hand-dispatched subagents.
 
@@ -3313,7 +3284,7 @@ prematurely or to name a file that does not exist yet.
 - Never commits spec/plan files without first being on a feature branch
 - Never BLOCKS on a missing linked issue — one issue per branch is the default, not a hard gate; it offers `/issue-creation` once at Phase 5 and honors a decline (see § Ad-hoc / issueless invocation)
 - Never runs more than 2 fix commits in a single bot review cycle (soft guideline; does not apply to merge-blocking findings)
-- Never lets the model-capability tier alter a gate or persist itself — tier is calibration, not authority (the security-label mode floor was retired 2026-07-24; see Phase 1.5)
+- Never checks, prints, or gates on the running model's identity — defaults are fixed on every harness (see § No model gate)
 - Never attempts post-merge local cleanup (`git branch -D`, `git checkout <default-branch> && git pull`, `git worktree remove`) — blocked by the destructive-commands hook in agent context. Always handed off to the developer as a copy-paste block (Phase 9, "Post-merge cleanup handoff")
 
 ## Why This Skill Exists
