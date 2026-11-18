@@ -121,8 +121,9 @@ esac
 STUB
 chmod +x "$TMP/bin/gh"
 out=$(PATH="$TMP/bin:$PATH" "$SCRIPT" 7 2>&1); got=$?
-case "$got:$out" in "0:#7 @aaaaaaa covered: $CP (COMMENTED)") echo "  ok   live path via stub gh (paginated, 404 config)"; pass=$((pass + 1)) ;;
-  *) echo "  FAIL live path via stub gh: $got $out"; fail=$((fail + 1)) ;; esac
+# An if, not a one-line case: Semgrep 1.121's bash parser rejects the one-line case form.
+if [[ "$got:$out" == "0:#7 @aaaaaaa covered: $CP (COMMENTED)" ]]; then echo "  ok   live path via stub gh (paginated, 404 config)"; pass=$((pass + 1))
+else echo "  FAIL live path via stub gh: $got $out"; fail=$((fail + 1)); fi
 out=$(PATH="$TMP/bin:$PATH" "$SCRIPT" 8 2>&1); got=$?
 if [[ "$got" -eq 1 ]]; then echo "  ok   allowlist comes from the default branch, not base"; pass=$((pass + 1)); else echo "  FAIL retargeted base widened the allowlist: $got $out"; fail=$((fail + 1)); fi
 # An explicit <owner/repo> wins over the cwd repo: x/y would fail, o/r succeeds.
