@@ -496,7 +496,7 @@ its DASH, HLS and SmoothStreaming modules turned off in `android/build.gradle`.
 Hermes is enabled; the optional JSC branch is not part of this inventory.
 
 The table records 119 resolved runtime library components, including transitive
-dependencies. They are what Gradle 9.8.2 resolves for the app's
+dependencies. They are what Gradle 9.9.0 resolves for the app's
 `releaseRuntimeClasspath`, with the app's Kotlin 2.4.21 declaration. The
 coroutines and Kotlin BOMs are dependency metadata, so they are omitted from the
 code attribution table. License names and links come from the resolved upstream POMs;

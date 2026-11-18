@@ -161,10 +161,10 @@ npm run ios                                         # or: npm run android
 
 `npm ci` also applies a bounded Android build compatibility patch: React Native
 0.88.1's included Gradle build selects Kotlin 2.2.0, which cannot read Gradle
-9.8.2's embedded Kotlin 2.4 metadata. The postinstall script requires the exact
+9.9.0's embedded Kotlin 2.4 metadata. The postinstall script requires the exact
 RN/plugin versions and catalog bytes, changes only the Kotlin selection to
 2.4.21, and refuses unexpected dependency changes. The app uses the same Kotlin
-version. Gradle stays at 9.8.2 with its official distribution checksum: reverting
+version. Gradle stays at 9.9.0 with its official distribution checksum: reverting
 to the template's 9.4.1 would restore vulnerabilities
 [GHSA-j5m7-59rp-24f5](https://github.com/gradle/gradle/security/advisories/GHSA-j5m7-59rp-24f5),
 [GHSA-xwqc-3h47-hg64](https://github.com/gradle/gradle/security/advisories/GHSA-xwqc-3h47-hg64)
