@@ -150,11 +150,11 @@ function metadataForDistribution(distributionURL, fixture) {
     modules.length !== 2 ||
     !modules.some(
       module =>
-        module?.coordinate === 'org.jetbrains.kotlin:kotlin-stdlib:2.4.10',
+        module?.coordinate === 'org.jetbrains.kotlin:kotlin-stdlib:2.4.21',
     ) ||
     !modules.some(
       module =>
-        module?.coordinate === 'org.jetbrains.kotlin:kotlin-reflect:2.4.10',
+        module?.coordinate === 'org.jetbrains.kotlin:kotlin-reflect:2.4.21',
     )
   ) {
     throw new MissingMetadataEvidence(

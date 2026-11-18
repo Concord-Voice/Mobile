@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // RN 0.88.1's included build selects Kotlin 2.2 (same catalog as 0.88.0),
-// which cannot read Gradle 9.8.2's embedded Kotlin metadata. Keep the security-fixed Gradle distribution
+// which cannot read Gradle 9.9.0's embedded Kotlin metadata. Keep the security-fixed Gradle distribution
 // and narrowly align the compiler. Reassess/remove this on every RN upgrade.
 const originalCatalogHash =
   'c7a028cdee90f490de9493ca9de92b61b994844836161871091c340c568f109e';
