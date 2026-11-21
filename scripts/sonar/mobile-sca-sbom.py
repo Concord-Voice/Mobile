@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 GRADLE_PIN = re.compile(r"^([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)=releaseRuntimeClasspath$")
 NATIVE_DEP = re.compile(r'^\s*(?:implementation|testImplementation)\("([A-Za-z0-9_.:-]+)"\)')
-NATIVE_CALL = re.compile(r"^\s*(?:implementation|[A-Za-z]*Implementation|api|compileOnly|runtimeOnly)\(")
+NATIVE_CALL = re.compile(r"^\s*(?:implementation|[A-Za-z]*Implementation|api|compileOnly|runtimeOnly)\b")
 PIP_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)==([^;\s\\]+)\s*\\$")
 PIP_HASH = re.compile(r"^\s+--hash=sha256:[0-9a-f]{64}\s*\\?$")
 
