@@ -14,6 +14,8 @@ allowed-tools:
 
 # Enhanced PR Review
 
+On Codex, apply the [independent reviewer requirement](../_shared/pr-review-agent-dispatch.md#codex-review-of-untrusted-prs) before retrieving any PR-authored review input.
+
 > **Bot roster is config-driven.** This skill discovers reviewers structurally via the `user.type == "Bot"` filter (Phase 1), not from a hard-coded list — so any GitHub-app reviewer is picked up automatically with the fallback display name `Bot: {login}`. Pretty display names, CI-check names, and PR-body markers come from the OPTIONAL per-repo `.claude/repo-config.json` `.bots[]` array (read as data with `jq`, never by sourcing a script from the checkout). To register a bot for a nicer display name, add an entry to `.bots[]` — see the "Adding support for a new bot" section at the end. With `.bots == []` the generic fallback still works for every reviewer.
 >
 > **Three posting locations — the skill fetches all three.** Bot reviewers can post to ANY of three GitHub endpoints, and which one they use is reviewer-specific (no universal rule). `/pulls/{n}/comments` carries inline review comments (line-by-line); `/pulls/{n}/reviews` carries PR review summaries with a state (a bot's overall judgment); `/issues/{n}/comments` carries top-level conversation comments (verdict-only reviewers, Quality-Gate posters, and any `github-actions[bot]` workflow posting). PRs are issues under the hood — that's why the conversation endpoint is `/issues/...`. The skill polls all three in Phase 1 to avoid missing a reviewer (or a recommendation like a version bump) that only posts to the conversation endpoint.
