@@ -24,5 +24,5 @@ React Native client for iOS and Android. Message crypto lives in the native pod 
 
 ## Repository rules
 
-- This repository is private, so no SonarCloud workflow: Sonar runs only on public repositories. Flag one being added.
+- This repository is public. Sonar runs from GitHub Actions (`.github/workflows/sonarcloud.yml`, `.github/workflows/sonar-main.yml`). Flag a change that removes or weakens either workflow.
 - iOS signing, entitlements and `Info.plist` export-compliance keys change only with explicit review.
