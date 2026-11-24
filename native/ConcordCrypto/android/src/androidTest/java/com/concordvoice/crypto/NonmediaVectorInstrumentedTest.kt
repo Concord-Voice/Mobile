@@ -66,7 +66,8 @@ class NonmediaVectorInstrumentedTest {
   private fun context(tag: String, values: List<Any>): ByteArray {
     val array = JSONArray().put("concord-e2ee-context").put(1).put(tag)
     values.forEach(array::put)
-    return array.toString().toByteArray(Charsets.US_ASCII)
+    // Android's JSONStringer escapes '/', but the pinned wire format does not.
+    return array.toString().replace("\\/", "/").toByteArray(Charsets.US_ASCII)
   }
   private fun parseContext(data: ByteArray): Pair<String, List<Any>> {
     val array = JSONArray(String(data, Charsets.UTF_8))
@@ -169,6 +170,10 @@ class NonmediaVectorInstrumentedTest {
   }
 
   @Test fun pinnedCorpusAndAllAcceptedCases() {
+    assertEquals(
+      "[\"concord-e2ee-context\",1,\"attachment-v4\",\"a/b\"]",
+      String(context("attachment-v4", listOf("a/b")), Charsets.US_ASCII),
+    )
     val (_, vectors) = corpus()
     val caseNames = (0 until vectors.length()).map { vectors.getJSONObject(it).getString("name") }
     assertEquals(vectors.length(), caseNames.toSet().size)
