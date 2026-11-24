@@ -24,8 +24,8 @@ import org.junit.runner.RunWith
 /** Test-only ADR-0051 adapter; runs with the actual vendored Argon2 JNI library on Android. */
 @RunWith(AndroidJUnit4::class)
 class NonmediaVectorInstrumentedTest {
-  private val pin = "d4b2e4b72b7ff351e5a379431f547664f162bd2c60f532f641ae0297f7313e77a1602cafb28c9be03eb6c2c6ef50fbd2"
-  private val generatorPin = "e4d620fbd8cb85bceb506144318295575f9dc56f8af1ae72848675e66f3a6a833a02e20cdf3dfdbc9acb1d51c475b844"
+  private val pin = "40ad79e980cf5d7085954be008f152644f48be9bc5ddaa7712d53b19c0c08a5f1892dbb5260a3fad6cd8b2bfbaee142f"
+  private val generatorPin = "20724e140d2745547091e04487579e53ad0288959dbe767c48b27aff8bc9ea3082862a613100797080212cb0a50e11f2"
   private val names = mapOf(
     "message-v1" to listOf("realm", "scope", "scope_id", "message_id", "sender_id", "key_epoch", "content_kind"),
     "blob-v1" to listOf("realm", "account_id", "blob_purpose", "schema_version"),
