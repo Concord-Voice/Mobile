@@ -7,8 +7,8 @@ import XCTest
 
 /// Test-only ADR-0051 adapter. The production client does not read these formats yet.
 final class NonmediaVectorTests: XCTestCase {
-  private let pin = "bf003f83acfcc7afcca34b408a9960f4ffaaedcb3057aeba34b0878ffa6352b790ef7754f47ca0cd6fd7cf91087cf40d"
-  private let generatorPin = "8ed4e8e461782a8119e81e9e62261b9e13a13ff365ed729d5d8666d45f3ea9b4cd0780d37f00196a5af0cf17f4924935"
+  private let pin = "4a16bb107203d840152ce432bcbeda286c7ecb79b2b519713eebb2d3701589433f54fad511d0e52b439ea230d49833e2"
+  private let generatorPin = "73594b0ff16df7b20976ce1e22cf7b6bb82a7ec0af783bfe896805e8b560339c600fa93a68eaa651874a8850ea0938bd"
   private let names: [String: [String]] = [
     "message-v1": ["realm", "scope", "scope_id", "message_id", "sender_id", "key_epoch", "content_kind"],
     "blob-v1": ["realm", "account_id", "blob_purpose", "schema_version"],

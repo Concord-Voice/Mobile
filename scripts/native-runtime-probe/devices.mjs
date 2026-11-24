@@ -973,6 +973,14 @@ async function android(output) {
           instrumentationFailed: vectorLines.some(line =>
             line.startsWith('INSTRUMENTATION_FAILED:'),
           ),
+          statusToken: vectorLog.includes('INSTRUMENTATION_STATUS'),
+          escapedNewline: vectorLog.includes('\\n'),
+          usage: /usage:\s*(?:am\s+)?instrument/i.test(vectorLog),
+          componentError:
+            /(?:Unable to find instrumentation|No instrumentation found|INSTRUMENTATION_FAILED|Error:)/i.test(
+              vectorLog,
+            ),
+          exception: /(?:Exception|Caused by:)/.test(vectorLog),
         },
       }),
     );
