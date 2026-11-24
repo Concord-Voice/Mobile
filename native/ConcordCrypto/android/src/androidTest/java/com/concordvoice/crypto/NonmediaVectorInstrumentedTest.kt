@@ -141,7 +141,7 @@ class NonmediaVectorInstrumentedTest {
   private fun seal(plain: ByteArray, key: ByteArray, nonce: ByteArray, aad: ByteArray): ByteArray = Cipher.getInstance("AES/GCM/NoPadding").run {
     init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce)); updateAAD(aad); doFinal(plain)
   }
-  private fun open(sealed: ByteArray, key: ByteArray, nonce: ByteArray, aad: ByteArray): ByteArray = Cipher.getInstance("AES/GCM/NoPadding").run {
+  private fun openAead(sealed: ByteArray, key: ByteArray, nonce: ByteArray, aad: ByteArray): ByteArray = Cipher.getInstance("AES/GCM/NoPadding").run {
     require(sealed.size >= 16 && nonce.size == 12 && key.size == 32)
     init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, nonce)); updateAAD(aad); doFinal(sealed)
   }
@@ -222,7 +222,7 @@ class NonmediaVectorInstrumentedTest {
           val format = input.getString("format"); val (tag, _) = parseContext(bytes(input, "expected_context_b64"))
           assertEquals(name, formatTags[format], tag)
           val (nonce, sealed) = splitWire(format, bytes(input, "envelope_b64"))
-          assertEquals(name, out.getString("plaintext_b64"), b64(open(sealed, bytes(input, "key_b64"), nonce, bytes(input, "expected_context_b64"))))
+          assertEquals(name, out.getString("plaintext_b64"), b64(openAead(sealed, bytes(input, "key_b64"), nonce, bytes(input, "expected_context_b64"))))
         }
         "policy" to "legacy-continuation" -> { assertEquals(name, legacyDecision(input), out.getString("decision") to out.getString("reason")); if (name.contains("/matrix/")) legacyMatrices++ }
         "policy" to "upgrade-outcome" -> { assertEquals(name, upgradeDecision(input), out.getString("decision") to out.getString("reason")); if (name.contains("/matrix/")) upgradeMatrices++ }
@@ -338,7 +338,8 @@ class NonmediaVectorInstrumentedTest {
         val aad = if (name.endsWith("/tamper-header")) {
           val candidate = values.toMutableList(); candidate[6] = b64(wire.copyOfRange(12, 28)); context(tag, candidate)
         } else bytes(input, "expected_context_b64")
-        if (runCatching { open(payload.second, key, payload.first, aad) }.isFailure) return "authenticate/aead_failure"
+        val authentication = runCatching { openAead(payload.second, key, payload.first, aad) }
+        if (authentication.isFailure) return "authenticate/aead_failure"
       }
       else -> error("unknown rejecting operation $name")
     }
