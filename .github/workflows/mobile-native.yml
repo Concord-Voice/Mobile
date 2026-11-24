@@ -156,6 +156,7 @@ jobs:
             ${{ runner.temp }}/mobile-ios-runtime/manifest.json
             ${{ runner.temp }}/mobile-ios-runtime/runtime.json
             ${{ runner.temp }}/mobile-ios-runtime/native-tests.json
+            ${{ runner.temp }}/mobile-ios-runtime/vector-tests.json
             ${{ runner.temp }}/mobile-ios-runtime/native-test-diagnostics.json
             ${{ runner.temp }}/mobile-ios-runtime/device-cleanup.json
           if-no-files-found: error
@@ -260,5 +261,6 @@ jobs:
             ${{ runner.temp }}/mobile-android-runtime/device-cleanup.json
             ${{ runner.temp }}/mobile-android-runtime/emulator-tool.json
             ${{ runner.temp }}/mobile-android-runtime/emulator-tool-failure.json
+            ${{ runner.temp }}/mobile-android-runtime/vector-tests.json
           if-no-files-found: error
           retention-days: 7

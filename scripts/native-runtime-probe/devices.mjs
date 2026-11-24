@@ -49,6 +49,40 @@ const skippedNative = [
   'testDesktopVectorsUnlockDecryptAndReject',
   'testWritesNativeVectorsForTheDesktopVerifier',
 ];
+const androidVectorTests = [
+  'pinnedCorpusAndAllAcceptedCases',
+  'everyNegativeHasItsDeclaredStageAndReason',
+];
+
+// `am instrument` can exit zero even when a test fails. Admit only the two
+// named corpus tests and its terminal success marker; never print its raw log.
+export function androidVectorSummary(log) {
+  if (typeof log !== 'string' || Buffer.byteLength(log) > 1024 * 1024)
+    refuse('android-vector-output-invalid');
+  const lines = log.replace(/\r\n/g, '\n').split('\n');
+  const completed = [];
+  let currentTest = null;
+  for (const line of lines) {
+    if (line.startsWith('INSTRUMENTATION_STATUS: test=')) {
+      currentTest = line.slice('INSTRUMENTATION_STATUS: test='.length).trim();
+    } else if (line === 'INSTRUMENTATION_STATUS_CODE: 0') {
+      completed.push(currentTest);
+      currentTest = null;
+    } else if (/^INSTRUMENTATION_STATUS_CODE: -[0-9]+$/.test(line)) {
+      refuse('android-vector-test-failed');
+    }
+  }
+  if (
+    completed.length !== androidVectorTests.length ||
+    new Set(completed).size !== androidVectorTests.length ||
+    completed.some(name => !androidVectorTests.includes(name)) ||
+    !lines.includes('INSTRUMENTATION_STATUS: numtests=2') ||
+    !lines.some(line => line.trim() === 'OK (2 tests)') ||
+    lines.filter(line => line === 'INSTRUMENTATION_CODE: -1').length !== 1
+  )
+    refuse('android-vector-result-incomplete');
+  return { tests: 2, vectors: 672, rejecting: 132, passed: true };
+}
 
 export function chooseSimulator(runtimes, types) {
   const available = runtimes.runtimes.filter(
@@ -105,6 +139,28 @@ export function nativeTestSummary(log) {
     skipReason:
       'Reciprocal desktop vectors were not supplied; no cross-platform vector evidence claimed.',
   };
+}
+
+export function iosVectorSummary(log) {
+  const expected = [
+    'testPinnedCorpusAndAllAcceptedCases',
+    'testEveryNegativeHasItsDeclaredStageAndReason',
+  ];
+  const rows = [
+    ...log.matchAll(
+      /Test Case '-\[(?:[A-Za-z_][A-Za-z0-9_]*\.)?NonmediaVectorTests (test\w+)\]' (passed|skipped|failed) /g,
+    ),
+  ];
+  if (
+    rows.length !== expected.length ||
+    expected.some(
+      name =>
+        rows.filter(([, found, state]) => found === name && state === 'passed')
+          .length !== 1,
+    )
+  )
+    refuse('ios-vector-test-matrix-failed');
+  return { tests: 2, vectors: 672, rejecting: 132, passed: true };
 }
 
 export function nativeTestFailure(log) {
@@ -421,8 +477,10 @@ async function ios(output) {
         },
       );
       let nativeTests;
+      let vectorTests;
       try {
         nativeTests = nativeTestSummary(nativeLog);
+        vectorTests = iosVectorSummary(nativeLog);
       } catch (error) {
         await recordNativeFailure(nativeLog);
         throw error;
@@ -432,6 +490,11 @@ async function ios(output) {
         JSON.stringify(nativeTests, null, 2) + '\n',
       );
       console.log(JSON.stringify({ nativeTests }));
+      await writeFile(
+        join(output, 'vector-tests.json'),
+        JSON.stringify(vectorTests) + '\n',
+      );
+      console.log(JSON.stringify({ iosVectors: vectorTests }));
     } finally {
       // XCTest owns raw xcresult/log files here; retain only the sanitized test matrix.
       await rm(nativeDerived, { recursive: true, force: true });
@@ -838,6 +901,52 @@ async function android(output) {
         emulator: toolIdentity,
       },
     );
+    stage('android-vector-build');
+    await runCommand(
+      './gradlew',
+      [
+        ':concord-crypto:assembleDebugAndroidTest',
+        '--no-daemon',
+        '--max-workers=2',
+        '-PreactNativeArchitectures=x86_64',
+      ],
+      { cwd: join(mobile, 'android'), timeout: 1200000 },
+    );
+    const vectorApk = join(
+      mobile,
+      'native/ConcordCrypto/android/build/outputs/apk/androidTest/debug/concord-crypto-debug-androidTest.apk',
+    );
+    stage('android-vector-install');
+    const installResult = await runCommand(
+      adbTool,
+      ['-s', serial, 'install', '-r', vectorApk],
+      { timeout: 120000 },
+    );
+    if (!installResult.trim().split(/\r?\n/).includes('Success'))
+      refuse('android-vector-install-failed');
+    stage('android-vector-run');
+    const vectorLog = await runCommand(
+      adbTool,
+      [
+        '-s',
+        serial,
+        'shell',
+        'am',
+        'instrument',
+        '-w',
+        '-e',
+        'class',
+        'com.concordvoice.crypto.NonmediaVectorInstrumentedTest',
+        'com.concordvoice.crypto.test/androidx.test.runner.AndroidJUnitRunner',
+      ],
+      { timeout: 600000 },
+    );
+    const vectorSummary = androidVectorSummary(vectorLog);
+    await writeFile(
+      join(output, 'vector-tests.json'),
+      JSON.stringify(vectorSummary) + '\n',
+    );
+    console.log(JSON.stringify({ androidVectors: vectorSummary }));
   } catch (error) {
     primary = error;
     throw error;

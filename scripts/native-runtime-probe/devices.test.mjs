@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   chooseSimulator,
   nativeTestSummary,
+  iosVectorSummary,
   verifyAndroidImage,
   nativeTestFailure,
   inspectEmulatorTool,
@@ -10,6 +11,7 @@ import {
   chooseAcceleration,
   startEmulator,
   guestAvdName,
+  androidVectorSummary,
 } from './devices.mjs';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -630,6 +632,8 @@ const fixture = [
     name =>
       `Test Case '-[ConcordCrypto_Tests.ConcordCryptoTests test${name}]' skipped (0.1 seconds).`,
   ),
+  "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testPinnedCorpusAndAllAcceptedCases]' passed (0.1 seconds).",
+  "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testEveryNegativeHasItsDeclaredStageAndReason]' passed (0.1 seconds).",
 ].join('\n');
 
 test('expects exactly the XCTest cases checked in under native/ConcordCrypto/Tests', async () => {
@@ -745,6 +749,10 @@ process.exit(64);`,
           summary.skipped,
           skipped.map(name => `test${name}`),
         );
+        assert.deepEqual(
+          JSON.parse(await readFile(join(output, 'vector-tests.json'), 'utf8')),
+          { tests: 2, vectors: 672, rejecting: 132, passed: true },
+        );
         const release = await readFile(normalRelease, 'utf8').catch(() => null);
         assert.ok(
           release,
@@ -810,6 +818,46 @@ test('requires all fourteen real native tests and records both intentional vecto
     nativeTestSummary(fixture + '\n' + fixture.split('\n')[0]),
   );
   assert.throws(() => nativeTestSummary('** TEST SUCCEEDED **'));
+});
+
+test('requires both iOS vector tests to pass exactly once', () => {
+  const rows = [
+    "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testPinnedCorpusAndAllAcceptedCases]' passed (0.1 seconds).",
+    "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testEveryNegativeHasItsDeclaredStageAndReason]' passed (0.1 seconds).",
+  ];
+  assert.deepEqual(iosVectorSummary(rows.join('\n')), {
+    tests: 2, vectors: 672, rejecting: 132, passed: true,
+  });
+  assert.throws(() => iosVectorSummary(rows[0]));
+  assert.throws(() => iosVectorSummary(rows.join('\n') + '\n' + rows[0]));
+  assert.throws(() => iosVectorSummary(rows.join('\n').replace('passed', 'skipped')));
+});
+
+test('accepts only the two real Android vector instrumentation completions', () => {
+  const lines = [
+    'INSTRUMENTATION_STATUS: numtests=2',
+    'INSTRUMENTATION_STATUS: test=pinnedCorpusAndAllAcceptedCases',
+    'INSTRUMENTATION_STATUS_CODE: 1',
+    'INSTRUMENTATION_STATUS: test=pinnedCorpusAndAllAcceptedCases',
+    'INSTRUMENTATION_STATUS_CODE: 0',
+    'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason',
+    'INSTRUMENTATION_STATUS_CODE: 1',
+    'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason',
+    'INSTRUMENTATION_STATUS_CODE: 0',
+    'INSTRUMENTATION_RESULT: stream=',
+    'Time: 4.2',
+    'OK (2 tests)',
+    'INSTRUMENTATION_CODE: -1',
+  ];
+  assert.deepEqual(androidVectorSummary(lines.join('\n')), {
+    tests: 2, vectors: 672, rejecting: 132, passed: true,
+  });
+  for (const changed of [
+    lines.filter(line => line !== 'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason'),
+    lines.map(line => line === 'INSTRUMENTATION_STATUS_CODE: 0' ? 'INSTRUMENTATION_STATUS_CODE: -2' : line),
+    lines.map(line => line === 'OK (2 tests)' ? 'FAILURES!!!' : line),
+    lines.map(line => line === 'INSTRUMENTATION_CODE: -1' ? 'INSTRUMENTATION_CODE: 0' : line),
+  ]) assert.throws(() => androidVectorSummary(changed.join('\n')));
 });
 
 test('requires exact installed stable Android API36 Google APIs x86_64 revision7 image', () => {
