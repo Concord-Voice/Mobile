@@ -174,6 +174,16 @@ class NonmediaVectorInstrumentedTest {
       "[\"concord-e2ee-context\",1,\"attachment-v4\",\"a/b\"]",
       String(context("attachment-v4", listOf("a/b")), Charsets.US_ASCII),
     )
+    val uuid = "00000000-0000-4000-8000-000000000000"
+    val slashDescriptor = """["split-auth-wrap-v1","$uuid","${b64(ByteArray(32) { 0xff.toByte() })}",1,"${b64(ByteArray(16))}",65536,3,4]""".toByteArray(Charsets.US_ASCII)
+    assertTrue("canonical descriptor with solidus", descriptorValid(slashDescriptor) != null)
+    val slashContext = """["concord-e2ee-context",1,"recovery-prefs-wrap-v1","$uuid","$uuid","preferences/aes256-gcm","user-account-recovery-key",1,1]""".toByteArray(Charsets.US_ASCII)
+    val slashPurposeVector = JSONObject()
+      .put("name", "context/parse/recovery-prefs-wrap-v1/invalid-purpose-solidus")
+      .put("suite", "context")
+      .put("operation", "parse")
+      .put("input", JSONObject().put("context_b64", b64(slashContext)))
+    assertEquals("validate/invalid_purpose", classify(slashPurposeVector))
     val (_, vectors) = corpus()
     val caseNames = (0 until vectors.length()).map { vectors.getJSONObject(it).getString("name") }
     assertEquals(vectors.length(), caseNames.toSet().size)
@@ -283,7 +293,7 @@ class NonmediaVectorInstrumentedTest {
     if (d.length() != 8 || d.getString(0) != "split-auth-wrap-v1" || !canonicalUUID(d.get(1))) return null
     if (unb64(d.getString(2)).size != 32 || unb64(d.getString(4)).size != 16) return null
     if ((exactInt(d.get(3)) ?: -1L) !in 1L..9007199254740991L) return null
-    if (!d.toString().toByteArray(Charsets.US_ASCII).contentEquals(data)) return null
+    if (!d.toString().replace("\\/", "/").toByteArray(Charsets.US_ASCII).contentEquals(data)) return null
     d
   }.getOrNull()
   private fun classify(v: JSONObject): String {
@@ -309,7 +319,7 @@ class NonmediaVectorInstrumentedTest {
       "context" to "parse" -> {
         val raw = bytes(input, "context_b64")
         val a = runCatching { JSONArray(String(raw, Charsets.UTF_8)) }.getOrNull() ?: return "parse/malformed_context"
-        if (a.length() < 3 || a.optString(0) != "concord-e2ee-context" || a.optInt(1) != 1 || !a.toString().toByteArray(Charsets.UTF_8).contentEquals(raw)) return "parse/malformed_context"
+        if (a.length() < 3 || a.optString(0) != "concord-e2ee-context" || a.optInt(1) != 1 || !a.toString().replace("\\/", "/").toByteArray(Charsets.UTF_8).contentEquals(raw)) return "parse/malformed_context"
         val tag = a.getString(2)
         if (names[tag] == null) return "validate/unknown_tag"
         val values = (3 until a.length()).map { a.get(it) }
