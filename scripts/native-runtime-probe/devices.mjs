@@ -981,6 +981,21 @@ async function android(output) {
               vectorLog,
             ),
           exception: /(?:Exception|Caused by:)/.test(vectorLog),
+          exceptionKinds: [
+            'SecurityException',
+            'IllegalArgumentException',
+            'IllegalStateException',
+            'RuntimeException',
+            'ClassNotFoundException',
+            'NoClassDefFoundError',
+            'UnsatisfiedLinkError',
+            'NullPointerException',
+            'RemoteException',
+            'IOException',
+          ].filter(kind => vectorLog.includes(kind)),
+          activityInstrumentFailure: vectorLog.includes(
+            "while executing 'instrument'",
+          ),
         },
       }),
     );
