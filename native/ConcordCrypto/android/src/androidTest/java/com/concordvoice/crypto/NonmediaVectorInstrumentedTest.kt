@@ -88,26 +88,35 @@ class NonmediaVectorInstrumentedTest {
     if (fieldNames.size != values.size) return false
     fieldNames.forEachIndexed { index, name ->
       val value = values[index]
-      when (name) {
-        "scope" -> if (value !in listOf("channel", "dm")) return false
-        "content_kind" -> if (value != "message-body") return false
-        "blob_purpose" -> if (value !in listOf("preferences", "saved_gifs", "friend_organization", "presence_overrides")) return false
-        "key_purpose" -> if (value != if (tag == "recovery-prefs-wrap-v1") "preferences-aes256-gcm" else "account-rsa-oaep4096-pss-sha256") return false
-        "recovery_purpose" -> if (value != "user-account-recovery-key") return false
-        "schema_version" -> if (exactInt(value) != 1L) return false
-        "flags" -> if (exactInt(value) != 0L) return false
-        "chunk_size" -> if (exactInt(value) != 8388608L) return false
-        "total_chunks" -> if ((exactInt(value) ?: -1L) !in 1L..10000L) return false
-        "chunk_index" -> if ((exactInt(value) ?: -1L) !in 0L until (exactInt(values[fieldNames.indexOf("total_chunks")]) ?: 0L)) return false
-        "file_nonce_b64" -> if (runCatching { unb64(value as String).size }.getOrNull() != 16) return false
-        "distributor_root_digest_b64" -> if (runCatching { unb64(value as String).size }.getOrNull() != 48) return false
-        else -> {
-          if (name == "key_epoch" || name.endsWith("generation")) {
-            if ((exactInt(value) ?: -1L) !in 1L..9007199254740991L) return false
-          } else if (name in listOf("realm", "account_id", "scope_id", "message_id", "sender_id", "file_id", "uploader_id", "recipient_id", "distributor_id")) {
-            if (value !is String || !Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").matches(value)) return false
-          }
-        }
+      if (name == "scope") {
+        if (value !in listOf("channel", "dm")) return false
+      } else if (name == "content_kind") {
+        if (value != "message-body") return false
+      } else if (name == "blob_purpose") {
+        if (value !in listOf("preferences", "saved_gifs", "friend_organization", "presence_overrides")) return false
+      } else if (name == "key_purpose") {
+        val expected = if (tag == "recovery-prefs-wrap-v1") "preferences-aes256-gcm" else "account-rsa-oaep4096-pss-sha256"
+        if (value != expected) return false
+      } else if (name == "recovery_purpose") {
+        if (value != "user-account-recovery-key") return false
+      } else if (name == "schema_version") {
+        if (exactInt(value) != 1L) return false
+      } else if (name == "flags") {
+        if (exactInt(value) != 0L) return false
+      } else if (name == "chunk_size") {
+        if (exactInt(value) != 8388608L) return false
+      } else if (name == "total_chunks") {
+        if ((exactInt(value) ?: -1L) !in 1L..10000L) return false
+      } else if (name == "chunk_index") {
+        if ((exactInt(value) ?: -1L) !in 0L until (exactInt(values[fieldNames.indexOf("total_chunks")]) ?: 0L)) return false
+      } else if (name == "file_nonce_b64") {
+        if (runCatching { unb64(value as String).size }.getOrNull() != 16) return false
+      } else if (name == "distributor_root_digest_b64") {
+        if (runCatching { unb64(value as String).size }.getOrNull() != 48) return false
+      } else if (name == "key_epoch" || name.endsWith("generation")) {
+        if ((exactInt(value) ?: -1L) !in 1L..9007199254740991L) return false
+      } else if (name in listOf("realm", "account_id", "scope_id", "message_id", "sender_id", "file_id", "uploader_id", "recipient_id", "distributor_id")) {
+        if (value !is String || !Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").matches(value)) return false
       }
     }
     return true
@@ -258,7 +267,8 @@ class NonmediaVectorInstrumentedTest {
   private fun wrongPurpose(tag: String, values: List<Any>): Boolean {
     val registry = names[tag] ?: return false
     val key = registry.indexOf("key_purpose")
-    if (key >= 0 && values[key] != if (tag == "recovery-prefs-wrap-v1") "preferences-aes256-gcm" else "account-rsa-oaep4096-pss-sha256") return true
+    val expected = if (tag == "recovery-prefs-wrap-v1") "preferences-aes256-gcm" else "account-rsa-oaep4096-pss-sha256"
+    if (key >= 0 && values[key] != expected) return true
     val recovery = registry.indexOf("recovery_purpose")
     return recovery >= 0 && values[recovery] != "user-account-recovery-key"
   }
