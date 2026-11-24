@@ -12,6 +12,7 @@ import {
   startEmulator,
   guestAvdName,
   androidVectorSummary,
+  androidVectorDiagnostics,
 } from './devices.mjs';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -859,6 +860,34 @@ test('accepts only the two real Android vector instrumentation completions', () 
     lines.map(line => line === 'OK (2 tests)' ? 'FAILURES!!!' : line),
     lines.map(line => line === 'INSTRUMENTATION_CODE: -1' ? 'INSTRUMENTATION_CODE: 0' : line),
   ]) assert.throws(() => androidVectorSummary(changed.join('\n')));
+});
+
+test('Android vector diagnostics classify stack sources without releasing instrument text', () => {
+  const log = [
+    'java.lang.IllegalArgumentException: private fixture value',
+    '  at androidx.test.runner.AndroidJUnitRunner.onCreate(AndroidJUnitRunner.java:1)',
+    '  at com.concordvoice.crypto.NonmediaVectorInstrumentedTest.run(Test.kt:2)',
+    '  at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:3)',
+  ].join('\n');
+  const observed = androidVectorDiagnostics(log);
+  assert.deepEqual(observed, {
+    firstStackSource: 'androidx-test',
+    stackSources: ['androidx-test', 'vector-test', 'android-framework'],
+    siteMarkers: ['androidx-runner', 'vector-test'],
+  });
+  assert.equal(
+    JSON.stringify(observed).includes('private fixture value'),
+    false,
+  );
+  assert.throws(() => androidVectorSummary(log));
+  assert.deepEqual(
+    androidVectorDiagnostics('at attacker.example.Secret.run(X.java:1)'),
+    { firstStackSource: 'other', stackSources: ['other'], siteMarkers: [] },
+  );
+  assert.equal(
+    androidVectorDiagnostics('x'.repeat(64 * 1024) + log).firstStackSource,
+    'none',
+  );
 });
 
 test('requires exact installed stable Android API36 Google APIs x86_64 revision7 image', () => {

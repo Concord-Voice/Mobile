@@ -54,6 +54,44 @@ const androidVectorTests = [
   'everyNegativeHasItsDeclaredStageAndReason',
 ];
 
+// Keep only fixed source categories from an instrumentation failure. The raw
+// stream can contain fixture values and must not enter CI logs or artifacts.
+export function androidVectorDiagnostics(log) {
+  const bounded = typeof log === 'string' ? log.slice(0, 64 * 1024) : '';
+  const sources = [];
+  const classify = name => {
+    if (name.startsWith('com.concordvoice.crypto.')) return 'vector-test';
+    if (name.startsWith('androidx.test.')) return 'androidx-test';
+    if (name.startsWith('org.junit.')) return 'junit';
+    if (name.startsWith('com.android.commands.am.')) return 'am-shell';
+    if (name.startsWith('android.')) return 'android-framework';
+    if (/^(?:java|jdk|sun)\./.test(name)) return 'java-runtime';
+    return 'other';
+  };
+  for (const match of bounded.matchAll(/^[ \t]*at ([A-Za-z0-9_.$]+)\(/gm)) {
+    const source = classify(match[1]);
+    if (!sources.includes(source)) sources.push(source);
+    if (sources.length === 7) break;
+  }
+  const siteMarkers = [
+    ['am-instrument', 'com.android.commands.am.Instrument.'],
+    ['androidx-runner', 'androidx.test.runner.AndroidJUnitRunner.'],
+    ['androidx-builder', 'androidx.test.internal.runner.junit4.'],
+    [
+      'instrumentation-registry',
+      'androidx.test.platform.app.InstrumentationRegistry.',
+    ],
+    ['vector-test', 'com.concordvoice.crypto.NonmediaVectorInstrumentedTest.'],
+  ]
+    .filter(([, marker]) => bounded.includes(marker))
+    .map(([code]) => code);
+  return {
+    firstStackSource: sources[0] ?? 'none',
+    stackSources: sources,
+    siteMarkers,
+  };
+}
+
 // `am instrument` can exit zero even when a test fails. Admit only the two
 // named corpus tests and its terminal success marker; never print its raw log.
 export function androidVectorSummary(log) {
@@ -1020,6 +1058,7 @@ async function android(output) {
             'No tests found',
             'target package',
           ].filter(reason => vectorLog.includes(reason)),
+          ...androidVectorDiagnostics(vectorLog),
         },
       }),
     );
