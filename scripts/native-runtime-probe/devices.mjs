@@ -85,10 +85,35 @@ export function androidVectorDiagnostics(log) {
   ]
     .filter(([, marker]) => bounded.includes(marker))
     .map(([code]) => code);
+  const vectorFrame = bounded.match(
+    /^[ \t]*at com\.concordvoice\.crypto\.NonmediaVectorInstrumentedTest\.([A-Za-z0-9_$<>]+)\(NonmediaVectorInstrumentedTest\.kt:([0-9]{1,4})\)/m,
+  );
+  const allowedMethods = new Set([
+    'unb64',
+    'parseContext',
+    'openAead',
+    'splitWire',
+    'pinnedCorpusAndAllAcceptedCases',
+    'classify',
+    'everyNegativeHasItsDeclaredStageAndReason',
+    'corpus',
+    'validContext',
+    'descriptorValid',
+    'scalarString',
+    'wire',
+    '<init>',
+    '<clinit>',
+  ]);
+  const method = vectorFrame?.[1];
+  const line = Number(vectorFrame?.[2]);
+  let vectorMethod = 'none';
+  if (method) vectorMethod = allowedMethods.has(method) ? method : 'other';
   return {
     firstStackSource: sources[0] ?? 'none',
     stackSources: sources,
     siteMarkers,
+    vectorMethod,
+    vectorLine: line >= 1 && line <= 500 ? line : null,
   };
 }
 

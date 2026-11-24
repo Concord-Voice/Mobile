@@ -866,7 +866,7 @@ test('Android vector diagnostics classify stack sources without releasing instru
   const log = [
     'java.lang.IllegalArgumentException: private fixture value',
     '  at androidx.test.runner.AndroidJUnitRunner.onCreate(AndroidJUnitRunner.java:1)',
-    '  at com.concordvoice.crypto.NonmediaVectorInstrumentedTest.run(Test.kt:2)',
+    '  at com.concordvoice.crypto.NonmediaVectorInstrumentedTest.unb64(NonmediaVectorInstrumentedTest.kt:47)',
     '  at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:3)',
   ].join('\n');
   const observed = androidVectorDiagnostics(log);
@@ -874,6 +874,8 @@ test('Android vector diagnostics classify stack sources without releasing instru
     firstStackSource: 'androidx-test',
     stackSources: ['androidx-test', 'vector-test', 'android-framework'],
     siteMarkers: ['androidx-runner', 'vector-test'],
+    vectorMethod: 'unb64',
+    vectorLine: 47,
   });
   assert.equal(
     JSON.stringify(observed).includes('private fixture value'),
@@ -882,12 +884,24 @@ test('Android vector diagnostics classify stack sources without releasing instru
   assert.throws(() => androidVectorSummary(log));
   assert.deepEqual(
     androidVectorDiagnostics('at attacker.example.Secret.run(X.java:1)'),
-    { firstStackSource: 'other', stackSources: ['other'], siteMarkers: [] },
+    {
+      firstStackSource: 'other',
+      stackSources: ['other'],
+      siteMarkers: [],
+      vectorMethod: 'none',
+      vectorLine: null,
+    },
   );
   assert.equal(
     androidVectorDiagnostics('x'.repeat(64 * 1024) + log).firstStackSource,
     'none',
   );
+  const unknown = androidVectorDiagnostics(
+    '  at com.concordvoice.crypto.NonmediaVectorInstrumentedTest.secretMethod(NonmediaVectorInstrumentedTest.kt:9999)',
+  );
+  assert.equal(unknown.vectorMethod, 'other');
+  assert.equal(unknown.vectorLine, null);
+  assert.equal(JSON.stringify(unknown).includes('secretMethod'), false);
 });
 
 test('requires exact installed stable Android API36 Google APIs x86_64 revision7 image', () => {
