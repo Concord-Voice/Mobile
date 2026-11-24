@@ -291,9 +291,9 @@ export function inspectEmulatorTool(versionOutput, properties, help) {
     metadataAmbiguous,
     identityMatchesExpected:
       !metadataAmbiguous &&
-      version === '37.2.13.0' &&
-      buildId === '16740729' &&
-      ['37.2.13', '37.2.13.0'].includes(revision) &&
+      version === '37.3.10.0' &&
+      buildId === '16970787' &&
+      ['37.3.10', '37.3.10.0'].includes(revision) &&
       packagePath === 'emulator',
     sourcePropertiesSha256: sha256(properties),
     helpAccelSha256: sha256(help),

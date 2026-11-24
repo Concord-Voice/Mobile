@@ -547,13 +547,13 @@ test('metadata failure categories preserve the exact failed command without acce
       if (command !== 'source-properties')
         await writeFile(
           properties,
-          'Pkg.Revision=37.2.13\nPkg.Path=emulator\n',
+          'Pkg.Revision=37.3.10\nPkg.Path=emulator\n',
         );
       await writeFile(
         join(sdk, 'emulator', 'emulator'),
         `#!/usr/bin/env node\nif(process.argv[2]==='-version'&&${JSON.stringify(
           command,
-        )}!=='version')console.log('Android emulator version 37.2.13.0 (build_id 16740729) (CL:N/A)');else{console.error(${JSON.stringify(
+        )}!=='version')console.log('Android emulator version 37.3.10.0 (build_id 16970787) (CL:N/A)');else{console.error(${JSON.stringify(
           message + ' ' + hidden,
         )});process.exit(1);}\n`,
         { mode: 0o700 },
@@ -833,13 +833,13 @@ test('requires exact installed stable Android API36 Google APIs x86_64 revision7
 
 test('binds exact hosted emulator version/build and positively advertised software support', () => {
   const version =
-    'Android emulator version 37.2.13.0 (build_id 16740729) (CL:N/A)\n';
-  const props = 'Pkg.Revision=37.2.13\nPkg.Path=emulator\n';
+    'Android emulator version 37.3.10.0 (build_id 16970787) (CL:N/A)\n';
+  const props = 'Pkg.Revision=37.3.10\nPkg.Path=emulator\n';
   const help =
     '     off    Disables acceleration entirely. Mostly useful for debugging.\n';
   const identity = inspectEmulatorTool(version, props, help);
-  assert.equal(identity.version, '37.2.13.0');
-  assert.equal(identity.buildId, '16740729');
+  assert.equal(identity.version, '37.3.10.0');
+  assert.equal(identity.buildId, '16970787');
   assert.equal(identity.advertisesOff, true);
   assert.doesNotThrow(() => assertEmulatorIdentity(identity));
   assert.equal(
@@ -852,18 +852,18 @@ test('binds exact hosted emulator version/build and positively advertised softwa
     false,
   );
   for (const unsupported of [
-    inspectEmulatorTool(version.replace('37.2.13', '37.2.14'), props, help),
-    inspectEmulatorTool(version.replace('16740729', '16740730'), props, help),
-    inspectEmulatorTool(version, props.replace('37.2.13', '37.2.12'), help),
+    inspectEmulatorTool(version.replace('37.3.10', '37.3.11'), props, help),
+    inspectEmulatorTool(version.replace('16970787', '16970788'), props, help),
+    inspectEmulatorTool(version, props.replace('37.3.10', '37.3.9'), help),
   ])
     assert.throws(() => assertEmulatorIdentity(unsupported));
   for (const ambiguous of [
     inspectEmulatorTool(
-      version + version.replace('37.2.13', '37.2.14'),
+      version + version.replace('37.3.10', '37.3.11'),
       props,
       help,
     ),
-    inspectEmulatorTool(version, props + 'Pkg.Revision=37.2.14\n', help),
+    inspectEmulatorTool(version, props + 'Pkg.Revision=37.3.11\n', help),
     inspectEmulatorTool(
       version,
       props + 'Pkg.Path=synthetic-sensitive-path\n',
