@@ -493,7 +493,7 @@ jobs:
       - name: Install pinned Semgrep for adversarial policy tests
         run: python3 -m pip install --user "semgrep==1.121.0"
       # The caller-proof verifier is Go; pin the toolchain its go.mod names.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: tools/sonar-caller-proof/go.mod
           cache: false
