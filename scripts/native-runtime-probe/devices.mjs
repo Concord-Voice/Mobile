@@ -1008,6 +1008,7 @@ async function android(output) {
         'shell',
         'am',
         'instrument',
+        '-r',
         '-w',
         '-e',
         'class',
