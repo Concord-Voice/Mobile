@@ -59,7 +59,7 @@ const androidVectorTests = [
 export function androidVectorSummary(log) {
   if (typeof log !== 'string' || Buffer.byteLength(log) > 1024 * 1024)
     refuse('android-vector-output-invalid');
-  const lines = log.replace(/\r\n/g, '\n').split('\n');
+  const lines = log.replace(/\r/g, '').split('\n');
   const completed = [];
   let currentTest = null;
   for (const line of lines) {
@@ -940,6 +940,41 @@ async function android(output) {
         'com.concordvoice.crypto.test/androidx.test.runner.AndroidJUnitRunner',
       ],
       { timeout: 600000 },
+    );
+    // Only fixed markers and counts may escape the owned emulator; XCTest and
+    // instrumentation streams can contain values from the fixture under test.
+    const vectorLines = vectorLog.replace(/\r/g, '').split('\n');
+    console.log(
+      JSON.stringify({
+        androidVectorObserved: {
+          bytes: Buffer.byteLength(vectorLog),
+          start: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_STATUS_CODE: 1',
+          ).length,
+          pass: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_STATUS_CODE: 0',
+          ).length,
+          failure: vectorLines.some(line =>
+            /^INSTRUMENTATION_STATUS_CODE: -[0-9]+$/.test(line),
+          ),
+          namedTests: androidVectorTests.map(
+            name =>
+              vectorLines.filter(
+                line => line === `INSTRUMENTATION_STATUS: test=${name}`,
+              ).length,
+          ),
+          numtests: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_STATUS: numtests=2',
+          ).length,
+          ok: vectorLines.some(line => line.includes('OK (2 tests)')),
+          terminal: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_CODE: -1',
+          ).length,
+          instrumentationFailed: vectorLines.some(line =>
+            line.startsWith('INSTRUMENTATION_FAILED:'),
+          ),
+        },
+      }),
     );
     const vectorSummary = androidVectorSummary(vectorLog);
     await writeFile(

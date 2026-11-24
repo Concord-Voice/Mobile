@@ -852,6 +852,7 @@ test('accepts only the two real Android vector instrumentation completions', () 
   assert.deepEqual(androidVectorSummary(lines.join('\n')), {
     tests: 2, vectors: 672, rejecting: 132, passed: true,
   });
+  assert.equal(androidVectorSummary(lines.join('\r\n')).passed, true);
   for (const changed of [
     lines.filter(line => line !== 'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason'),
     lines.map(line => line === 'INSTRUMENTATION_STATUS_CODE: 0' ? 'INSTRUMENTATION_STATUS_CODE: -2' : line),
