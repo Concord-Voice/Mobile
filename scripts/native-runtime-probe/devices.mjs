@@ -924,6 +924,18 @@ async function android(output) {
     );
     if (!installResult.trim().split(/\r?\n/).includes('Success'))
       refuse('android-vector-install-failed');
+    const registeredInstruments = await runCommand(
+      adbTool,
+      ['-s', serial, 'shell', 'pm', 'list', 'instrumentation'],
+      { timeout: 30000 },
+    );
+    const registeredRunner = registeredInstruments.includes(
+      'instrumentation:com.concordvoice.crypto.test/androidx.test.runner.AndroidJUnitRunner (target=com.concordvoice.crypto.test)',
+    );
+    console.log(
+      JSON.stringify({ androidVectorRunnerRegistered: registeredRunner }),
+    );
+    if (!registeredRunner) refuse('android-vector-runner-not-registered');
     stage('android-vector-run');
     const vectorLog = await runCommand(
       adbTool,
@@ -996,6 +1008,18 @@ async function android(output) {
           activityInstrumentFailure: vectorLog.includes(
             "while executing 'instrument'",
           ),
+          argumentReasons: [
+            'Bad component name:',
+            'No instrumentation found for:',
+            'Found multiple instrumentations:',
+            'Argument expected after',
+            'Unknown option:',
+            'File descriptors passed in Bundle',
+            'Unable to find instrumentation info for:',
+            'Could not find class',
+            'No tests found',
+            'target package',
+          ].filter(reason => vectorLog.includes(reason)),
         },
       }),
     );
