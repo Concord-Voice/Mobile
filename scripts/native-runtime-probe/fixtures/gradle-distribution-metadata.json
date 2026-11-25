@@ -1,28 +1,58 @@
 {
-  "schemaVersion": 1,
-  "distribution": {
-    "url": "https://services.gradle.org/distributions/gradle-9.9.0-bin.zip",
-    "checksumSource": "https://services.gradle.org/distributions/gradle-9.9.0-bin.zip.sha256"
-  },
-  "evidence": {
-    "kind": "ci-module-metadata-diagnostic",
-    "jobURL": "https://github.com/Concord-Voice/Mobile/actions/runs/44258932186/job/134649337463",
-    "observedAt": "2026-11-18T07:35:19Z",
-    "strictHeaderFlagObserved": false,
-    "scope": "Compiler diagnostics identify these modules inside the selected Gradle distribution. No class-header strict flag was extracted; the independent oracle uses the permissive non-strict ceiling. This fixture is not a bytecode-deserialization or successful build receipt.",
-    "modules": [
-      {
-        "coordinate": "org.jetbrains.kotlin:kotlin-reflect:2.4.21",
-        "archiveEntry": "lib/kotlin-reflect-2.4.21.jar!/META-INF/kotlin-reflection.kotlin_module",
-        "metadataVersion": "2.4.0",
-        "readerExpectedMetadataVersion": "2.2.0"
+  "schemaVersion": 2,
+  "receipts": [
+    {
+      "distribution": {
+        "url": "https://services.gradle.org/distributions/gradle-9.9.0-bin.zip",
+        "checksumSource": "https://services.gradle.org/distributions/gradle-9.9.0-bin.zip.sha256",
+        "sha256": "0b00b0ffe07c4d4789c12d4935a44a7057d55774b7540bd4a3f76f336deb177a"
       },
-      {
-        "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.4.21",
-        "archiveEntry": "lib/kotlin-stdlib-2.4.21.jar!/META-INF/kotlin-stdlib.kotlin_module",
-        "metadataVersion": "2.4.0",
-        "readerExpectedMetadataVersion": "2.2.0"
+      "evidence": {
+        "kind": "ci-module-metadata-diagnostic",
+        "jobURL": "https://github.com/Concord-Voice/Mobile/actions/runs/44258932186/job/134649337463",
+        "observedAt": "2026-11-18T07:35:19Z",
+        "strictHeaderFlagObserved": false,
+        "scope": "Compiler diagnostics identify these modules inside the selected Gradle distribution. No class-header strict flag was extracted; the independent oracle uses the permissive non-strict ceiling. This fixture is not a bytecode-deserialization or successful build receipt.",
+        "modules": [
+          {
+            "coordinate": "org.jetbrains.kotlin:kotlin-reflect:2.4.21",
+            "archiveEntry": "lib/kotlin-reflect-2.4.21.jar!/META-INF/kotlin-reflection.kotlin_module",
+            "metadataVersion": "2.4.0",
+            "readerExpectedMetadataVersion": "2.2.0"
+          },
+          {
+            "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.4.21",
+            "archiveEntry": "lib/kotlin-stdlib-2.4.21.jar!/META-INF/kotlin-stdlib.kotlin_module",
+            "metadataVersion": "2.4.0",
+            "readerExpectedMetadataVersion": "2.2.0"
+          }
+        ]
       }
-    ]
-  }
+    },
+    {
+      "distribution": {
+        "url": "https://services.gradle.org/distributions/gradle-9.9.1-bin.zip",
+        "checksumSource": "https://services.gradle.org/distributions/gradle-9.9.1-bin.zip.sha256",
+        "sha256": "d8a18a7a841dd5df825d35a685fad6f2d7f12ac0c280e57b67c27b4a520ba228"
+      },
+      "evidence": {
+        "kind": "verified-distribution-archive",
+        "observedAt": "2026-11-25T17:51:57Z",
+        "strictHeaderFlagObserved": false,
+        "scope": "SHA-256-verified official archive. Version triples come from the big-endian .kotlin_module headers inside the listed JARs. Class-header strict flags and application runtime behavior were outside this receipt.",
+        "modules": [
+          {
+            "coordinate": "org.jetbrains.kotlin:kotlin-reflect:2.4.21",
+            "archiveEntry": "lib/kotlin-reflect-2.4.21.jar!/META-INF/kotlin-reflection.kotlin_module",
+            "metadataVersion": "2.4.0"
+          },
+          {
+            "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.4.21",
+            "archiveEntry": "lib/kotlin-stdlib-2.4.21.jar!/META-INF/kotlin-stdlib.kotlin_module",
+            "metadataVersion": "2.4.0"
+          }
+        ]
+      }
+    }
+  ]
 }

@@ -64,7 +64,13 @@ function selectedDistribution(properties) {
       'Unsupported wrapper distribution provenance',
     );
   }
-  return url;
+  const checksums = [
+    ...properties.matchAll(/^distributionSha256Sum=([a-f0-9]{64})$/gm),
+  ];
+  if (checksums.length !== 1) {
+    throw new MissingMetadataEvidence('Expected one wrapper distribution checksum');
+  }
+  return { url, sha256: checksums[0][1] };
 }
 
 // Parse only the selected catalog's simple string/inline-table declarations.
@@ -126,25 +132,32 @@ function catalogCompiler(source, table, key, coordinateKey, coordinate) {
   return match[1];
 }
 
-function metadataForDistribution(distributionURL, fixture) {
+function metadataForDistribution(distribution, fixture) {
+  const matches =
+    fixture?.schemaVersion === 2 && Array.isArray(fixture.receipts)
+      ? fixture.receipts.filter(
+          receipt => receipt?.distribution?.url === distribution.url,
+        )
+      : [];
+  const receipt = matches[0];
   if (
-    fixture?.schemaVersion !== 1 ||
-    fixture?.distribution?.url !== distributionURL ||
-    fixture?.evidence?.kind !== 'ci-module-metadata-diagnostic' ||
-    fixture?.evidence?.strictHeaderFlagObserved !== false ||
-    !/^https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9.]+-bin\.zip\.sha256$/.test(
-      fixture?.distribution?.checksumSource ?? '',
-    ) ||
-    fixture.distribution.checksumSource !== `${distributionURL}.sha256` ||
-    !/^https:\/\/github\.com\/Concord-Voice\/Mobile\/actions\//.test(
-      fixture?.evidence?.jobURL ?? '',
+    matches.length !== 1 ||
+    receipt.distribution.sha256 !== distribution.sha256 ||
+    receipt.distribution.checksumSource !== `${distribution.url}.sha256` ||
+    receipt.evidence?.strictHeaderFlagObserved !== false ||
+    !(
+      receipt.evidence.kind === 'verified-distribution-archive' ||
+      (receipt.evidence.kind === 'ci-module-metadata-diagnostic' &&
+        /^https:\/\/github\.com\/Concord-Voice\/Mobile\/actions\//.test(
+          receipt.evidence.jobURL ?? '',
+        ))
     )
   ) {
     throw new MissingMetadataEvidence(
       'Missing provenance-bound metadata for selected distribution',
     );
   }
-  const modules = fixture.evidence.modules;
+  const modules = receipt.evidence.modules;
   if (
     !Array.isArray(modules) ||
     modules.length !== 2 ||
@@ -235,17 +248,21 @@ test('compatibility oracle includes equal/lower/next-minor and strictness contro
     );
 });
 
-test('unknown/malformed distribution evidence refuses distinctly from incompatibility', () => {
-  assert.equal(
-    metadataForDistribution(fixture.distribution.url, fixture).length,
-    2,
-  );
+test('only exact distribution evidence admits embedded Kotlin metadata', () => {
+  for (const receipt of fixture.receipts) {
+    assert.equal(metadataForDistribution(receipt.distribution, fixture).length, 2);
+  }
+  const selected = fixture.receipts[0].distribution;
   assert.throws(
     () =>
       metadataForDistribution(
-        'https://services.gradle.org/distributions/gradle-99.0-bin.zip',
+        { ...selected, url: 'https://services.gradle.org/distributions/gradle-99.0-bin.zip' },
         fixture,
       ),
+    MissingMetadataEvidence,
+  );
+  assert.throws(
+    () => metadataForDistribution({ ...selected, sha256: '0'.repeat(64) }, fixture),
     MissingMetadataEvidence,
   );
   for (const change of [
@@ -272,12 +289,16 @@ test('unknown/malformed distribution evidence refuses distinctly from incompatib
     },
   ]) {
     const changed = structuredClone(fixture);
-    change(changed);
+    change(changed.receipts[0]);
     assert.throws(
-      () => metadataForDistribution(fixture.distribution.url, changed),
+      () => metadataForDistribution(selected, changed),
       MissingMetadataEvidence,
     );
   }
+  assert.throws(
+    () => metadataForDistribution(selected, { ...fixture, receipts: [...fixture.receipts, fixture.receipts[0]] }),
+    MissingMetadataEvidence,
+  );
 });
 
 test('compiler is resolved through each actual alias rather than a preferred version key', () => {
