@@ -49,6 +49,103 @@ const skippedNative = [
   'testDesktopVectorsUnlockDecryptAndReject',
   'testWritesNativeVectorsForTheDesktopVerifier',
 ];
+const androidVectorTests = [
+  'pinnedCorpusAndAllAcceptedCases',
+  'everyNegativeHasItsDeclaredStageAndReason',
+];
+
+// Keep only fixed source categories from an instrumentation failure. The raw
+// stream can contain fixture values and must not enter CI logs or artifacts.
+export function androidVectorDiagnostics(log) {
+  const bounded = typeof log === 'string' ? log.slice(0, 64 * 1024) : '';
+  const sources = [];
+  const classify = name => {
+    if (name.startsWith('com.concordvoice.crypto.')) return 'vector-test';
+    if (name.startsWith('androidx.test.')) return 'androidx-test';
+    if (name.startsWith('org.junit.')) return 'junit';
+    if (name.startsWith('com.android.commands.am.')) return 'am-shell';
+    if (name.startsWith('android.')) return 'android-framework';
+    if (/^(?:java|jdk|sun)\./.test(name)) return 'java-runtime';
+    return 'other';
+  };
+  for (const match of bounded.matchAll(/^[ \t]*at ([A-Za-z0-9_.$]+)\(/gm)) {
+    const source = classify(match[1]);
+    if (!sources.includes(source)) sources.push(source);
+    if (sources.length === 7) break;
+  }
+  const siteMarkers = [
+    ['am-instrument', 'com.android.commands.am.Instrument.'],
+    ['androidx-runner', 'androidx.test.runner.AndroidJUnitRunner.'],
+    ['androidx-builder', 'androidx.test.internal.runner.junit4.'],
+    [
+      'instrumentation-registry',
+      'androidx.test.platform.app.InstrumentationRegistry.',
+    ],
+    ['vector-test', 'com.concordvoice.crypto.NonmediaVectorInstrumentedTest.'],
+  ]
+    .filter(([, marker]) => bounded.includes(marker))
+    .map(([code]) => code);
+  const vectorFrame = bounded.match(
+    /^[ \t]*at com\.concordvoice\.crypto\.NonmediaVectorInstrumentedTest\.([A-Za-z0-9_$<>]+)\(NonmediaVectorInstrumentedTest\.kt:([0-9]{1,4})\)/m,
+  );
+  const allowedMethods = new Set([
+    'unb64',
+    'parseContext',
+    'openAead',
+    'splitWire',
+    'pinnedCorpusAndAllAcceptedCases',
+    'classify',
+    'everyNegativeHasItsDeclaredStageAndReason',
+    'corpus',
+    'validContext',
+    'descriptorValid',
+    'scalarString',
+    'wire',
+    '<init>',
+    '<clinit>',
+  ]);
+  const method = vectorFrame?.[1];
+  const line = Number(vectorFrame?.[2]);
+  let vectorMethod = 'none';
+  if (method) vectorMethod = allowedMethods.has(method) ? method : 'other';
+  return {
+    firstStackSource: sources[0] ?? 'none',
+    stackSources: sources,
+    siteMarkers,
+    vectorMethod,
+    vectorLine: line >= 1 && line <= 500 ? line : null,
+  };
+}
+
+// `am instrument` can exit zero even when a test fails. Admit only the two
+// named corpus tests and its terminal success marker; never print its raw log.
+export function androidVectorSummary(log) {
+  if (typeof log !== 'string' || Buffer.byteLength(log) > 1024 * 1024)
+    refuse('android-vector-output-invalid');
+  const lines = log.replace(/\r/g, '').split('\n');
+  const completed = [];
+  let currentTest = null;
+  for (const line of lines) {
+    if (line.startsWith('INSTRUMENTATION_STATUS: test=')) {
+      currentTest = line.slice('INSTRUMENTATION_STATUS: test='.length).trim();
+    } else if (line === 'INSTRUMENTATION_STATUS_CODE: 0') {
+      completed.push(currentTest);
+      currentTest = null;
+    } else if (/^INSTRUMENTATION_STATUS_CODE: -[0-9]+$/.test(line)) {
+      refuse('android-vector-test-failed');
+    }
+  }
+  if (
+    completed.length !== androidVectorTests.length ||
+    new Set(completed).size !== androidVectorTests.length ||
+    completed.some(name => !androidVectorTests.includes(name)) ||
+    !lines.includes('INSTRUMENTATION_STATUS: numtests=2') ||
+    !lines.some(line => line.trim() === 'OK (2 tests)') ||
+    lines.filter(line => line === 'INSTRUMENTATION_CODE: -1').length !== 1
+  )
+    refuse('android-vector-result-incomplete');
+  return { tests: 2, vectors: 672, rejecting: 132, passed: true };
+}
 
 export function chooseSimulator(runtimes, types) {
   const available = runtimes.runtimes.filter(
@@ -105,6 +202,28 @@ export function nativeTestSummary(log) {
     skipReason:
       'Reciprocal desktop vectors were not supplied; no cross-platform vector evidence claimed.',
   };
+}
+
+export function iosVectorSummary(log) {
+  const expected = [
+    'testPinnedCorpusAndAllAcceptedCases',
+    'testEveryNegativeHasItsDeclaredStageAndReason',
+  ];
+  const rows = [
+    ...log.matchAll(
+      /Test Case '-\[(?:[A-Za-z_][A-Za-z0-9_]*\.)?NonmediaVectorTests (test\w+)\]' (passed|skipped|failed) /g,
+    ),
+  ];
+  if (
+    rows.length !== expected.length ||
+    expected.some(
+      name =>
+        rows.filter(([, found, state]) => found === name && state === 'passed')
+          .length !== 1,
+    )
+  )
+    refuse('ios-vector-test-matrix-failed');
+  return { tests: 2, vectors: 672, rejecting: 132, passed: true };
 }
 
 export function nativeTestFailure(log) {
@@ -291,9 +410,9 @@ export function inspectEmulatorTool(versionOutput, properties, help) {
     metadataAmbiguous,
     identityMatchesExpected:
       !metadataAmbiguous &&
-      version === '37.2.13.0' &&
-      buildId === '16740729' &&
-      ['37.2.13', '37.2.13.0'].includes(revision) &&
+      version === '37.3.10.0' &&
+      buildId === '16970787' &&
+      ['37.3.10', '37.3.10.0'].includes(revision) &&
       packagePath === 'emulator',
     sourcePropertiesSha256: sha256(properties),
     helpAccelSha256: sha256(help),
@@ -421,8 +540,10 @@ async function ios(output) {
         },
       );
       let nativeTests;
+      let vectorTests;
       try {
         nativeTests = nativeTestSummary(nativeLog);
+        vectorTests = iosVectorSummary(nativeLog);
       } catch (error) {
         await recordNativeFailure(nativeLog);
         throw error;
@@ -432,6 +553,11 @@ async function ios(output) {
         JSON.stringify(nativeTests, null, 2) + '\n',
       );
       console.log(JSON.stringify({ nativeTests }));
+      await writeFile(
+        join(output, 'vector-tests.json'),
+        JSON.stringify(vectorTests) + '\n',
+      );
+      console.log(JSON.stringify({ iosVectors: vectorTests }));
     } finally {
       // XCTest owns raw xcresult/log files here; retain only the sanitized test matrix.
       await rm(nativeDerived, { recursive: true, force: true });
@@ -838,6 +964,136 @@ async function android(output) {
         emulator: toolIdentity,
       },
     );
+    stage('android-vector-build');
+    await runCommand(
+      './gradlew',
+      [
+        ':concord-crypto:assembleDebugAndroidTest',
+        '--no-daemon',
+        '--max-workers=2',
+        '-PreactNativeArchitectures=x86_64',
+      ],
+      { cwd: join(mobile, 'android'), timeout: 1200000 },
+    );
+    const vectorApk = join(
+      mobile,
+      'native/ConcordCrypto/android/build/outputs/apk/androidTest/debug/concord-crypto-debug-androidTest.apk',
+    );
+    stage('android-vector-install');
+    const installResult = await runCommand(
+      adbTool,
+      ['-s', serial, 'install', '-r', vectorApk],
+      { timeout: 120000 },
+    );
+    if (!installResult.trim().split(/\r?\n/).includes('Success'))
+      refuse('android-vector-install-failed');
+    const registeredInstruments = await runCommand(
+      adbTool,
+      ['-s', serial, 'shell', 'pm', 'list', 'instrumentation'],
+      { timeout: 30000 },
+    );
+    const registeredRunner = registeredInstruments.includes(
+      'instrumentation:com.concordvoice.crypto.test/androidx.test.runner.AndroidJUnitRunner (target=com.concordvoice.crypto.test)',
+    );
+    console.log(
+      JSON.stringify({ androidVectorRunnerRegistered: registeredRunner }),
+    );
+    if (!registeredRunner) refuse('android-vector-runner-not-registered');
+    stage('android-vector-run');
+    const vectorLog = await runCommand(
+      adbTool,
+      [
+        '-s',
+        serial,
+        'shell',
+        'am',
+        'instrument',
+        '-r',
+        '-w',
+        '-e',
+        'class',
+        'com.concordvoice.crypto.NonmediaVectorInstrumentedTest',
+        'com.concordvoice.crypto.test/androidx.test.runner.AndroidJUnitRunner',
+      ],
+      { timeout: 600000 },
+    );
+    // Only fixed markers and counts may escape the owned emulator; XCTest and
+    // instrumentation streams can contain values from the fixture under test.
+    const vectorLines = vectorLog.replace(/\r/g, '').split('\n');
+    console.log(
+      JSON.stringify({
+        androidVectorObserved: {
+          bytes: Buffer.byteLength(vectorLog),
+          start: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_STATUS_CODE: 1',
+          ).length,
+          pass: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_STATUS_CODE: 0',
+          ).length,
+          failure: vectorLines.some(line =>
+            /^INSTRUMENTATION_STATUS_CODE: -[0-9]+$/.test(line),
+          ),
+          namedTests: androidVectorTests.map(
+            name =>
+              vectorLines.filter(
+                line => line === `INSTRUMENTATION_STATUS: test=${name}`,
+              ).length,
+          ),
+          numtests: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_STATUS: numtests=2',
+          ).length,
+          ok: vectorLines.some(line => line.includes('OK (2 tests)')),
+          terminal: vectorLines.filter(
+            line => line === 'INSTRUMENTATION_CODE: -1',
+          ).length,
+          instrumentationFailed: vectorLines.some(line =>
+            line.startsWith('INSTRUMENTATION_FAILED:'),
+          ),
+          statusToken: vectorLog.includes('INSTRUMENTATION_STATUS'),
+          escapedNewline: vectorLog.includes('\\n'),
+          usage: /usage:\s*(?:am\s+)?instrument/i.test(vectorLog),
+          componentError:
+            /(?:Unable to find instrumentation|No instrumentation found|INSTRUMENTATION_FAILED|Error:)/i.test(
+              vectorLog,
+            ),
+          exception: /(?:Exception|Caused by:)/.test(vectorLog),
+          exceptionKinds: [
+            'SecurityException',
+            'IllegalArgumentException',
+            'IllegalStateException',
+            'RuntimeException',
+            'ClassNotFoundException',
+            'NoClassDefFoundError',
+            'UnsatisfiedLinkError',
+            'NullPointerException',
+            'RemoteException',
+            'IOException',
+          ].filter(kind => vectorLog.includes(kind)),
+          activityInstrumentFailure: vectorLog.includes(
+            "while executing 'instrument'",
+          ),
+          argumentReasons: [
+            'Bad component name:',
+            'No instrumentation found for:',
+            'Found multiple instrumentations:',
+            'Argument expected after',
+            'Unknown option:',
+            'File descriptors passed in Bundle',
+            'Unable to find instrumentation info for:',
+            'Could not find class',
+            'No tests found',
+            'target package',
+          ].filter(reason => vectorLog.includes(reason)),
+          ...androidVectorDiagnostics(vectorLog),
+        },
+      }),
+    );
+    const vectorSummary = androidVectorSummary(vectorLog);
+    await writeFile(
+      join(output, 'vector-tests.json'),
+      JSON.stringify(vectorSummary) + '\n',
+    );
+    console.log(JSON.stringify({ androidVectors: vectorSummary }));
   } catch (error) {
     primary = error;
     throw error;
