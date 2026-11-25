@@ -238,10 +238,13 @@ jobs:
             "$emulator_archive" | sha256sum -c -
           unzip -q "$emulator_archive" -d "$sdk_root"
           rm "$emulator_archive"
-          ln -s "$ANDROID_HOME/cmdline-tools" "$sdk_root/cmdline-tools"
-          ln -s "$ANDROID_HOME/platform-tools" "$sdk_root/platform-tools"
-          ln -s "$ANDROID_HOME/system-images" "$sdk_root/system-images"
+          # The probe creates a device, then builds and signs a disposable x86_64 APK.
+          for sdk_dir in build-tools cmake cmdline-tools licenses ndk platform-tools platforms system-images; do
+            test -d "$ANDROID_HOME/$sdk_dir"
+            ln -s "$ANDROID_HOME/$sdk_dir" "$sdk_root/$sdk_dir"
+          done
           test -x "$sdk_root/cmdline-tools/latest/bin/avdmanager"
+          test -x "$sdk_root/build-tools/37.0.0/apksigner"
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk_root" "$sdk_root" >> "$GITHUB_ENV"
       # The hosted runner exposes /dev/kvm without granting the runner user access.
       # This grants it on the disposable runner only, so the probe selects
