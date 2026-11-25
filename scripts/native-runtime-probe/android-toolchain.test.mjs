@@ -49,12 +49,25 @@ function canReadMetadata(compiler, metadata, strict = false) {
 }
 
 function selectedDistribution(properties) {
-  const matches = [...properties.matchAll(/^distributionUrl=(.+)$/gm)];
-  if (matches.length !== 1)
-    throw new MissingMetadataEvidence(
-      'Expected one selected wrapper distribution',
-    );
-  const url = matches[0][1].replace(/\\:/g, ':');
+  // Require ordinary assignments so the evidence cannot select a different
+  // distribution from the wrapper's properties reader.
+  const fields = new Map();
+  for (const line of properties.split(/\r\n|[\r\n]/)) {
+    if (/^[ \t\f]*(?:[#!].*)?$/.test(line)) continue;
+    const entry = /^[ \t\f]*([A-Za-z][A-Za-z0-9]*)=(\S+)$/.exec(line);
+    if (
+      !entry ||
+      entry[0] !== line ||
+      entry[2].endsWith('\\') ||
+      fields.has(entry[1])
+    ) {
+      throw new MissingMetadataEvidence(
+        'Malformed or duplicate wrapper property',
+      );
+    }
+    fields.set(entry[1], entry[2]);
+  }
+  const url = (fields.get('distributionUrl') ?? '').replace(/\\:/g, ':');
   if (
     !/^https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9]+\.[0-9]+(?:\.[0-9]+)?-bin\.zip$/.test(
       url,
@@ -64,13 +77,11 @@ function selectedDistribution(properties) {
       'Unsupported wrapper distribution provenance',
     );
   }
-  const checksums = [
-    ...properties.matchAll(/^distributionSha256Sum=([a-f0-9]{64})$/gm),
-  ];
-  if (checksums.length !== 1) {
+  const sha256 = fields.get('distributionSha256Sum');
+  if (!/^[a-f0-9]{64}$/.test(sha256 ?? '')) {
     throw new MissingMetadataEvidence('Expected one wrapper distribution checksum');
   }
-  return { url, sha256: checksums[0][1] };
+  return { url, sha256 };
 }
 
 // Parse only the selected catalog's simple string/inline-table declarations.
@@ -179,6 +190,32 @@ function metadataForDistribution(distribution, fixture) {
 }
 
 const fixture = JSON.parse(readFileSync(fixtureURL, 'utf8'));
+
+test('wrapper evidence requires unambiguous distribution properties', () => {
+  for (const { distribution } of fixture.receipts) {
+    const properties = [
+      '# Gradle wrapper metadata',
+      `distributionUrl=${distribution.url.replace(':', '\\:')}`,
+      `distributionSha256Sum=${distribution.sha256}`,
+      '',
+    ].join('\r\n');
+    assert.deepEqual(selectedDistribution(properties), {
+      url: distribution.url,
+      sha256: distribution.sha256,
+    });
+    for (const extra of [
+      'distributionSha256Sum=invalid',
+      '  distributionSha256Sum:invalid',
+      'distributionUrl=',
+      'networkTimeout=10000\\',
+    ]) {
+      assert.throws(
+        () => selectedDistribution(properties + extra),
+        MissingMetadataEvidence,
+      );
+    }
+  }
+});
 
 test('selected React Native Kotlin compilers can read selected wrapper embedded metadata', () => {
   const distribution = selectedDistribution(
