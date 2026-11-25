@@ -224,7 +224,23 @@ jobs:
       - name: Install the isolated API 36 emulator prerequisites
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
-            'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+            'platform-tools' 'system-images;android-36;google_apis;x86_64'
+
+          # The runtime probe admits emulator 37.2.13.0/build 16740729.
+          # Keep the build SDK intact and give the probe its own SDK root.
+          sdk_root="$(mktemp -d "$RUNNER_TEMP/mobile-runtime-sdk.XXXXXX")"
+          emulator_archive="$sdk_root/emulator-linux-x64.zip"
+          curl --fail --silent --show-error --location --max-time 240 \
+            'https://dl.google.com/android/repository/emulator-linux_x64-16740729.zip' \
+            --output "$emulator_archive"
+          printf '%s  %s\n' \
+            'cbc7c3cfb83220b8a0f9c513fdab557712e74d339ec19ddffa43f23350ae9bdd' \
+            "$emulator_archive" | sha256sum -c -
+          unzip -q "$emulator_archive" -d "$sdk_root"
+          rm "$emulator_archive"
+          ln -s "$ANDROID_HOME/platform-tools" "$sdk_root/platform-tools"
+          ln -s "$ANDROID_HOME/system-images" "$sdk_root/system-images"
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk_root" "$sdk_root" >> "$GITHUB_ENV"
       # The hosted runner exposes /dev/kvm without granting the runner user access.
       # This grants it on the disposable runner only, so the probe selects
       # hardware mode; software mode stays the fallback when no KVM device exists.
