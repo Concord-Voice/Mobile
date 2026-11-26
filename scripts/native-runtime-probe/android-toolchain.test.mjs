@@ -49,12 +49,25 @@ function canReadMetadata(compiler, metadata, strict = false) {
 }
 
 function selectedDistribution(properties) {
-  const matches = [...properties.matchAll(/^distributionUrl=(.+)$/gm)];
-  if (matches.length !== 1)
-    throw new MissingMetadataEvidence(
-      'Expected one selected wrapper distribution',
-    );
-  const url = matches[0][1].replace(/\\:/g, ':');
+  // Require ordinary assignments so the evidence cannot select a different
+  // distribution from the wrapper's properties reader.
+  const fields = new Map();
+  for (const line of properties.split(/\r\n|[\r\n]/)) {
+    if (/^[ \t\f]*(?:[#!].*)?$/.test(line)) continue;
+    const entry = /^[ \t\f]*([A-Za-z][A-Za-z0-9]*)=(\S+)$/.exec(line);
+    if (
+      !entry ||
+      entry[0] !== line ||
+      entry[2].endsWith('\\') ||
+      fields.has(entry[1])
+    ) {
+      throw new MissingMetadataEvidence(
+        'Malformed or duplicate wrapper property',
+      );
+    }
+    fields.set(entry[1], entry[2]);
+  }
+  const url = (fields.get('distributionUrl') ?? '').replace(/\\:/g, ':');
   if (
     !/^https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9]+\.[0-9]+(?:\.[0-9]+)?-bin\.zip$/.test(
       url,
@@ -64,7 +77,11 @@ function selectedDistribution(properties) {
       'Unsupported wrapper distribution provenance',
     );
   }
-  return url;
+  const sha256 = fields.get('distributionSha256Sum');
+  if (!/^[a-f0-9]{64}$/.test(sha256 ?? '')) {
+    throw new MissingMetadataEvidence('Expected one wrapper distribution checksum');
+  }
+  return { url, sha256 };
 }
 
 // Parse only the selected catalog's simple string/inline-table declarations.
@@ -126,25 +143,32 @@ function catalogCompiler(source, table, key, coordinateKey, coordinate) {
   return match[1];
 }
 
-function metadataForDistribution(distributionURL, fixture) {
+function metadataForDistribution(distribution, fixture) {
+  const matches =
+    fixture?.schemaVersion === 2 && Array.isArray(fixture.receipts)
+      ? fixture.receipts.filter(
+          receipt => receipt?.distribution?.url === distribution.url,
+        )
+      : [];
+  const receipt = matches[0];
   if (
-    fixture?.schemaVersion !== 1 ||
-    fixture?.distribution?.url !== distributionURL ||
-    fixture?.evidence?.kind !== 'ci-module-metadata-diagnostic' ||
-    fixture?.evidence?.strictHeaderFlagObserved !== false ||
-    !/^https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9.]+-bin\.zip\.sha256$/.test(
-      fixture?.distribution?.checksumSource ?? '',
-    ) ||
-    fixture.distribution.checksumSource !== `${distributionURL}.sha256` ||
-    !/^https:\/\/github\.com\/Concord-Voice\/Mobile\/actions\//.test(
-      fixture?.evidence?.jobURL ?? '',
+    matches.length !== 1 ||
+    receipt.distribution.sha256 !== distribution.sha256 ||
+    receipt.distribution.checksumSource !== `${distribution.url}.sha256` ||
+    receipt.evidence?.strictHeaderFlagObserved !== false ||
+    !(
+      receipt.evidence.kind === 'verified-distribution-archive' ||
+      (receipt.evidence.kind === 'ci-module-metadata-diagnostic' &&
+        /^https:\/\/github\.com\/Concord-Voice\/Mobile\/actions\//.test(
+          receipt.evidence.jobURL ?? '',
+        ))
     )
   ) {
     throw new MissingMetadataEvidence(
       'Missing provenance-bound metadata for selected distribution',
     );
   }
-  const modules = fixture.evidence.modules;
+  const modules = receipt.evidence.modules;
   if (
     !Array.isArray(modules) ||
     modules.length !== 2 ||
@@ -166,6 +190,32 @@ function metadataForDistribution(distributionURL, fixture) {
 }
 
 const fixture = JSON.parse(readFileSync(fixtureURL, 'utf8'));
+
+test('wrapper evidence requires unambiguous distribution properties', () => {
+  for (const { distribution } of fixture.receipts) {
+    const properties = [
+      '# Gradle wrapper metadata',
+      `distributionUrl=${distribution.url.replace(':', '\\:')}`,
+      `distributionSha256Sum=${distribution.sha256}`,
+      '',
+    ].join('\r\n');
+    assert.deepEqual(selectedDistribution(properties), {
+      url: distribution.url,
+      sha256: distribution.sha256,
+    });
+    for (const extra of [
+      'distributionSha256Sum=invalid',
+      '  distributionSha256Sum:invalid',
+      'distributionUrl=',
+      'networkTimeout=10000\\',
+    ]) {
+      assert.throws(
+        () => selectedDistribution(properties + extra),
+        MissingMetadataEvidence,
+      );
+    }
+  }
+});
 
 test('selected React Native Kotlin compilers can read selected wrapper embedded metadata', () => {
   const distribution = selectedDistribution(
@@ -235,17 +285,21 @@ test('compatibility oracle includes equal/lower/next-minor and strictness contro
     );
 });
 
-test('unknown/malformed distribution evidence refuses distinctly from incompatibility', () => {
-  assert.equal(
-    metadataForDistribution(fixture.distribution.url, fixture).length,
-    2,
-  );
+test('only exact distribution evidence admits embedded Kotlin metadata', () => {
+  for (const receipt of fixture.receipts) {
+    assert.equal(metadataForDistribution(receipt.distribution, fixture).length, 2);
+  }
+  const selected = fixture.receipts[0].distribution;
   assert.throws(
     () =>
       metadataForDistribution(
-        'https://services.gradle.org/distributions/gradle-99.0-bin.zip',
+        { ...selected, url: 'https://services.gradle.org/distributions/gradle-99.0-bin.zip' },
         fixture,
       ),
+    MissingMetadataEvidence,
+  );
+  assert.throws(
+    () => metadataForDistribution({ ...selected, sha256: '0'.repeat(64) }, fixture),
     MissingMetadataEvidence,
   );
   for (const change of [
@@ -272,12 +326,16 @@ test('unknown/malformed distribution evidence refuses distinctly from incompatib
     },
   ]) {
     const changed = structuredClone(fixture);
-    change(changed);
+    change(changed.receipts[0]);
     assert.throws(
-      () => metadataForDistribution(fixture.distribution.url, changed),
+      () => metadataForDistribution(selected, changed),
       MissingMetadataEvidence,
     );
   }
+  assert.throws(
+    () => metadataForDistribution(selected, { ...fixture, receipts: [...fixture.receipts, fixture.receipts[0]] }),
+    MissingMetadataEvidence,
+  );
 });
 
 test('compiler is resolved through each actual alias rather than a preferred version key', () => {
