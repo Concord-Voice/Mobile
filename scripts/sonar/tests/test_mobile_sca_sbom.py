@@ -19,7 +19,12 @@ class MobileScaSbomTests(unittest.TestCase):
         locked = {f"pkg:maven/{group}/{artifact}@{version}"
                   for line in lock.read_text().splitlines() if line and not line.startswith("#")
                   and line != "empty=" for group, artifact, version in [line.split("=", 1)[0].split(":")]}
-        self.assertEqual(purls, locked | {"pkg:maven/junit/junit@4.13.2", "pkg:pypi/pyyaml@6.0.3"})
+        self.assertEqual(purls, locked | {
+            "pkg:maven/junit/junit@4.13.2",
+            "pkg:maven/androidx.test/runner@1.7.0",
+            "pkg:maven/androidx.test.ext/junit@1.3.0",
+            "pkg:pypi/pyyaml@6.0.3",
+        })
 
     def test_malformed_lock_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

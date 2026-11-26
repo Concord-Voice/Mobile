@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   chooseSimulator,
   nativeTestSummary,
+  iosVectorSummary,
   verifyAndroidImage,
   nativeTestFailure,
   inspectEmulatorTool,
@@ -10,6 +11,8 @@ import {
   chooseAcceleration,
   startEmulator,
   guestAvdName,
+  androidVectorSummary,
+  androidVectorDiagnostics,
 } from './devices.mjs';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -547,13 +550,13 @@ test('metadata failure categories preserve the exact failed command without acce
       if (command !== 'source-properties')
         await writeFile(
           properties,
-          'Pkg.Revision=37.2.13\nPkg.Path=emulator\n',
+          'Pkg.Revision=37.3.10\nPkg.Path=emulator\n',
         );
       await writeFile(
         join(sdk, 'emulator', 'emulator'),
         `#!/usr/bin/env node\nif(process.argv[2]==='-version'&&${JSON.stringify(
           command,
-        )}!=='version')console.log('Android emulator version 37.2.13.0 (build_id 16740729) (CL:N/A)');else{console.error(${JSON.stringify(
+        )}!=='version')console.log('Android emulator version 37.3.10.0 (build_id 16970787) (CL:N/A)');else{console.error(${JSON.stringify(
           message + ' ' + hidden,
         )});process.exit(1);}\n`,
         { mode: 0o700 },
@@ -630,6 +633,8 @@ const fixture = [
     name =>
       `Test Case '-[ConcordCrypto_Tests.ConcordCryptoTests test${name}]' skipped (0.1 seconds).`,
   ),
+  "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testPinnedCorpusAndAllAcceptedCases]' passed (0.1 seconds).",
+  "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testEveryNegativeHasItsDeclaredStageAndReason]' passed (0.1 seconds).",
 ].join('\n');
 
 test('expects exactly the XCTest cases checked in under native/ConcordCrypto/Tests', async () => {
@@ -745,6 +750,10 @@ process.exit(64);`,
           summary.skipped,
           skipped.map(name => `test${name}`),
         );
+        assert.deepEqual(
+          JSON.parse(await readFile(join(output, 'vector-tests.json'), 'utf8')),
+          { tests: 2, vectors: 672, rejecting: 132, passed: true },
+        );
         const release = await readFile(normalRelease, 'utf8').catch(() => null);
         assert.ok(
           release,
@@ -812,6 +821,89 @@ test('requires all fourteen real native tests and records both intentional vecto
   assert.throws(() => nativeTestSummary('** TEST SUCCEEDED **'));
 });
 
+test('requires both iOS vector tests to pass exactly once', () => {
+  const rows = [
+    "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testPinnedCorpusAndAllAcceptedCases]' passed (0.1 seconds).",
+    "Test Case '-[ConcordCrypto_Tests.NonmediaVectorTests testEveryNegativeHasItsDeclaredStageAndReason]' passed (0.1 seconds).",
+  ];
+  assert.deepEqual(iosVectorSummary(rows.join('\n')), {
+    tests: 2, vectors: 672, rejecting: 132, passed: true,
+  });
+  assert.throws(() => iosVectorSummary(rows[0]));
+  assert.throws(() => iosVectorSummary(rows.join('\n') + '\n' + rows[0]));
+  assert.throws(() => iosVectorSummary(rows.join('\n').replace('passed', 'skipped')));
+});
+
+test('accepts only the two real Android vector instrumentation completions', () => {
+  const lines = [
+    'INSTRUMENTATION_STATUS: numtests=2',
+    'INSTRUMENTATION_STATUS: test=pinnedCorpusAndAllAcceptedCases',
+    'INSTRUMENTATION_STATUS_CODE: 1',
+    'INSTRUMENTATION_STATUS: test=pinnedCorpusAndAllAcceptedCases',
+    'INSTRUMENTATION_STATUS_CODE: 0',
+    'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason',
+    'INSTRUMENTATION_STATUS_CODE: 1',
+    'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason',
+    'INSTRUMENTATION_STATUS_CODE: 0',
+    'INSTRUMENTATION_RESULT: stream=',
+    'Time: 4.2',
+    'OK (2 tests)',
+    'INSTRUMENTATION_CODE: -1',
+  ];
+  assert.deepEqual(androidVectorSummary(lines.join('\n')), {
+    tests: 2, vectors: 672, rejecting: 132, passed: true,
+  });
+  assert.equal(androidVectorSummary(lines.join('\r\n')).passed, true);
+  for (const changed of [
+    lines.filter(line => line !== 'INSTRUMENTATION_STATUS: test=everyNegativeHasItsDeclaredStageAndReason'),
+    lines.map(line => line === 'INSTRUMENTATION_STATUS_CODE: 0' ? 'INSTRUMENTATION_STATUS_CODE: -2' : line),
+    lines.map(line => line === 'OK (2 tests)' ? 'FAILURES!!!' : line),
+    lines.map(line => line === 'INSTRUMENTATION_CODE: -1' ? 'INSTRUMENTATION_CODE: 0' : line),
+  ]) assert.throws(() => androidVectorSummary(changed.join('\n')));
+});
+
+test('Android vector diagnostics classify stack sources without releasing instrument text', () => {
+  const log = [
+    'java.lang.IllegalArgumentException: private fixture value',
+    '  at androidx.test.runner.AndroidJUnitRunner.onCreate(AndroidJUnitRunner.java:1)',
+    '  at com.concordvoice.crypto.NonmediaVectorInstrumentedTest.unb64(NonmediaVectorInstrumentedTest.kt:47)',
+    '  at android.app.Instrumentation.callApplicationOnCreate(Instrumentation.java:3)',
+  ].join('\n');
+  const observed = androidVectorDiagnostics(log);
+  assert.deepEqual(observed, {
+    firstStackSource: 'androidx-test',
+    stackSources: ['androidx-test', 'vector-test', 'android-framework'],
+    siteMarkers: ['androidx-runner', 'vector-test'],
+    vectorMethod: 'unb64',
+    vectorLine: 47,
+  });
+  assert.equal(
+    JSON.stringify(observed).includes('private fixture value'),
+    false,
+  );
+  assert.throws(() => androidVectorSummary(log));
+  assert.deepEqual(
+    androidVectorDiagnostics('at attacker.example.Secret.run(X.java:1)'),
+    {
+      firstStackSource: 'other',
+      stackSources: ['other'],
+      siteMarkers: [],
+      vectorMethod: 'none',
+      vectorLine: null,
+    },
+  );
+  assert.equal(
+    androidVectorDiagnostics('x'.repeat(64 * 1024) + log).firstStackSource,
+    'none',
+  );
+  const unknown = androidVectorDiagnostics(
+    '  at com.concordvoice.crypto.NonmediaVectorInstrumentedTest.secretMethod(NonmediaVectorInstrumentedTest.kt:9999)',
+  );
+  assert.equal(unknown.vectorMethod, 'other');
+  assert.equal(unknown.vectorLine, null);
+  assert.equal(JSON.stringify(unknown).includes('secretMethod'), false);
+});
+
 test('requires exact installed stable Android API36 Google APIs x86_64 revision7 image', () => {
   const properties =
     'Pkg.Revision=7\nAndroidVersion.ApiLevel=36\nSystemImage.Abi=x86_64\nSystemImage.TagId=google_apis\n';
@@ -833,13 +925,13 @@ test('requires exact installed stable Android API36 Google APIs x86_64 revision7
 
 test('binds exact hosted emulator version/build and positively advertised software support', () => {
   const version =
-    'Android emulator version 37.2.13.0 (build_id 16740729) (CL:N/A)\n';
-  const props = 'Pkg.Revision=37.2.13\nPkg.Path=emulator\n';
+    'Android emulator version 37.3.10.0 (build_id 16970787) (CL:N/A)\n';
+  const props = 'Pkg.Revision=37.3.10\nPkg.Path=emulator\n';
   const help =
     '     off    Disables acceleration entirely. Mostly useful for debugging.\n';
   const identity = inspectEmulatorTool(version, props, help);
-  assert.equal(identity.version, '37.2.13.0');
-  assert.equal(identity.buildId, '16740729');
+  assert.equal(identity.version, '37.3.10.0');
+  assert.equal(identity.buildId, '16970787');
   assert.equal(identity.advertisesOff, true);
   assert.doesNotThrow(() => assertEmulatorIdentity(identity));
   assert.equal(
@@ -852,18 +944,18 @@ test('binds exact hosted emulator version/build and positively advertised softwa
     false,
   );
   for (const unsupported of [
-    inspectEmulatorTool(version.replace('37.2.13', '37.2.14'), props, help),
-    inspectEmulatorTool(version.replace('16740729', '16740730'), props, help),
-    inspectEmulatorTool(version, props.replace('37.2.13', '37.2.12'), help),
+    inspectEmulatorTool(version.replace('37.3.10', '37.3.11'), props, help),
+    inspectEmulatorTool(version.replace('16970787', '16970788'), props, help),
+    inspectEmulatorTool(version, props.replace('37.3.10', '37.3.9'), help),
   ])
     assert.throws(() => assertEmulatorIdentity(unsupported));
   for (const ambiguous of [
     inspectEmulatorTool(
-      version + version.replace('37.2.13', '37.2.14'),
+      version + version.replace('37.3.10', '37.3.11'),
       props,
       help,
     ),
-    inspectEmulatorTool(version, props + 'Pkg.Revision=37.2.14\n', help),
+    inspectEmulatorTool(version, props + 'Pkg.Revision=37.3.11\n', help),
     inspectEmulatorTool(
       version,
       props + 'Pkg.Path=synthetic-sensitive-path\n',
