@@ -156,6 +156,7 @@ jobs:
             ${{ runner.temp }}/mobile-ios-runtime/manifest.json
             ${{ runner.temp }}/mobile-ios-runtime/runtime.json
             ${{ runner.temp }}/mobile-ios-runtime/native-tests.json
+            ${{ runner.temp }}/mobile-ios-runtime/vector-tests.json
             ${{ runner.temp }}/mobile-ios-runtime/native-test-diagnostics.json
             ${{ runner.temp }}/mobile-ios-runtime/device-cleanup.json
           if-no-files-found: error
@@ -214,8 +215,8 @@ jobs:
         run: ./gradlew :concord-crypto:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
       # `emulator -version` execs qemu-system-x86_64, which links system libraries
       # the launcher does not (libpulse.so.0 among them). In a clean ubuntu:24.04
-      # container with emulator 37.2.13, these packages are the complete set the
-      # version query needs; packages the runner image already has are no-ops.
+      # container, these packages supply the version query's host libraries;
+      # packages the runner image already has are no-ops.
       - name: Install the emulator's host libraries
         run: |
           sudo apt-get update -qq
@@ -260,5 +261,6 @@ jobs:
             ${{ runner.temp }}/mobile-android-runtime/device-cleanup.json
             ${{ runner.temp }}/mobile-android-runtime/emulator-tool.json
             ${{ runner.temp }}/mobile-android-runtime/emulator-tool-failure.json
+            ${{ runner.temp }}/mobile-android-runtime/vector-tests.json
           if-no-files-found: error
           retention-days: 7

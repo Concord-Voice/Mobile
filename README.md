@@ -244,7 +244,7 @@ Hardware mode requires read/write access to `/dev/kvm`. The hosted runner expose
 the device without granting the runner user access, so the workflow adds a udev
 rule on that disposable runner before the probe. The probe itself never changes
 host permissions. Software emulation is a bounded fallback when KVM is absent:
-the installed emulator must identify as version 37.2.13.0/build 16740729, match its
+the installed emulator must identify as version 37.3.10.0/build 16970787, match its
 package properties and positively advertise `off` in that exact binary's
 `-help-accel`. The runner records the actual package/help/executable hashes and
 bounded numeric identity before refusing an unsupported or ambiguous tool. It
