@@ -11,6 +11,7 @@ import {
   startLogCollector,
   sdkAdb,
   androidObserveFailure,
+  iosObserveFailure,
 } from './run.mjs';
 
 const expected = {
@@ -168,6 +169,62 @@ test('permits a failure-only private sanitizer without propagating raw subproces
   );
   assert.equal(captured.stdout, 'compiler diagnostic');
   assert.equal(captured.stderr, 'synthetic-private-value');
+  assert.equal(captured.timedOut, false);
+  assert.equal(captured.exitCode, 2);
+});
+
+test('reports a timeout kill to the failure sanitizer', async () => {
+  let captured;
+  await assert.rejects(
+    runCommand(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      timeout: 50,
+      onFailure: value => {
+        captured = value;
+      },
+    }),
+    error => error.message === 'platform-command-failed',
+  );
+  assert.equal(captured.timedOut, true);
+  assert.equal(captured.signal, 'SIGTERM');
+});
+
+test('sanitizes a failed simctl step to fixed fields and plain words', () => {
+  assert.deepEqual(
+    iosObserveFailure('launch', {
+      stdout: '',
+      stderr: '',
+      timedOut: true,
+      signal: 'SIGTERM',
+      exitCode: null,
+    }),
+    {
+      iosObserveFailure: {
+        step: 'launch',
+        timedOut: true,
+        signal: 'SIGTERM',
+        emptyOutput: true,
+      },
+    },
+  );
+  const failed = iosObserveFailure('install', {
+    stdout: '',
+    stderr:
+      'An error was encountered processing the command /Users/x/a.app token=abc123',
+    timedOut: false,
+    signal: 'bogus value',
+    exitCode: 149,
+  }).iosObserveFailure;
+  assert.equal(failed.exitCode, 149);
+  assert.equal(failed.signal, undefined);
+  assert.deepEqual(failed.words, [
+    'An',
+    'error',
+    'was',
+    'encountered',
+    'processing',
+    'the',
+    'command',
+  ]);
 });
 
 test('binds native dependency selections independently of the compiler package', () => {
