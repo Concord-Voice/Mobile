@@ -151,6 +151,42 @@ export function sdkAdb(env = process.env) {
   return join(env.ANDROID_HOME, 'platform-tools/adb');
 }
 
+// Only plain words from the last line of a tool's output: paths, numbers, hex
+// and punctuation are dropped, so no value or path can leak.
+export function plainWords(log) {
+  const lastLine =
+    log
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .pop() ?? '';
+  return lastLine
+    .split(/\s+/)
+    .map(word => word.replace(/[:,.;]+$/, ''))
+    .filter(word => /^[A-Za-z][a-z]{1,23}$/.test(word))
+    .slice(0, 12);
+}
+
+// Sanitized record of a failed simctl step: whether the timeout killed it,
+// the numeric exit code or signal name, and plain words only.
+export function iosObserveFailure(
+  step,
+  { stdout, stderr, timedOut, signal, exitCode },
+) {
+  const log = `${stdout}\n${stderr}`;
+  const words = plainWords(log);
+  return {
+    iosObserveFailure: {
+      step,
+      timedOut,
+      ...(Number.isInteger(exitCode) ? { exitCode } : {}),
+      ...(/^SIG[A-Z0-9]{1,10}$/.test(signal ?? '') ? { signal } : {}),
+      emptyOutput: !log.trim(),
+      ...(words.length ? { words } : {}),
+    },
+  };
+}
+
 // Sanitized category for a failed adb step: only a fixed install-failure code
 // or a fixed label leaves the process, never raw adb output.
 export function androidObserveFailure(step, log) {
@@ -177,22 +213,7 @@ export function androidObserveFailure(step, log) {
       ? 'timed-out'
       : 'command-failed');
   // Whether adb printed anything, so a silent kill reads differently from an unknown message.
-  // For an unknown message, keep only plain words from its last line: paths,
-  // numbers, hex and punctuation are dropped, so no value or path can leak.
-  const lastLine =
-    log
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-      .pop() ?? '';
-  const words =
-    category === 'command-failed'
-      ? lastLine
-          .split(/\s+/)
-          .map(word => word.replace(/[:,.;]+$/, ''))
-          .filter(word => /^[A-Za-z][a-z]{1,23}$/.test(word))
-          .slice(0, 12)
-      : [];
+  const words = category === 'command-failed' ? plainWords(log) : [];
   // A Java exception class name is a fixed identifier, never a value.
   const exception = log.match(
     /\b((?:java|android)\.[a-z.]{1,60}\.[A-Z][A-Za-z]{0,60}(?:Exception|Error))\b/,
@@ -244,6 +265,9 @@ export async function runCommand(
         await onFailure({
           stdout: typeof error.stdout === 'string' ? error.stdout : '',
           stderr: typeof error.stderr === 'string' ? error.stderr : '',
+          timedOut: error.killed === true,
+          signal: error.signal ?? null,
+          exitCode: error.code,
         });
     } finally {
       refuse('platform-command-failed');
@@ -466,8 +490,12 @@ export async function observe(
       if (!/^[0-9A-F-]{36}$/i.test(device)) refuse('invalid-simulator');
       // A Release app install on a busy hosted macOS runner can take longer than 30 s;
       // that ceiling failed three runs in a row as platform-command-failed.
+      // install and launch hide the cause behind platform-command-failed; log a sanitized reason.
+      const reportFailure = step => failure =>
+        console.log(JSON.stringify(iosObserveFailure(step, failure)));
       await runCommand('xcrun', ['simctl', 'install', device, app], {
         timeout: 120000,
+        onFailure: reportFailure('install'),
       });
       collector = await startLogCollector('xcrun', [
         'simctl',
@@ -490,7 +518,7 @@ export async function observe(
       const launched = await runCommand(
         'xcrun',
         ['simctl', 'launch', device, bundleId],
-        { timeout: 60000 },
+        { timeout: 60000, onFailure: reportFailure('launch') },
       );
       pid = Number(launched.match(/com\.concordvoice\.mobile:\s*(\d+)/)?.[1]);
       logs = async () => collector.read();
