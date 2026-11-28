@@ -61,5 +61,119 @@
       "head_verdict_pattern": "\\*\\*Completed\\*\\*[^|\\n]*\\|\\s*`([0-9a-f]{7,40})`",
       "decline_pattern": "codex usage limit|usage limits? (have|has) been reached|reached your (codex )?usage limit|Codex Review: Something went wrong"
     }
-  ]
+  ],
+  "weekly_deps": {
+    "risk_policy": "evidence-v1",
+    "tiers": {
+      "A": {
+        "Mobile lint and formatting": {
+          "ecosystems": [
+            "npm"
+          ],
+          "directories": [
+            "."
+          ],
+          "packages": [
+            "eslint",
+            "prettier"
+          ],
+          "dependency_type": "development",
+          "max_bump": "minor"
+        },
+        "Android Gradle patch": {
+          "ecosystems": [
+            "gradle"
+          ],
+          "directories": [
+            "android"
+          ],
+          "packages": [
+            "gradle-wrapper"
+          ],
+          "max_bump": "patch"
+        },
+        "Mobile compiler patch": {
+          "ecosystems": [
+            "npm"
+          ],
+          "directories": [
+            "."
+          ],
+          "packages": [
+            "@babel/core",
+            "@react-native-community/cli",
+            "@react-native-community/cli-platform-android",
+            "@react-native-community/cli-platform-ios"
+          ],
+          "dependency_type": "development",
+          "max_bump": "patch"
+        }
+      },
+      "B": {
+        "Mobile lint and formatting major": {
+          "ecosystems": [
+            "npm"
+          ],
+          "directories": [
+            "."
+          ],
+          "packages": [
+            "eslint",
+            "prettier"
+          ],
+          "dependency_type": "development",
+          "max_bump": "major"
+        },
+        "Android Gradle minor": {
+          "ecosystems": [
+            "gradle"
+          ],
+          "directories": [
+            "android"
+          ],
+          "packages": [
+            "gradle-wrapper"
+          ],
+          "max_bump": "minor"
+        },
+        "Mobile compiler minor": {
+          "ecosystems": [
+            "npm"
+          ],
+          "directories": [
+            "."
+          ],
+          "packages": [
+            "@babel/core",
+            "@react-native-community/cli",
+            "@react-native-community/cli-platform-android",
+            "@react-native-community/cli-platform-ios"
+          ],
+          "dependency_type": "development",
+          "max_bump": "minor"
+        }
+      }
+    },
+    "critical_packages": [
+      "gradle-wrapper",
+      "react-native",
+      "@babel/core",
+      "@babel/runtime",
+      "@react-native-community/cli",
+      "@react-native-community/cli-platform-android",
+      "@react-native-community/cli-platform-ios"
+    ],
+    "bundled_engines": [
+      "electron",
+      "@playwright/test",
+      "playwright",
+      "playwright-core",
+      "mediasoup",
+      "workerd",
+      "miniflare",
+      "react-native",
+      "hermes-engine",
+      "hermes-compiler"
+    ]
+  }
 }
