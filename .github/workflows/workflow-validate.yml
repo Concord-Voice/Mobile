@@ -17,10 +17,6 @@ permissions:
   contents: read
   pull-requests: none
 
-concurrency:
-  group: workflow-validate-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   notify-fork-pr:
     name: Reject fork-PR validation
@@ -28,6 +24,9 @@ jobs:
       github.event.pull_request.base.ref == 'main'
       && contains(github.event.pull_request.labels.*.name, 'workflow-validation: dispatch')
       && github.event.pull_request.head.repo.full_name != github.repository
+    concurrency:
+      group: workflow-validate-fork-notice-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -55,6 +54,11 @@ jobs:
       github.event.pull_request.base.ref == 'main'
       && (github.event.action != 'labeled' || github.event.label.name == 'workflow-validation: dispatch')
       && github.event.pull_request.head.repo.full_name == github.repository
+    # Only another eligible analyzer can supersede this job. Ordinary label
+    # events skip this job and must not cancel validation for the same PR.
+    concurrency:
+      group: workflow-validate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
