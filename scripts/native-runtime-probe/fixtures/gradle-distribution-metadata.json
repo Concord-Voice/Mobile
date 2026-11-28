@@ -53,6 +53,31 @@
           }
         ]
       }
+    },
+    {
+      "distribution": {
+        "url": "https://services.gradle.org/distributions/gradle-9.9.2-bin.zip",
+        "checksumSource": "https://services.gradle.org/distributions/gradle-9.9.2-bin.zip.sha256",
+        "sha256": "971fcd7150ca4ba04852c0b2ca0d2d0ab9468e14b03473eab19528809914c76b"
+      },
+      "evidence": {
+        "kind": "verified-distribution-archive",
+        "observedAt": "2026-11-28T03:23:28Z",
+        "strictHeaderFlagObserved": false,
+        "scope": "SHA-256-verified official archive. Version triples come from the big-endian .kotlin_module headers inside the listed JARs. Class-header strict flags and application runtime behavior were outside this receipt.",
+        "modules": [
+          {
+            "coordinate": "org.jetbrains.kotlin:kotlin-reflect:2.4.21",
+            "archiveEntry": "lib/kotlin-reflect-2.4.21.jar!/META-INF/kotlin-reflection.kotlin_module",
+            "metadataVersion": "2.4.0"
+          },
+          {
+            "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.4.21",
+            "archiveEntry": "lib/kotlin-stdlib-2.4.21.jar!/META-INF/kotlin-stdlib.kotlin_module",
+            "metadataVersion": "2.4.0"
+          }
+        ]
+      }
     }
   ]
 }
